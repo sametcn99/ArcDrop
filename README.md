@@ -15,6 +15,7 @@ Self-host-first bookmarking platform with cross-platform desktop clients and AI-
 - Adds MAUI bookmark add/list/detail/edit workflow slices using API-backed query and command services with resilient list fallback (`FR-004`, `TASK-006` slice).
 - Adds Blazor web host pages for auth session management, bookmark CRUD, AI provider configuration, and AI organization operation lookup against backend APIs (`FR-002`, `FR-004`, `FR-007`, `FR-008`, `TASK-010` slice).
 - Adds Blazor web host inside MAUI folder with bookmark add/list/edit flows against the same API contracts (`FR-004`, `TASK-006` web slice).
+- Secures web auth flow with server-issued HttpOnly session cookie, protected route redirects, and persistent refresh-safe sign-in behavior (`FR-002`).
 
 ## Quick Navigation
 
@@ -23,6 +24,7 @@ Self-host-first bookmarking platform with cross-platform desktop clients and AI-
 - MAUI foundation guide: `docs/desktop-maui-foundation.md`
 - Blazor web app: `apps/web/ArcDrop.Maui.Web`
 - MAUI-related web host: `apps/web/ArcDrop.Maui.Web`
+- API tests project: `tests/ArcDrop.Api.Tests`
 - Self-host quickstart: `docs/self-host-quickstart.md`
 - Contributor guide: `CONTRIBUTING.md`
 - Engineering guardrails: `.github/copilot-instructions.md`

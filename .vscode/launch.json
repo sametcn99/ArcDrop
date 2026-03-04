@@ -1,0 +1,57 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ArcDrop API (Development)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build ArcDrop API",
+      "envFile": "${workspaceFolder}/ops/docker/.env",
+      "program": "${workspaceFolder}/services/ArcDrop.Api/bin/Debug/net10.0/ArcDrop.Api.dll",
+      "cwd": "${workspaceFolder}/services/ArcDrop.Api",
+      "args": [
+        "--urls",
+        "http://localhost:5237"
+      ],
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_ENVIRONMENT": "Development"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Now listening on:\\s+(https?://\\S+)"
+      }
+    },
+    {
+      "name": "ArcDrop Web (Development)",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build ArcDrop Web",
+      "program": "${workspaceFolder}/apps/web/ArcDrop.Maui.Web/bin/Debug/net10.0/ArcDrop.Web.dll",
+      "cwd": "${workspaceFolder}/apps/web/ArcDrop.Maui.Web",
+      "args": [
+        "--urls",
+        "http://localhost:5290"
+      ],
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_ENVIRONMENT": "Development",
+        "ARCDROP_Api__BaseUrl": "http://localhost:5237/"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Now listening on:\\s+(https?://\\S+)"
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "ArcDrop API + Web (Development)",
+      "configurations": [
+        "ArcDrop API (Development)",
+        "ArcDrop Web (Development)"
+      ],
+      "stopAll": true
+    }
+  ]
+}

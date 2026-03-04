@@ -2,7 +2,7 @@
 @rendermode InteractiveServer
 
 @inject IArcDropApiClient ApiClient
-@inject AuthSessionState AuthSession
+@inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Admin Profile</PageTitle>
 
@@ -18,7 +18,7 @@
         <div class="profile-info__item">
             <span class="profile-info__label">Status</span>
             <span>
-                @if (AuthSession.IsAuthenticated)
+                @if (IsAuthenticated)
                 {
                     <span class="arc-badge arc-badge--success">Authenticated</span>
                 }
@@ -34,7 +34,7 @@
         </div>
         <div class="profile-info__item">
             <span class="profile-info__label">Token Expires</span>
-            <span class="profile-info__value">@(AuthSession.ExpiresAtUtc?.ToLocalTime().ToString("g") ?? "N/A")</span>
+            <span class="profile-info__value">@TokenExpiresText</span>
         </div>
     </div>
 
@@ -43,7 +43,10 @@
             @if (IsBusy) { <span class="spinner-inline"></span> }
             Refresh
         </button>
-        <button class="btn btn-outline-danger" @onclick="SignOut">Sign Out</button>
+        <form method="post" action="/auth/session/logout" class="d-inline">
+            <AntiforgeryToken />
+            <button class="btn btn-outline-danger" type="submit">Sign Out</button>
+        </form>
     </div>
 </div>
 
@@ -92,6 +95,8 @@
     private bool IsBusy { get; set; }
     private string StatusText { get; set; } = "Load profile data to verify session health.";
     private string? ErrorText { get; set; }
+    private bool IsAuthenticated { get; set; }
+    private string TokenExpiresText { get; set; } = "N/A";
 
     protected override async Task OnInitializedAsync()
     {
@@ -106,7 +111,16 @@
 
         try
         {
-            // Explicit /me lookup validates token and updates the in-memory username cache for the layout.
+            await RefreshAuthenticationProjectionAsync();
+
+            if (!IsAuthenticated)
+            {
+                CurrentUsername = null;
+                StatusText = "Session is not authenticated.";
+                return;
+            }
+
+            // Explicit /me lookup validates current cookie-backed token and refreshes profile projection.
             var profile = await ApiClient.GetCurrentAdminAsync(CancellationToken.None);
             CurrentUsername = profile?.Username;
             StatusText = profile is null
@@ -157,11 +171,24 @@
         }
     }
 
-    private void SignOut()
+    private async Task RefreshAuthenticationProjectionAsync()
     {
-        AuthSession.Clear();
-        CurrentUsername = null;
-        StatusText = "Session cleared.";
-        ErrorText = null;
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        IsAuthenticated = authState.User.Identity?.IsAuthenticated is true;
+
+        if (!IsAuthenticated)
+        {
+            TokenExpiresText = "N/A";
+            return;
+        }
+
+        var expiresAtClaim = authState.User.FindFirst("arcdrop:expires_at_unix")?.Value;
+        if (long.TryParse(expiresAtClaim, out var expiresAtUnix))
+        {
+            TokenExpiresText = DateTimeOffset.FromUnixTimeSeconds(expiresAtUnix).ToLocalTime().ToString("g");
+            return;
+        }
+
+        TokenExpiresText = "N/A";
     }
 }

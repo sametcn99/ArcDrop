@@ -1,8 +1,7 @@
 @page "/auth/login"
 @rendermode InteractiveServer
 
-@inject IArcDropApiClient ApiClient
-@inject AuthSessionState AuthSession
+@inject AuthenticationStateProvider AuthenticationStateProvider
 @inject NavigationManager Navigation
 
 <PageTitle>Admin Login</PageTitle>
@@ -16,33 +15,27 @@
         </div>
 
         <div class="card-shell">
-            <EditForm Model="Model" OnValidSubmit="SignInAsync">
-                <DataAnnotationsValidator />
-                <ValidationSummary />
-
+            <form method="post" action="/auth/session/login">
+                <AntiforgeryToken />
                 <div class="mb-3">
                     <label class="form-label">Username</label>
-                    <InputText class="form-control" @bind-Value="Model.Username" placeholder="Enter username" />
+                    <input class="form-control" name="Username" autocomplete="username" placeholder="Enter username" required />
                 </div>
 
                 <div class="mb-3">
                     <label class="form-label">Password</label>
-                    <InputText class="form-control" type="password" @bind-Value="Model.Password" placeholder="Enter password" />
+                    <input class="form-control" name="Password" type="password" autocomplete="current-password" placeholder="Enter password" required />
                 </div>
+
+                <input type="hidden" name="returnUrl" value="@ResolvedReturnUrl" />
 
                 @if (!string.IsNullOrWhiteSpace(ErrorText))
                 {
                     <div class="alert alert-danger mb-3" role="alert">@ErrorText</div>
                 }
 
-                <button class="btn btn-primary w-100" type="submit" disabled="@IsLoading">
-                    @if (IsLoading)
-                    {
-                        <span class="spinner-inline"></span>
-                    }
-                    Sign In
-                </button>
-            </EditForm>
+                <button class="btn btn-primary w-100" type="submit">Sign In</button>
+            </form>
         </div>
 
         @if (!string.IsNullOrWhiteSpace(StatusText))
@@ -53,39 +46,40 @@
 </div>
 
 @code {
-    private LoginRequest Model { get; set; } = new();
-    private bool IsLoading { get; set; }
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    public string? ErrorCode { get; set; }
+
     private string StatusText { get; set; } = "Use fixed-admin credentials to access protected API operations.";
     private string? ErrorText { get; set; }
+    private string ResolvedReturnUrl { get; set; } = "/bookmarks";
 
-    private async Task SignInAsync()
+    protected override async Task OnParametersSetAsync()
     {
-        IsLoading = true;
-        ErrorText = null;
-        StatusText = "Authenticating...";
+        ResolvedReturnUrl = AuthRoutePolicy.ResolveSafeReturnUrl(ReturnUrl);
+        ErrorText = MapError(ErrorCode);
 
-        try
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        if (authState.User.Identity?.IsAuthenticated is true)
         {
-            // Login returns the JWT token and expiry used by protected AI provider and operation pages.
-            await ApiClient.LoginAsync(Model, CancellationToken.None);
-            StatusText = "Authentication succeeded.";
-            Navigation.NavigateTo("/auth/profile");
+            Navigation.NavigateTo(ResolvedReturnUrl, replace: true);
+            return;
         }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-            StatusText = "Sign-in did not complete.";
-            AuthSession.Clear();
-        }
-        catch (Exception)
-        {
-            ErrorText = "Authentication failed. Verify username and password.";
-            StatusText = "Sign-in did not complete.";
-            AuthSession.Clear();
-        }
-        finally
-        {
-            IsLoading = false;
-        }
+
+        StatusText = string.IsNullOrWhiteSpace(ErrorText)
+            ? "Use fixed-admin credentials to access protected API operations."
+            : "Sign-in did not complete.";
     }
+
+    private static string? MapError(string? errorCode)
+        => errorCode switch
+        {
+            "missing_credentials" => "Username and password are required.",
+            "invalid_credentials" => "Authentication failed. Verify username and password.",
+            "auth_service_error" => "Authentication service is unavailable. Try again shortly.",
+            "invalid_auth_payload" => "Authentication response was invalid. Sign in again.",
+            _ => null
+        };
 }

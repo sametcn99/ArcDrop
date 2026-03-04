@@ -20,6 +20,31 @@ var builder = WebApplication.CreateBuilder(args);
 // outside source-controlled files. Example key mapping: ARCDROP_Admin__Username.
 builder.Configuration.AddEnvironmentVariables(prefix: "ARCDROP_");
 
+var configuredConnectionString = builder.Configuration.GetConnectionString("ArcDropPostgres");
+if (ShouldUsePostgresEnvironmentFallback(configuredConnectionString))
+{
+    var postgresDatabase = builder.Configuration["POSTGRES_DB"];
+    var postgresUser = builder.Configuration["POSTGRES_USER"];
+    var postgresPassword = builder.Configuration["POSTGRES_PASSWORD"];
+    var postgresPort = builder.Configuration["POSTGRES_PORT"];
+
+    // Local debugging may run API outside Docker while credentials still live in env files.
+    // This fallback only activates when ArcDropPostgres is missing or still set to placeholder values.
+    if (!string.IsNullOrWhiteSpace(postgresDatabase) &&
+        !string.IsNullOrWhiteSpace(postgresUser) &&
+        !string.IsNullOrWhiteSpace(postgresPassword))
+    {
+        var normalizedPort = int.TryParse(postgresPort, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedPort)
+            ? parsedPort
+            : 5432;
+
+        var fallbackConnectionString =
+            $"Host=localhost;Port={normalizedPort};Database={postgresDatabase};Username={postgresUser};Password={postgresPassword}";
+
+        builder.Configuration["ConnectionStrings:ArcDropPostgres"] = fallbackConnectionString;
+    }
+}
+
 // Bind fixed-admin bootstrap settings early and validate them at startup so configuration failures
 // are detected before the API starts serving requests.
 builder.Services
@@ -85,6 +110,14 @@ builder.Services.AddOpenApi();
 builder.Services.AddArcDropInfrastructure(builder.Configuration);
 
 var app = builder.Build();
+
+// Apply pending migrations at startup so API endpoints do not fail with missing-table errors
+// when the database is provisioned but schema initialization has not been run yet.
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<ArcDropDbContext>();
+    dbContext.Database.Migrate();
+}
 
 if (app.Environment.IsDevelopment())
 {
@@ -732,6 +765,17 @@ static string? NormalizeOperationType(string rawOperationType)
         "summary-cleanup" => normalized,
         _ => null
     };
+}
+
+static bool ShouldUsePostgresEnvironmentFallback(string? configuredConnectionString)
+{
+    if (string.IsNullOrWhiteSpace(configuredConnectionString))
+    {
+        return true;
+    }
+
+    // Placeholder values are intentionally treated as unresolved credentials.
+    return configuredConnectionString.Contains("ChangeThis", StringComparison.OrdinalIgnoreCase);
 }
 
 static IReadOnlyList<AiOperationResultResponse> GenerateOrganizationResults(

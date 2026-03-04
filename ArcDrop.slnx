@@ -26,8 +26,7 @@
     <Project Path="services/ArcDrop.Api/ArcDrop.Api.csproj" />
   </Folder>
   <Folder Name="/tests/" />
-  <Folder Name="/tests/arcdrop-api.tests/" />
-  <Folder Name="/tests/arcdrop-api.tests/src/">
-    <Project Path="tests/arcdrop-api.tests/src/ArcDrop.Api.Tests/ArcDrop.Api.Tests.csproj" />
+  <Folder Name="/tests/ArcDrop.Api.Tests/">
+    <Project Path="tests/ArcDrop.Api.Tests/ArcDrop.Api.Tests.csproj" />
   </Folder>
 </Solution>

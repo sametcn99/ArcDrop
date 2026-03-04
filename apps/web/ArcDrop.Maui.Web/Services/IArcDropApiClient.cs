@@ -6,8 +6,6 @@ namespace ArcDrop.Web.Services;
 /// </summary>
 public interface IArcDropApiClient
 {
-    Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
-
     Task<CurrentAdminResponse?> GetCurrentAdminAsync(CancellationToken cancellationToken);
 
     Task RotatePasswordAsync(RotateAdminPasswordRequest request, CancellationToken cancellationToken);

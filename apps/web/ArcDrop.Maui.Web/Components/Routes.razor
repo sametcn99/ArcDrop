@@ -1,6 +1,39 @@
-﻿<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+﻿@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)" OnNavigateAsync="HandleNavigateAsync">
     <Found Context="routeData">
-        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        @if (IsPublicCurrentRoute())
+        {
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.AuthLayout)" />
+        }
+        else
+        {
+            <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        }
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
+
+@code {
+    private bool IsPublicCurrentRoute()
+    {
+        var currentRelativePath = Navigation.ToBaseRelativePath(Navigation.Uri);
+        return AuthRoutePolicy.IsPublicPath(currentRelativePath);
+    }
+
+    private async Task HandleNavigateAsync(NavigationContext context)
+    {
+        if (AuthRoutePolicy.IsPublicPath(context.Path))
+        {
+            return;
+        }
+
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        if (authState.User.Identity?.IsAuthenticated is not true)
+        {
+            var returnUrl = AuthRoutePolicy.ResolveSafeReturnUrl($"/{context.Path}");
+            Navigation.NavigateTo($"/auth/login?returnUrl={Uri.EscapeDataString(returnUrl)}", replace: true);
+        }
+    }
+}

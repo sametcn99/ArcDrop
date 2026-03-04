@@ -21,7 +21,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\services\ArcDrop.Api\ArcDrop.Api.csproj" />
+    <ProjectReference Include="..\..\services\ArcDrop.Api\ArcDrop.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\apps\web\ArcDrop.Maui.Web\Services\AuthRoutePolicy.cs" Link="WebAuth\AuthRoutePolicy.cs" />
   </ItemGroup>
 
 </Project>

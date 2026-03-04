@@ -1,44 +1,34 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Components.Authorization;
 
 namespace ArcDrop.Web.Services;
 
 /// <summary>
 /// Implements ArcDrop API access with explicit authorization handling.
-/// All authenticated calls use the in-memory circuit session token from <see cref="AuthSessionState"/>.
+/// Protected requests read the bearer token from cookie-authenticated user claims.
 /// </summary>
 public sealed class ArcDropApiClient : IArcDropApiClient
 {
-    private readonly HttpClient _httpClient;
-    private readonly AuthSessionState _authSessionState;
+    private const string AccessTokenClaimType = "arcdrop:access_token";
+    private const string ExpiresAtClaimType = "arcdrop:expires_at_unix";
 
-    public ArcDropApiClient(HttpClient httpClient, AuthSessionState authSessionState)
+    private readonly HttpClient _httpClient;
+    private readonly AuthenticationStateProvider _authenticationStateProvider;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public ArcDropApiClient(
+        HttpClient httpClient,
+        AuthenticationStateProvider authenticationStateProvider,
+        IHttpContextAccessor httpContextAccessor)
     {
         _httpClient = httpClient;
-        _authSessionState = authSessionState;
-    }
-
-    /// <inheritdoc />
-    public async Task<LoginResponse> LoginAsync(LoginRequest request, CancellationToken cancellationToken)
-    {
-        return await ExecuteAsync(async () =>
-        {
-            using var response = await _httpClient.PostAsJsonAsync("api/auth/login", request, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.Unauthorized)
-            {
-                _authSessionState.Clear();
-                throw new ApiClientException(ApiErrorKind.Unauthorized, "Authentication failed. Verify username and password.");
-            }
-
-            await EnsureSuccessOrThrowAsync(response, "Login request", clearSessionOnUnauthorized: true, cancellationToken);
-
-            var payload = await response.Content.ReadFromJsonAsync<LoginResponse>(cancellationToken: cancellationToken)
-                ?? throw new ApiClientException(ApiErrorKind.Client, "Login response payload was empty.");
-
-            _authSessionState.SetSession(payload.AccessToken, payload.ExpiresAtUtc);
-            return payload;
-        }, "Could not complete authentication request.");
+        _authenticationStateProvider = authenticationStateProvider;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     /// <inheritdoc />
@@ -46,22 +36,19 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var request = CreateAuthorizedRequest(HttpMethod.Get, "api/auth/me");
+            using var request = await CreateAuthorizedRequestAsync(HttpMethod.Get, "api/auth/me");
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                _authSessionState.Clear();
+                await SignOutCurrentRequestAsync();
                 return null;
             }
 
-            await EnsureSuccessOrThrowAsync(response, "Profile request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Profile request", signOutOnUnauthorized: true, cancellationToken);
 
-            var payload = await response.Content.ReadFromJsonAsync<CurrentAdminResponse>(cancellationToken: cancellationToken)
+            return await response.Content.ReadFromJsonAsync<CurrentAdminResponse>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Current admin response payload was empty.");
-
-            _authSessionState.SetUsername(payload.Username);
-            return payload;
         }, "Could not load authenticated profile.");
     }
 
@@ -70,9 +57,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         await ExecuteAsync(async () =>
         {
-            using var httpRequest = CreateAuthorizedRequest(HttpMethod.Post, "api/auth/rotate-password", request);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Post, "api/auth/rotate-password", request);
             using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Password rotation request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Password rotation request", signOutOnUnauthorized: true, cancellationToken);
         }, "Could not rotate admin password.");
     }
 
@@ -82,7 +69,7 @@ public sealed class ArcDropApiClient : IArcDropApiClient
         return await ExecuteAsync(async () =>
         {
             using var response = await _httpClient.GetAsync("api/bookmarks", cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark list request", clearSessionOnUnauthorized: false, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark list request", signOutOnUnauthorized: false, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<List<BookmarkDto>>(cancellationToken: cancellationToken)
                 ?? [];
@@ -100,7 +87,7 @@ public sealed class ArcDropApiClient : IArcDropApiClient
                 return null;
             }
 
-            await EnsureSuccessOrThrowAsync(response, "Bookmark detail request", clearSessionOnUnauthorized: false, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark detail request", signOutOnUnauthorized: false, cancellationToken);
             return await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken);
         }, "Could not load bookmark details.");
     }
@@ -111,7 +98,7 @@ public sealed class ArcDropApiClient : IArcDropApiClient
         return await ExecuteAsync(async () =>
         {
             using var response = await _httpClient.PostAsJsonAsync("api/bookmarks", request, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark create request", clearSessionOnUnauthorized: false, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark create request", signOutOnUnauthorized: false, cancellationToken);
 
             var payload = await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Bookmark create response payload was empty.");
@@ -126,7 +113,7 @@ public sealed class ArcDropApiClient : IArcDropApiClient
         return await ExecuteAsync(async () =>
         {
             using var response = await _httpClient.PutAsJsonAsync($"api/bookmarks/{id}", request, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark update request", clearSessionOnUnauthorized: false, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark update request", signOutOnUnauthorized: false, cancellationToken);
 
             var payload = await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Bookmark update response payload was empty.");
@@ -141,7 +128,7 @@ public sealed class ArcDropApiClient : IArcDropApiClient
         await ExecuteAsync(async () =>
         {
             using var response = await _httpClient.DeleteAsync($"api/bookmarks/{id}", cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark delete request", clearSessionOnUnauthorized: false, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark delete request", signOutOnUnauthorized: false, cancellationToken);
         }, "Could not delete bookmark.");
     }
 
@@ -150,16 +137,16 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var request = CreateAuthorizedRequest(HttpMethod.Get, "api/ai/providers");
+            using var request = await CreateAuthorizedRequestAsync(HttpMethod.Get, "api/ai/providers");
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                _authSessionState.Clear();
+                await SignOutCurrentRequestAsync();
                 throw new ApiClientException(ApiErrorKind.Unauthorized, "Session is not authorized. Sign in and retry.");
             }
 
-            await EnsureSuccessOrThrowAsync(response, "AI provider list request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "AI provider list request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<List<AiProviderConfigResponse>>(cancellationToken: cancellationToken)
                 ?? [];
@@ -171,7 +158,7 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var request = CreateAuthorizedRequest(HttpMethod.Get, $"api/ai/providers/{Uri.EscapeDataString(providerName)}");
+            using var request = await CreateAuthorizedRequestAsync(HttpMethod.Get, $"api/ai/providers/{Uri.EscapeDataString(providerName)}");
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (response.StatusCode == HttpStatusCode.NotFound)
@@ -181,11 +168,11 @@ public sealed class ArcDropApiClient : IArcDropApiClient
 
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                _authSessionState.Clear();
+                await SignOutCurrentRequestAsync();
                 throw new ApiClientException(ApiErrorKind.Unauthorized, "Session is not authorized. Sign in and retry.");
             }
 
-            await EnsureSuccessOrThrowAsync(response, "AI provider detail request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "AI provider detail request", signOutOnUnauthorized: true, cancellationToken);
             return await response.Content.ReadFromJsonAsync<AiProviderConfigResponse>(cancellationToken: cancellationToken);
         }, "Could not load AI provider profile.");
     }
@@ -195,9 +182,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var httpRequest = CreateAuthorizedRequest(HttpMethod.Post, "api/ai/providers", request);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Post, "api/ai/providers", request);
             using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "AI provider create request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "AI provider create request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<AiProviderConfigResponse>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "AI provider create response payload was empty.");
@@ -209,9 +196,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var httpRequest = CreateAuthorizedRequest(HttpMethod.Put, $"api/ai/providers/{Uri.EscapeDataString(providerName)}", request);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Put, $"api/ai/providers/{Uri.EscapeDataString(providerName)}", request);
             using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "AI provider update request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "AI provider update request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<AiProviderConfigResponse>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "AI provider update response payload was empty.");
@@ -223,9 +210,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         await ExecuteAsync(async () =>
         {
-            using var request = CreateAuthorizedRequest(HttpMethod.Delete, $"api/ai/providers/{Uri.EscapeDataString(providerName)}");
+            using var request = await CreateAuthorizedRequestAsync(HttpMethod.Delete, $"api/ai/providers/{Uri.EscapeDataString(providerName)}");
             using var response = await _httpClient.SendAsync(request, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "AI provider delete request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "AI provider delete request", signOutOnUnauthorized: true, cancellationToken);
         }, "Could not delete AI provider profile.");
     }
 
@@ -234,9 +221,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var httpRequest = CreateAuthorizedRequest(HttpMethod.Post, "api/ai/organize", request);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Post, "api/ai/organize", request);
             using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "AI organize request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "AI organize request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<OrganizeBookmarkResponse>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "AI organization response payload was empty.");
@@ -248,7 +235,7 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var request = CreateAuthorizedRequest(HttpMethod.Get, $"api/ai/operations/{operationId}");
+            using var request = await CreateAuthorizedRequestAsync(HttpMethod.Get, $"api/ai/operations/{operationId}");
             using var response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (response.StatusCode == HttpStatusCode.NotFound)
@@ -258,27 +245,22 @@ public sealed class ArcDropApiClient : IArcDropApiClient
 
             if (response.StatusCode == HttpStatusCode.Unauthorized)
             {
-                _authSessionState.Clear();
+                await SignOutCurrentRequestAsync();
                 throw new ApiClientException(ApiErrorKind.Unauthorized, "Session is not authorized. Sign in and retry.");
             }
 
-            await EnsureSuccessOrThrowAsync(response, "AI operation lookup request", clearSessionOnUnauthorized: true, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "AI operation lookup request", signOutOnUnauthorized: true, cancellationToken);
             return await response.Content.ReadFromJsonAsync<OrganizeBookmarkResponse>(cancellationToken: cancellationToken);
         }, "Could not load AI operation details.");
     }
 
-    private HttpRequestMessage CreateAuthorizedRequest(HttpMethod method, string requestUri, object? payload = null)
+    private async Task<HttpRequestMessage> CreateAuthorizedRequestAsync(HttpMethod method, string requestUri, object? payload = null)
     {
         var message = new HttpRequestMessage(method, requestUri);
+        var accessToken = await GetAccessTokenOrThrowAsync();
 
-        // Every protected request fails closed when no valid token exists,
-        // preventing accidental anonymous calls to credential-sensitive endpoints.
-        if (string.IsNullOrWhiteSpace(_authSessionState.AccessToken))
-        {
-            throw new ApiClientException(ApiErrorKind.Unauthorized, "Authentication is required. Please sign in first.");
-        }
-
-        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _authSessionState.AccessToken);
+        // Every protected request fails closed when no valid token claim exists.
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
         if (payload is not null)
         {
@@ -291,7 +273,7 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     private async Task EnsureSuccessOrThrowAsync(
         HttpResponseMessage response,
         string operationName,
-        bool clearSessionOnUnauthorized,
+        bool signOutOnUnauthorized,
         CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode)
@@ -301,9 +283,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            if (clearSessionOnUnauthorized)
+            if (signOutOnUnauthorized)
             {
-                _authSessionState.Clear();
+                await SignOutCurrentRequestAsync();
             }
 
             throw new ApiClientException(ApiErrorKind.Unauthorized, "Session is not authorized. Sign in and retry.");
@@ -346,6 +328,44 @@ public sealed class ArcDropApiClient : IArcDropApiClient
 
     private static bool IsTimeout(Exception exception)
         => exception is TaskCanceledException;
+
+    private async Task<string> GetAccessTokenOrThrowAsync()
+    {
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        if (user.Identity?.IsAuthenticated is not true)
+        {
+            throw new ApiClientException(ApiErrorKind.Unauthorized, "Authentication is required. Please sign in first.");
+        }
+
+        var accessToken = user.FindFirst(AccessTokenClaimType)?.Value;
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            throw new ApiClientException(ApiErrorKind.Unauthorized, "Authentication token is unavailable. Please sign in again.");
+        }
+
+        var expiresAtClaim = user.FindFirst(ExpiresAtClaimType)?.Value;
+        if (long.TryParse(expiresAtClaim, NumberStyles.Integer, CultureInfo.InvariantCulture, out var expiresAtUnix) &&
+            DateTimeOffset.FromUnixTimeSeconds(expiresAtUnix) <= DateTimeOffset.UtcNow)
+        {
+            await SignOutCurrentRequestAsync();
+            throw new ApiClientException(ApiErrorKind.Unauthorized, "Session has expired. Please sign in again.");
+        }
+
+        return accessToken;
+    }
+
+    private async Task SignOutCurrentRequestAsync()
+    {
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext is null)
+        {
+            return;
+        }
+
+        await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    }
 
     private static bool IsNetwork(Exception exception)
         => exception is HttpRequestException;
