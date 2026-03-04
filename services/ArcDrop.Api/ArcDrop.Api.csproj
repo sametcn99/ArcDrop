@@ -16,9 +16,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\packages\arcdrop-application\src\ArcDrop.Application\ArcDrop.Application.csproj" />
-    <ProjectReference Include="..\..\..\..\packages\arcdrop-infrastructure\src\ArcDrop.Infrastructure\ArcDrop.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\..\..\packages\arcdrop-shared\src\ArcDrop.Shared\ArcDrop.Shared.csproj" />
+    <ProjectReference Include="..\..\packages\ArcDrop.Application\ArcDrop.Application.csproj" />
+    <ProjectReference Include="..\..\packages\ArcDrop.Infrastructure\ArcDrop.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\packages\ArcDrop.Shared\ArcDrop.Shared.csproj" />
   </ItemGroup>
 
 </Project>

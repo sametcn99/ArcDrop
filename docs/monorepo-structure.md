@@ -12,18 +12,19 @@ This document defines the mandatory folder conventions for ArcDrop. The goal is 
 /
   apps/
     desktop/
-      arcdrop-maui/
+      ArcDrop.Maui/
       arcdrop-avalonia/
     web/
       arcdrop-docs/
+      ArcDrop.Maui.Web/
     extensions/
   services/
-    arcdrop-api/
+    ArcDrop.Api/
   packages/
-    arcdrop-domain/
-    arcdrop-application/
-    arcdrop-infrastructure/
-    arcdrop-shared/
+    ArcDrop.Domain/
+    ArcDrop.Application/
+    ArcDrop.Infrastructure/
+    ArcDrop.Shared/
   ops/
     docker/
     scripts/
@@ -34,19 +35,19 @@ This document defines the mandatory folder conventions for ArcDrop. The goal is 
 
 - `apps/*`: UI and presentation-layer composition.
 - `services/*`: backend services and HTTP endpoints.
-- `packages/arcdrop-domain`: entities, value objects, invariants.
-- `packages/arcdrop-application`: use-case orchestration and contracts.
-- `packages/arcdrop-infrastructure`: database adapters, external providers, and persistence concerns.
-- `packages/arcdrop-shared`: cross-cutting primitives reused by multiple layers.
+- `packages/ArcDrop.Domain`: entities, value objects, invariants.
+- `packages/ArcDrop.Application`: use-case orchestration and contracts.
+- `packages/ArcDrop.Infrastructure`: database adapters, external providers, and persistence concerns.
+- `packages/ArcDrop.Shared`: cross-cutting primitives reused by multiple layers.
 - `ops/*`: deployment and operations assets.
 - `tests/*`: automated tests grouped by target area.
 
 ## Dependency Direction
 
 1. `apps/*` and `services/*` may depend on `packages/*`.
-2. `packages/arcdrop-application` may depend on domain/shared only.
-3. `packages/arcdrop-infrastructure` may depend on domain/application/shared.
-4. `packages/arcdrop-domain` must not depend on infrastructure or UI.
+2. `packages/ArcDrop.Application` may depend on domain/shared only.
+3. `packages/ArcDrop.Infrastructure` may depend on domain/application/shared.
+4. `packages/ArcDrop.Domain` must not depend on infrastructure or UI.
 
 ## Enforcement
 

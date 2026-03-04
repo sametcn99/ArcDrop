@@ -1,6 +1,6 @@
 ---
 description: "Use when implementing AI provider settings, adapters, prompt orchestration, model calls, or bookmark organization actions."
-applyTo: "services/**, packages/arcdrop-application/**, packages/arcdrop-infrastructure/**"
+applyTo: "services/**, packages/ArcDrop.Application/**, packages/ArcDrop.Infrastructure/**"
 ---
 
 # ArcDrop AI Integration Rules

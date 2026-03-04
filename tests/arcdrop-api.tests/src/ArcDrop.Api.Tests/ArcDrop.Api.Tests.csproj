@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\services\arcdrop-api\src\ArcDrop.Api\ArcDrop.Api.csproj" />
+    <ProjectReference Include="..\..\..\..\services\ArcDrop.Api\ArcDrop.Api.csproj" />
   </ItemGroup>
 
 </Project>

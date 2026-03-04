@@ -21,8 +21,8 @@ Self-host-first bookmarking platform with cross-platform desktop clients and AI-
 - Monorepo rules: `docs/monorepo-structure.md`
 - API bootstrap and migration guide: `docs/api-bootstrap.md`
 - MAUI foundation guide: `docs/desktop-maui-foundation.md`
-- Blazor web app: `apps/web/arcdrop-web/src/ArcDrop.Maui.Web`
-- MAUI-related web host: `apps/web/arcdrop-web/src/ArcDrop.Maui.Web`
+- Blazor web app: `apps/web/ArcDrop.Maui.Web`
+- MAUI-related web host: `apps/web/ArcDrop.Maui.Web`
 - Self-host quickstart: `docs/self-host-quickstart.md`
 - Contributor guide: `CONTRIBUTING.md`
 - Engineering guardrails: `.github/copilot-instructions.md`

@@ -55,11 +55,11 @@ Important settings:
 Create a migration:
 
 ```powershell
-dotnet dotnet-ef migrations add <MigrationName> --project packages/arcdrop-infrastructure/src/ArcDrop.Infrastructure/ArcDrop.Infrastructure.csproj --startup-project services/arcdrop-api/src/ArcDrop.Api/ArcDrop.Api.csproj --context ArcDrop.Infrastructure.Persistence.ArcDropDbContext --output-dir Persistence/Migrations
+dotnet dotnet-ef migrations add <MigrationName> --project packages/ArcDrop.Infrastructure/ArcDrop.Infrastructure.csproj --startup-project services/ArcDrop.Api/ArcDrop.Api.csproj --context ArcDrop.Infrastructure.Persistence.ArcDropDbContext --output-dir Persistence/Migrations
 ```
 
 Apply migrations in a test or local workflow:
 
 ```powershell
-dotnet dotnet-ef database update --project packages/arcdrop-infrastructure/src/ArcDrop.Infrastructure/ArcDrop.Infrastructure.csproj --startup-project services/arcdrop-api/src/ArcDrop.Api/ArcDrop.Api.csproj --context ArcDrop.Infrastructure.Persistence.ArcDropDbContext
+dotnet dotnet-ef database update --project packages/ArcDrop.Infrastructure/ArcDrop.Infrastructure.csproj --startup-project services/ArcDrop.Api/ArcDrop.Api.csproj --context ArcDrop.Infrastructure.Persistence.ArcDropDbContext
 ```

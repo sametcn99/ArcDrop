@@ -6,8 +6,8 @@ WORKDIR /src
 COPY . .
 
 # Restore and publish only the API entry project to keep the final runtime image small.
-RUN dotnet restore ./services/arcdrop-api/src/ArcDrop.Api/ArcDrop.Api.csproj
-RUN dotnet publish ./services/arcdrop-api/src/ArcDrop.Api/ArcDrop.Api.csproj -c Release -o /app/publish --no-restore
+RUN dotnet restore ./services/ArcDrop.Api/ArcDrop.Api.csproj
+RUN dotnet publish ./services/ArcDrop.Api/ArcDrop.Api.csproj -c Release -o /app/publish --no-restore
 
 # Runtime stage: run the published output on the ASP.NET runtime image.
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime

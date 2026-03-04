@@ -22,7 +22,7 @@ services:
   arcdrop-api:
     build:
       context: ../../
-      dockerfile: services/arcdrop-api/src/ArcDrop.Api/Dockerfile
+      dockerfile: services/ArcDrop.Api/Dockerfile
     container_name: arcdrop-api
     restart: unless-stopped
     depends_on:

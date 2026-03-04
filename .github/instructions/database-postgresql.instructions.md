@@ -1,6 +1,6 @@
 ---
 description: "Use when editing PostgreSQL schema, migrations, repositories, SQL queries, indexing strategy, or data access code for bookmarks, collections, tags, and AI logs."
-applyTo: "services/**/*.sql, services/**/Migrations/**, packages/arcdrop-infrastructure/**, ops/docker/**"
+applyTo: "services/**/*.sql, services/**/Migrations/**, packages/ArcDrop.Infrastructure/**, ops/docker/**"
 ---
 
 # ArcDrop PostgreSQL Rules
