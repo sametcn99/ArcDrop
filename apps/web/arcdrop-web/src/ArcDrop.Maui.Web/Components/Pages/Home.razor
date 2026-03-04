@@ -1,0 +1,41 @@
+﻿@page "/home"
+
+<PageTitle>ArcDrop Dashboard</PageTitle>
+
+<div class="page-header" style="margin-bottom: 1.5rem;">
+    <div>
+        <h1>Dashboard</h1>
+        <p class="page-subtitle">Your workspace overview for bookmarks, AI providers, and organization.</p>
+    </div>
+</div>
+
+<div class="dashboard-grid">
+    <a class="feature-card" href="/bookmarks">
+        <div class="feature-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <h2>Bookmarks</h2>
+        <p>Create, edit, search, and manage your bookmark entries.</p>
+    </a>
+    <a class="feature-card" href="/ai/providers">
+        <div class="feature-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
+        <h2>AI Providers</h2>
+        <p>Register and manage provider endpoints, models, and credentials.</p>
+    </a>
+    <a class="feature-card" href="/ai/organize">
+        <div class="feature-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        </div>
+        <h2>AI Organize</h2>
+        <p>Run organization commands and review suggestion results.</p>
+    </a>
+    <a class="feature-card" href="/auth/profile">
+        <div class="feature-card__icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <h2>Admin Session</h2>
+        <p>Check login status and rotate admin credentials.</p>
+    </a>
+</div>

@@ -1,0 +1,88 @@
+@page "/bookmarks/new"
+@rendermode InteractiveServer
+
+@inject IArcDropApiClient ApiClient
+@inject NavigationManager NavigationManager
+
+<PageTitle>Add Bookmark</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Add Bookmark</h1>
+        <p class="page-subtitle">Save a new bookmark to your workspace.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="/bookmarks">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Back
+    </a>
+</div>
+
+<div class="card-shell" style="max-width: 640px;">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label">Title</label>
+            <InputText class="form-control" @bind-Value="Model.Title" placeholder="Bookmark title" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">URL</label>
+            <InputText class="form-control" @bind-Value="Model.Url" placeholder="https://example.com" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Summary</label>
+            <InputTextArea class="form-control" @bind-Value="Model.Summary" rows="3" placeholder="Optional summary or note" />
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit" disabled="@IsSaving">
+                @if (IsSaving) { <span class="spinner-inline"></span> }
+                Save Bookmark
+            </button>
+        </div>
+    </EditForm>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorText))
+{
+    <div class="alert alert-danger mt-3" role="alert">@ErrorText</div>
+}
+
+@code {
+    private CreateBookmarkRequest Model { get; set; } = new();
+    private bool IsSaving { get; set; }
+    private string StatusText { get; set; } = "Fill the form and save.";
+    private string? ErrorText { get; set; }
+
+    private async Task HandleSubmitAsync()
+    {
+        IsSaving = true;
+        ErrorText = null;
+        StatusText = "Saving bookmark...";
+
+        try
+        {
+            // Navigate to detail after create so the user can continue with update/delete actions immediately.
+            var created = await ApiClient.CreateBookmarkAsync(Model, CancellationToken.None);
+            StatusText = "Bookmark created successfully.";
+            NavigationManager.NavigateTo($"/bookmarks/{created.Id}");
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Creation did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Bookmark creation failed.";
+            StatusText = "Creation did not complete.";
+        }
+        finally
+        {
+            IsSaving = false;
+        }
+    }
+}

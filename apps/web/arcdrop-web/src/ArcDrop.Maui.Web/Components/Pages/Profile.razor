@@ -1,0 +1,167 @@
+@page "/auth/profile"
+@rendermode InteractiveServer
+
+@inject IArcDropApiClient ApiClient
+@inject AuthSessionState AuthSession
+
+<PageTitle>Admin Profile</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Admin Profile</h1>
+        <p class="page-subtitle">Manage your session and security credentials.</p>
+    </div>
+</div>
+
+<div class="card-shell mb-4" style="max-width: 640px;">
+    <div class="profile-info mb-3">
+        <div class="profile-info__item">
+            <span class="profile-info__label">Status</span>
+            <span>
+                @if (AuthSession.IsAuthenticated)
+                {
+                    <span class="arc-badge arc-badge--success">Authenticated</span>
+                }
+                else
+                {
+                    <span class="arc-badge arc-badge--muted">Not Authenticated</span>
+                }
+            </span>
+        </div>
+        <div class="profile-info__item">
+            <span class="profile-info__label">Username</span>
+            <span class="profile-info__value">@(string.IsNullOrWhiteSpace(CurrentUsername) ? "N/A" : CurrentUsername)</span>
+        </div>
+        <div class="profile-info__item">
+            <span class="profile-info__label">Token Expires</span>
+            <span class="profile-info__value">@(AuthSession.ExpiresAtUtc?.ToLocalTime().ToString("g") ?? "N/A")</span>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary" @onclick="LoadProfileAsync" disabled="@IsBusy">
+            @if (IsBusy) { <span class="spinner-inline"></span> }
+            Refresh
+        </button>
+        <button class="btn btn-outline-danger" @onclick="SignOut">Sign Out</button>
+    </div>
+</div>
+
+<hr class="section-divider" style="max-width: 640px;" />
+
+<div style="max-width: 640px;">
+    <h2>Rotate Password</h2>
+    <p class="page-subtitle mb-3">Change your admin password. You will need your current password.</p>
+
+    <div class="card-shell">
+        <EditForm Model="RotationModel" OnValidSubmit="RotatePasswordAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="mb-3">
+                <label class="form-label">Current Password</label>
+                <InputText class="form-control" type="password" @bind-Value="RotationModel.CurrentPassword" placeholder="Current password" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">New Password</label>
+                <InputText class="form-control" type="password" @bind-Value="RotationModel.NewPassword" placeholder="New password" />
+            </div>
+
+            <button class="btn btn-primary" type="submit" disabled="@IsBusy">
+                @if (IsBusy) { <span class="spinner-inline"></span> }
+                Rotate Password
+            </button>
+        </EditForm>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorText))
+{
+    <div class="alert alert-danger mt-3" style="max-width: 640px;" role="alert">@ErrorText</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusText) && string.IsNullOrWhiteSpace(ErrorText))
+{
+    <p class="status-hint mt-3">@StatusText</p>
+}
+
+@code {
+    private RotateAdminPasswordRequest RotationModel { get; set; } = new();
+    private string? CurrentUsername { get; set; }
+    private bool IsBusy { get; set; }
+    private string StatusText { get; set; } = "Load profile data to verify session health.";
+    private string? ErrorText { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProfileAsync();
+    }
+
+    private async Task LoadProfileAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+        StatusText = "Loading profile...";
+
+        try
+        {
+            // Explicit /me lookup validates token and updates the in-memory username cache for the layout.
+            var profile = await ApiClient.GetCurrentAdminAsync(CancellationToken.None);
+            CurrentUsername = profile?.Username;
+            StatusText = profile is null
+                ? "Session is not authenticated."
+                : "Profile loaded successfully.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Profile load failed.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load profile data.";
+            StatusText = "Profile load failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RotatePasswordAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+        StatusText = "Rotating password...";
+
+        try
+        {
+            await ApiClient.RotatePasswordAsync(RotationModel, CancellationToken.None);
+            StatusText = "Password rotated successfully.";
+            RotationModel = new RotateAdminPasswordRequest();
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Rotation did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Password rotation failed. Check current password and policy constraints.";
+            StatusText = "Rotation did not complete.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void SignOut()
+    {
+        AuthSession.Clear();
+        CurrentUsername = null;
+        StatusText = "Session cleared.";
+        ErrorText = null;
+    }
+}

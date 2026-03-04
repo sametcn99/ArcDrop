@@ -1,0 +1,136 @@
+@page "/ai/operations"
+@rendermode InteractiveServer
+
+@inject IArcDropApiClient ApiClient
+
+<PageTitle>AI Operations</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>AI Operations</h1>
+        <p class="page-subtitle">Look up a completed operation by its ID.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="/ai/organize">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Back to Organize
+    </a>
+</div>
+
+<div class="card-shell mb-4" style="max-width: 640px;">
+    <EditForm Model="QueryModel" OnValidSubmit="LookupAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label">Operation ID</label>
+            <InputText class="form-control" @bind-Value="QueryModel.OperationId" />
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit" disabled="@IsBusy">
+                @if (IsBusy) { <span class="spinner-inline"></span> }
+                Lookup
+            </button>
+        </div>
+    </EditForm>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorText))
+{
+    <div class="alert alert-danger" role="alert">@ErrorText</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusText) && string.IsNullOrWhiteSpace(ErrorText))
+{
+    <p class="status-hint">@StatusText</p>
+}
+
+@if (Result is not null)
+{
+    <div class="card-shell">
+        <h2>Operation Details</h2>
+        <p><strong>Provider:</strong> @Result.ProviderName</p>
+        <p><strong>Type:</strong> @Result.OperationType</p>
+        <p><strong>Status:</strong> @Result.OutcomeStatus</p>
+        <p><strong>Started:</strong> @Result.StartedAtUtc.ToLocalTime().ToString("g")</p>
+        <p><strong>Completed:</strong> @Result.CompletedAtUtc.ToLocalTime().ToString("g")</p>
+
+        <table class="table table-hover align-middle app-table">
+            <thead>
+                <tr>
+                    <th>Result Type</th>
+                    <th>Value</th>
+                    <th>Confidence</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in Result.Results)
+                {
+                    <tr>
+                        <td>@item.ResultType</td>
+                        <td>@item.Value</td>
+                        <td>@(item.Confidence?.ToString("0.##") ?? "-")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private OperationLookupFormModel QueryModel { get; set; } = new();
+    private OrganizeBookmarkResponse? Result { get; set; }
+    private bool IsBusy { get; set; }
+    private string StatusText { get; set; } = "Enter an operation ID to read persisted result rows.";
+    private string? ErrorText { get; set; }
+
+    private async Task LookupAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+        StatusText = "Loading operation data...";
+
+        try
+        {
+            if (!Guid.TryParse(QueryModel.OperationId, out var operationId))
+            {
+                ErrorText = "Operation ID must be a valid GUID value.";
+                StatusText = "Lookup input validation failed.";
+                Result = null;
+                return;
+            }
+
+            // NotFound is represented by null to keep the page behavior explicit and predictable.
+            Result = await ApiClient.GetOperationByIdAsync(operationId, CancellationToken.None);
+            if (Result is null)
+            {
+                StatusText = "Operation was not found or session is not authorized.";
+                return;
+            }
+
+            StatusText = "Operation loaded successfully.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Lookup request failed.";
+            Result = null;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load operation details.";
+            StatusText = "Lookup request failed.";
+            Result = null;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private sealed class OperationLookupFormModel
+    {
+        [Required]
+        public string OperationId { get; set; } = string.Empty;
+    }
+}

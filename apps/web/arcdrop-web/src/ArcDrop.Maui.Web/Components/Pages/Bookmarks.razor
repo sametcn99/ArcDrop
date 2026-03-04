@@ -1,0 +1,215 @@
+@page "/"
+@page "/bookmarks"
+@rendermode InteractiveServer
+
+@inject IArcDropApiClient ApiClient
+
+<PageTitle>Bookmarks</PageTitle>
+
+<div class="raindrop-header">
+    <div>
+        <h1>Bookmarks</h1>
+        <p class="page-subtitle">Your reading queue and bookmark workspace.</p>
+    </div>
+    <a class="btn btn-primary" href="/bookmarks/new">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Bookmark
+    </a>
+</div>
+
+<div class="raindrop-board">
+    <aside class="raindrop-sidebar card-shell">
+        <h2>Collections</h2>
+        <button class="collection-item @FilterClass(BookmarkViewFilter.All)" @onclick="(() => SetFilter(BookmarkViewFilter.All))">
+            <span>All bookmarks</span>
+            <strong>@_allBookmarks.Count</strong>
+        </button>
+        <button class="collection-item @FilterClass(BookmarkViewFilter.Recent)" @onclick="(() => SetFilter(BookmarkViewFilter.Recent))">
+            <span>Updated this week</span>
+            <strong>@RecentCount</strong>
+        </button>
+        <button class="collection-item @FilterClass(BookmarkViewFilter.WithSummary)" @onclick="(() => SetFilter(BookmarkViewFilter.WithSummary))">
+            <span>With summary</span>
+            <strong>@WithSummaryCount</strong>
+        </button>
+        <button class="collection-item @FilterClass(BookmarkViewFilter.WithoutSummary)" @onclick="(() => SetFilter(BookmarkViewFilter.WithoutSummary))">
+            <span>Without summary</span>
+            <strong>@WithoutSummaryCount</strong>
+        </button>
+    </aside>
+
+    <section>
+        <div class="card-shell mb-3 raindrop-toolbar">
+            <input class="form-control"
+                   placeholder="Search title, URL, or summary"
+                   @bind="SearchText"
+                   @bind:event="oninput" />
+            <button class="btn btn-outline-secondary" @onclick="LoadAsync" disabled="@IsLoading">Refresh</button>
+        </div>
+
+        @if (IsLoading)
+        {
+            <div class="card-shell" style="padding: 2rem; text-align: center;">
+                <span class="spinner-inline"></span> Loading bookmarks...
+            </div>
+        }
+        else if (!string.IsNullOrWhiteSpace(ErrorText))
+        {
+            <div class="alert alert-danger" role="alert">@ErrorText</div>
+        }
+        else if (FilteredBookmarks.Count == 0)
+        {
+            <div class="empty-state">
+                <div class="empty-state__icon">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <p class="empty-state__title">No bookmarks found</p>
+                <p class="empty-state__text">Try a different filter or add your first bookmark.</p>
+            </div>
+        }
+        else
+        {
+            <div class="bookmark-feed">
+                @foreach (var item in FilteredBookmarks)
+                {
+                    <article class="bookmark-card">
+                        <div class="bookmark-card__meta">
+                            <span>@item.UpdatedAtUtc.ToLocalTime().ToString("g")</span>
+                            <span class="bookmark-card__domain">@DomainFromUrl(item.Url)</span>
+                        </div>
+                        <h3>@item.Title</h3>
+                        <a href="@item.Url" target="_blank" rel="noopener noreferrer">@item.Url</a>
+                        @if (!string.IsNullOrWhiteSpace(item.Summary))
+                        {
+                            <p>@item.Summary</p>
+                        }
+                        <div class="bookmark-card__actions">
+                            <a class="btn btn-sm btn-outline-secondary" href="/bookmarks/@item.Id">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                Open
+                            </a>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private enum BookmarkViewFilter
+    {
+        All,
+        Recent,
+        WithSummary,
+        WithoutSummary
+    }
+
+    private readonly List<BookmarkDto> _allBookmarks = [];
+    private List<BookmarkDto> FilteredBookmarks { get; set; } = [];
+    private BookmarkViewFilter ActiveFilter { get; set; } = BookmarkViewFilter.All;
+
+    private bool IsLoading { get; set; }
+    private string? ErrorText { get; set; }
+    private string StatusText { get; set; } = "Ready.";
+
+    private string _searchText = string.Empty;
+
+    private int RecentCount => _allBookmarks.Count(x => x.UpdatedAtUtc >= DateTimeOffset.UtcNow.AddDays(-7));
+    private int WithSummaryCount => _allBookmarks.Count(x => !string.IsNullOrWhiteSpace(x.Summary));
+    private int WithoutSummaryCount => _allBookmarks.Count - WithSummaryCount;
+
+    private string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            _searchText = value;
+            ApplyFilter();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        ErrorText = null;
+        StatusText = "Loading bookmarks...";
+
+        try
+        {
+            // The list refresh intentionally pulls from API each time so users see edits made in other clients.
+            var payload = await ApiClient.GetBookmarksAsync(CancellationToken.None);
+            _allBookmarks.Clear();
+            _allBookmarks.AddRange(payload);
+            ApplyFilter();
+            StatusText = $"Loaded {_allBookmarks.Count} bookmark(s).";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Bookmark loading failed.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load bookmarks from API.";
+            StatusText = "Bookmark loading failed.";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void SetFilter(BookmarkViewFilter filter)
+    {
+        ActiveFilter = filter;
+        ApplyFilter();
+    }
+
+    private string FilterClass(BookmarkViewFilter filter)
+        => ActiveFilter == filter ? "is-active" : string.Empty;
+
+    private void ApplyFilter()
+    {
+        // Apply collection filter first, then search text so the sidebar behavior stays deterministic.
+        IEnumerable<BookmarkDto> candidates = ActiveFilter switch
+        {
+            BookmarkViewFilter.Recent => _allBookmarks.Where(x => x.UpdatedAtUtc >= DateTimeOffset.UtcNow.AddDays(-7)),
+            BookmarkViewFilter.WithSummary => _allBookmarks.Where(x => !string.IsNullOrWhiteSpace(x.Summary)),
+            BookmarkViewFilter.WithoutSummary => _allBookmarks.Where(x => string.IsNullOrWhiteSpace(x.Summary)),
+            _ => _allBookmarks
+        };
+
+        if (string.IsNullOrWhiteSpace(SearchText))
+        {
+            FilteredBookmarks = candidates
+                .OrderByDescending(x => x.UpdatedAtUtc)
+                .ToList();
+            return;
+        }
+
+        var normalized = SearchText.Trim();
+        FilteredBookmarks = candidates
+            .Where(x =>
+                x.Title.Contains(normalized, StringComparison.OrdinalIgnoreCase) ||
+                x.Url.Contains(normalized, StringComparison.OrdinalIgnoreCase) ||
+                (x.Summary?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false))
+            .OrderByDescending(x => x.UpdatedAtUtc)
+            .ToList();
+    }
+
+    private static string DomainFromUrl(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return uri.Host;
+        }
+
+        return "unknown-source";
+    }
+}

@@ -1,0 +1,153 @@
+@page "/ai/organize"
+@rendermode InteractiveServer
+
+@inject IArcDropApiClient ApiClient
+
+<PageTitle>AI Organize</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>AI Organize</h1>
+        <p class="page-subtitle">Run a bookmark organization command against a configured provider.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="/ai/operations">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Operations Log
+    </a>
+</div>
+
+<div class="card-shell" style="max-width: 640px;">
+    <EditForm Model="Model" OnValidSubmit="RunAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label">Provider Name</label>
+            <InputText class="form-control" @bind-Value="Model.ProviderName" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Operation Type</label>
+            <InputSelect class="form-select" @bind-Value="Model.OperationType">
+                <option value="tag-suggestions">tag-suggestions</option>
+                <option value="collection-suggestions">collection-suggestions</option>
+                <option value="title-cleanup">title-cleanup</option>
+                <option value="summary-cleanup">summary-cleanup</option>
+            </InputSelect>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Bookmark URL</label>
+            <InputText class="form-control" @bind-Value="Model.BookmarkUrl" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Bookmark Title</label>
+            <InputText class="form-control" @bind-Value="Model.BookmarkTitle" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Bookmark Summary</label>
+            <InputTextArea class="form-control" @bind-Value="Model.BookmarkSummary" />
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit" disabled="@IsBusy">
+                @if (IsBusy) { <span class="spinner-inline"></span> }
+                Run Operation
+            </button>
+        </div>
+    </EditForm>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorText))
+{
+    <div class="alert alert-danger mt-3" role="alert">@ErrorText</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusText) && string.IsNullOrWhiteSpace(ErrorText))
+{
+    <p class="status-hint mt-3">@StatusText</p>
+}
+
+@if (LastResult is not null)
+{
+    <div class="card-shell mt-4">
+        <h2>Operation Result</h2>
+        <p><strong>Operation ID:</strong> @LastResult.OperationId</p>
+        <p><strong>Status:</strong> @LastResult.OutcomeStatus</p>
+        <p><strong>Provider:</strong> @LastResult.ProviderName</p>
+        <p><strong>Type:</strong> @LastResult.OperationType</p>
+
+        @if (LastResult.Results.Count == 0)
+        {
+            <p><em>No result rows were returned.</em></p>
+        }
+        else
+        {
+            <table class="table table-hover align-middle app-table">
+                <thead>
+                    <tr>
+                        <th>Result Type</th>
+                        <th>Value</th>
+                        <th>Confidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in LastResult.Results)
+                    {
+                        <tr>
+                            <td>@item.ResultType</td>
+                            <td>@item.Value</td>
+                            <td>@(item.Confidence?.ToString("0.##") ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    private OrganizeBookmarkRequest Model { get; set; } = new()
+    {
+        OperationType = "tag-suggestions",
+        BookmarkUrl = "https://example.com",
+        BookmarkTitle = "Example Bookmark"
+    };
+
+    private bool IsBusy { get; set; }
+    private string StatusText { get; set; } = "Submit a command to generate organization suggestions.";
+    private string? ErrorText { get; set; }
+    private OrganizeBookmarkResponse? LastResult { get; set; }
+
+    private async Task RunAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+        StatusText = "Running organization operation...";
+
+        try
+        {
+            // Persist the last response in-memory so users can compare outputs before running new commands.
+            LastResult = await ApiClient.OrganizeBookmarkAsync(Model, CancellationToken.None);
+            StatusText = $"Operation completed with status '{LastResult.OutcomeStatus}'.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Operation did not complete.";
+            LastResult = null;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Organization command failed. Verify auth state and provider profile.";
+            StatusText = "Operation did not complete.";
+            LastResult = null;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

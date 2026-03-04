@@ -1,0 +1,6 @@
+@ArcDrop.Api_HostAddress = http://localhost:5237
+
+GET {{ArcDrop.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

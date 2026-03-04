@@ -1,0 +1,179 @@
+@page "/bookmarks/{Id:guid}"
+@rendermode InteractiveServer
+
+@inject IArcDropApiClient ApiClient
+@inject NavigationManager NavigationManager
+
+<PageTitle>Edit Bookmark</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Edit Bookmark</h1>
+        <p class="page-subtitle">Update details or remove this bookmark.</p>
+    </div>
+    <a class="btn btn-outline-secondary" href="/bookmarks">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Back
+    </a>
+</div>
+
+@if (IsLoading)
+{
+    <div class="card-shell" style="max-width: 640px; padding: 2rem; text-align: center;">
+        <span class="spinner-inline"></span> Loading bookmark...
+    </div>
+}
+else if (!string.IsNullOrWhiteSpace(ErrorText))
+{
+    <div class="alert alert-danger" role="alert">@ErrorText</div>
+}
+else
+{
+    <div class="card-shell" style="max-width: 640px;">
+        <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="mb-3">
+                <label class="form-label">Title</label>
+                <InputText class="form-control" @bind-Value="Model.Title" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">URL</label>
+                <InputText class="form-control" @bind-Value="Model.Url" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Summary</label>
+                <InputTextArea class="form-control" @bind-Value="Model.Summary" rows="3" />
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" type="submit" disabled="@IsSaving">
+                    @if (IsSaving) { <span class="spinner-inline"></span> }
+                    Save Changes
+                </button>
+                <button class="btn btn-outline-danger" type="button" @onclick="DeleteAsync" disabled="@IsDeleting">
+                    @if (IsDeleting) { <span class="spinner-inline"></span> }
+                    Delete
+                </button>
+            </div>
+        </EditForm>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(StatusText))
+    {
+        <p class="status-hint mt-3">@StatusText</p>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private UpdateBookmarkRequest Model { get; set; } = new();
+    private bool IsLoading { get; set; }
+    private bool IsSaving { get; set; }
+    private bool IsDeleting { get; set; }
+    private string StatusText { get; set; } = "Ready.";
+    private string? ErrorText { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        ErrorText = null;
+        StatusText = "Loading bookmark details...";
+
+        try
+        {
+            // Reloading on each route parameter change keeps deep-link navigation deterministic.
+            var detail = await ApiClient.GetBookmarkByIdAsync(Id, CancellationToken.None);
+            if (detail is null)
+            {
+                ErrorText = "Bookmark not found.";
+                return;
+            }
+
+            Model = new UpdateBookmarkRequest
+            {
+                Title = detail.Title,
+                Url = detail.Url,
+                Summary = detail.Summary
+            };
+
+            StatusText = "Bookmark loaded.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load bookmark details.";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        IsSaving = true;
+        ErrorText = null;
+        StatusText = "Saving bookmark...";
+
+        try
+        {
+            await ApiClient.UpdateBookmarkAsync(Id, Model, CancellationToken.None);
+            StatusText = "Bookmark saved successfully.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Save did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Bookmark save failed.";
+            StatusText = "Save did not complete.";
+        }
+        finally
+        {
+            IsSaving = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        IsDeleting = true;
+        ErrorText = null;
+        StatusText = "Deleting bookmark...";
+
+        try
+        {
+            await ApiClient.DeleteBookmarkAsync(Id, CancellationToken.None);
+            NavigationManager.NavigateTo("/bookmarks");
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Delete did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Bookmark delete failed.";
+            StatusText = "Delete did not complete.";
+        }
+        finally
+        {
+            IsDeleting = false;
+        }
+    }
+}

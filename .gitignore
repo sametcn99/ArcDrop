@@ -1,0 +1,105 @@
+# ArcDrop repository .gitignore
+# Covers .NET (services/packages/tests), MAUI apps, future VitePress docs app, and local secrets.
+
+# ------------------------------
+# OS / editor noise
+# ------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+.vs/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# VS Code local workspace settings (keep shared recommendations if added later)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# ------------------------------
+# .NET / C# build artifacts
+# ------------------------------
+[Bb]in/
+[Oo]bj/
+out/
+artifacts/
+
+# Test and coverage outputs
+TestResults/
+coverage/
+coverage-*/
+*.coverage
+*.coveragexml
+*.trx
+
+# NuGet local artifacts
+*.nupkg
+*.snupkg
+*.symbols.nupkg
+.nuget/
+
+# Rider / ReSharper
+_ReSharper*/
+*.DotSettings.user
+
+# ------------------------------
+# MAUI / Xamarin specific
+# ------------------------------
+# Generated platform app packages and diagnostics
+*.apk
+*.aab
+*.ipa
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+
+# ------------------------------
+# Node / VitePress (apps/web/arcdrop-docs)
+# ------------------------------
+node_modules/
+.pnpm-store/
+.npm/
+.yarn/
+.yarn-cache/
+.yarnrc.yml
+
+# Build/cache outputs
+*.tsbuildinfo
+.vite/
+.cache/
+dist/
+
+# ------------------------------
+# Environment and secrets
+# ------------------------------
+# Keep template env files tracked, ignore real environment files.
+.env
+.env.*
+!.env.example
+
+ops/docker/.env
+
+# ASP.NET / local secrets and certificates
+secrets.json
+*.pfx
+*.pem
+*.key
+
+# ------------------------------
+# Logs
+# ------------------------------
+*.log
+logs/
+
+# ------------------------------
+# Git helper leftovers
+# ------------------------------
+*.orig
+*.rej

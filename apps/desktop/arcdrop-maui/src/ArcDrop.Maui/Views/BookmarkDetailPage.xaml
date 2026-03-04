@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewModels="clr-namespace:ArcDrop.Maui.ViewModels"
+             x:Class="ArcDrop.Maui.Views.BookmarkDetailPage"
+             x:DataType="viewModels:BookmarkDetailViewModel"
+             Title="Bookmark Detail">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="20" Spacing="12">
+            <Label Text="Edit Bookmark"
+                   FontSize="28"
+                   FontAttributes="Bold"
+                   SemanticProperties.HeadingLevel="Level1" />
+
+            <Label Text="Title" FontAttributes="Bold" />
+            <Entry Text="{Binding Title}" Placeholder="Bookmark title" />
+
+            <Label Text="URL" FontAttributes="Bold" />
+            <Entry Text="{Binding Url}" Placeholder="https://example.com" />
+
+            <Label Text="Summary" FontAttributes="Bold" />
+            <Editor Text="{Binding Summary}" AutoSize="TextChanges" MinimumHeightRequest="120" />
+
+            <HorizontalStackLayout Spacing="8">
+                <Button Text="Save"
+                        Command="{Binding SaveCommand}" />
+            </HorizontalStackLayout>
+
+            <Label Text="{Binding StatusText}"
+                   FontSize="13"
+                   TextColor="Gray" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

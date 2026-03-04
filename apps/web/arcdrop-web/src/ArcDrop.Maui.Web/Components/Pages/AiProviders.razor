@@ -1,0 +1,278 @@
+@page "/ai/providers"
+@rendermode InteractiveServer
+
+@inject IArcDropApiClient ApiClient
+
+<PageTitle>AI Providers</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>AI Providers</h1>
+        <p class="page-subtitle">Manage provider endpoints, models, and credentials. <a href="/auth/login">Sign in</a> to access protected operations.</p>
+    </div>
+</div>
+
+<div class="card-shell mb-4" style="max-width: 640px;">
+    <div class="section-header">
+        <h2>@(IsEditMode ? "Update Provider" : "New Provider")</h2>
+        @if (IsEditMode)
+        {
+            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="BeginCreate">Create New</button>
+        }
+    </div>
+
+    <EditForm Model="FormModel" OnValidSubmit="SaveAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label">Provider Name</label>
+            <InputText class="form-control" @bind-Value="FormModel.ProviderName" disabled="@IsEditMode" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">API Endpoint</label>
+            <InputText class="form-control" @bind-Value="FormModel.ApiEndpoint" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">Model</label>
+            <InputText class="form-control" @bind-Value="FormModel.Model" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">API Key</label>
+            <InputText class="form-control" type="password" @bind-Value="FormModel.ApiKey" />
+            @if (IsEditMode)
+            {
+                <small class="text-muted">Leave empty to keep the existing encrypted key.</small>
+            }
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit" disabled="@IsBusy">
+                @if (IsBusy) { <span class="spinner-inline"></span> }
+                @(IsEditMode ? "Update" : "Create")
+            </button>
+            <button class="btn btn-outline-secondary" type="button" @onclick="LoadAsync" disabled="@IsBusy">
+                Refresh
+            </button>
+        </div>
+    </EditForm>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorText))
+{
+    <div class="alert alert-danger" role="alert">@ErrorText</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusText) && string.IsNullOrWhiteSpace(ErrorText))
+{
+    <p class="status-hint">@StatusText</p>
+}
+
+@if (Providers.Count > 0)
+{
+    <table class="table table-hover align-middle app-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Endpoint</th>
+                <th>Model</th>
+                <th>Key</th>
+                <th>Updated</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var provider in Providers)
+            {
+                <tr>
+                    <td>@provider.ProviderName</td>
+                    <td>@provider.ApiEndpoint</td>
+                    <td>@provider.Model</td>
+                    <td>@(provider.HasApiKey ? provider.ApiKeyPreview : "No key")</td>
+                    <td>@provider.UpdatedAtUtc.ToLocalTime().ToString("g")</td>
+                    <td>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => BeginEdit(provider)">Edit</button>
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteAsync(provider.ProviderName)">Delete</button>
+                        </div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private readonly List<AiProviderConfigResponse> Providers = [];
+    private ProviderFormModel FormModel { get; set; } = new();
+    private bool IsBusy { get; set; }
+    private bool IsEditMode { get; set; }
+    private string? ErrorText { get; set; }
+    private string StatusText { get; set; } = "Use create to register a provider profile.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+        StatusText = "Loading providers...";
+
+        try
+        {
+            var providers = await ApiClient.GetAiProvidersAsync(CancellationToken.None);
+            Providers.Clear();
+            Providers.AddRange(providers.OrderBy(x => x.ProviderName));
+            StatusText = $"Loaded {Providers.Count} provider profile(s).";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Provider load failed.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load provider profiles. Sign in and verify API availability.";
+            StatusText = "Provider load failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void BeginCreate()
+    {
+        IsEditMode = false;
+        FormModel = new ProviderFormModel();
+        ErrorText = null;
+        StatusText = "Create a new provider profile.";
+    }
+
+    private void BeginEdit(AiProviderConfigResponse provider)
+    {
+        IsEditMode = true;
+        FormModel = new ProviderFormModel
+        {
+            ProviderName = provider.ProviderName,
+            ApiEndpoint = provider.ApiEndpoint,
+            Model = provider.Model,
+            ApiKey = string.Empty
+        };
+
+        ErrorText = null;
+        StatusText = $"Editing provider '{provider.ProviderName}'.";
+    }
+
+    private async Task SaveAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+        StatusText = IsEditMode ? "Updating provider..." : "Creating provider...";
+
+        try
+        {
+            // Create requires API key while update allows preserving existing key by sending null.
+            if (IsEditMode)
+            {
+                await ApiClient.UpdateAiProviderAsync(
+                    FormModel.ProviderName,
+                    new UpdateAiProviderConfigRequest
+                    {
+                        ApiEndpoint = FormModel.ApiEndpoint,
+                        Model = FormModel.Model,
+                        ApiKey = string.IsNullOrWhiteSpace(FormModel.ApiKey) ? null : FormModel.ApiKey
+                    },
+                    CancellationToken.None);
+            }
+            else
+            {
+                await ApiClient.UpsertAiProviderAsync(
+                    new UpsertAiProviderConfigRequest
+                    {
+                        ProviderName = FormModel.ProviderName,
+                        ApiEndpoint = FormModel.ApiEndpoint,
+                        Model = FormModel.Model,
+                        ApiKey = FormModel.ApiKey
+                    },
+                    CancellationToken.None);
+            }
+
+            StatusText = IsEditMode ? "Provider updated successfully." : "Provider created successfully.";
+            if (!IsEditMode)
+            {
+                FormModel = new ProviderFormModel();
+            }
+
+            await LoadAsync();
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Save operation did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = IsEditMode ? "Provider update failed." : "Provider create failed.";
+            StatusText = "Save operation did not complete.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteAsync(string providerName)
+    {
+        IsBusy = true;
+        ErrorText = null;
+        StatusText = $"Deleting provider '{providerName}'...";
+
+        try
+        {
+            await ApiClient.DeleteAiProviderAsync(providerName, CancellationToken.None);
+            StatusText = "Provider deleted successfully.";
+            if (IsEditMode && string.Equals(FormModel.ProviderName, providerName, StringComparison.OrdinalIgnoreCase))
+            {
+                BeginCreate();
+            }
+
+            await LoadAsync();
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Delete operation did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Provider delete failed.";
+            StatusText = "Delete operation did not complete.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private sealed class ProviderFormModel
+    {
+        [Required]
+        public string ProviderName { get; set; } = string.Empty;
+
+        [Required]
+        [Url]
+        public string ApiEndpoint { get; set; } = string.Empty;
+
+        [Required]
+        public string Model { get; set; } = string.Empty;
+
+        public string ApiKey { get; set; } = string.Empty;
+    }
+}

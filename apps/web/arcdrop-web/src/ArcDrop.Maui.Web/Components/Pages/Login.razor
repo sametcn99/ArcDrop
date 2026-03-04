@@ -1,0 +1,91 @@
+@page "/auth/login"
+@rendermode InteractiveServer
+
+@inject IArcDropApiClient ApiClient
+@inject AuthSessionState AuthSession
+@inject NavigationManager Navigation
+
+<PageTitle>Admin Login</PageTitle>
+
+<div class="auth-card-wrapper">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--arc-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+            <h1>ArcDrop</h1>
+            <p>Sign in to access your workspace</p>
+        </div>
+
+        <div class="card-shell">
+            <EditForm Model="Model" OnValidSubmit="SignInAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <InputText class="form-control" @bind-Value="Model.Username" placeholder="Enter username" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <InputText class="form-control" type="password" @bind-Value="Model.Password" placeholder="Enter password" />
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(ErrorText))
+                {
+                    <div class="alert alert-danger mb-3" role="alert">@ErrorText</div>
+                }
+
+                <button class="btn btn-primary w-100" type="submit" disabled="@IsLoading">
+                    @if (IsLoading)
+                    {
+                        <span class="spinner-inline"></span>
+                    }
+                    Sign In
+                </button>
+            </EditForm>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(StatusText))
+        {
+            <p class="status-hint mt-3" style="justify-content: center;">@StatusText</p>
+        }
+    </div>
+</div>
+
+@code {
+    private LoginRequest Model { get; set; } = new();
+    private bool IsLoading { get; set; }
+    private string StatusText { get; set; } = "Use fixed-admin credentials to access protected API operations.";
+    private string? ErrorText { get; set; }
+
+    private async Task SignInAsync()
+    {
+        IsLoading = true;
+        ErrorText = null;
+        StatusText = "Authenticating...";
+
+        try
+        {
+            // Login returns the JWT token and expiry used by protected AI provider and operation pages.
+            await ApiClient.LoginAsync(Model, CancellationToken.None);
+            StatusText = "Authentication succeeded.";
+            Navigation.NavigateTo("/auth/profile");
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Sign-in did not complete.";
+            AuthSession.Clear();
+        }
+        catch (Exception)
+        {
+            ErrorText = "Authentication failed. Verify username and password.";
+            StatusText = "Sign-in did not complete.";
+            AuthSession.Clear();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+}

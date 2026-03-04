@@ -1,0 +1,55 @@
+# ArcDrop self-host stack for local and small-team deployments.
+# Implements TASK-012 with persistent PostgreSQL storage and API health checks.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: arcdrop-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${ARCDROP_POSTGRES_DB}
+      POSTGRES_USER: ${ARCDROP_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${ARCDROP_POSTGRES_PASSWORD}
+    ports:
+      - "${ARCDROP_POSTGRES_PORT}:5432"
+    volumes:
+      - arcdrop-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ARCDROP_POSTGRES_USER} -d ${ARCDROP_POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+  arcdrop-api:
+    build:
+      context: ../../
+      dockerfile: services/arcdrop-api/src/ArcDrop.Api/Dockerfile
+    container_name: arcdrop-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${ARCDROP_API_PORT}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ARCDROP_API_ENVIRONMENT}
+      ARCDROP_ConnectionStrings__ArcDropPostgres: Host=postgres;Port=5432;Database=${ARCDROP_POSTGRES_DB};Username=${ARCDROP_POSTGRES_USER};Password=${ARCDROP_POSTGRES_PASSWORD}
+      ARCDROP_Admin__Username: ${ARCDROP_ADMIN_USERNAME}
+      ARCDROP_Admin__Password: ${ARCDROP_ADMIN_PASSWORD}
+      ARCDROP_AdminCredentialPolicy__MinimumPasswordLength: ${ARCDROP_ADMIN_CREDENTIAL_POLICY_MINIMUM_PASSWORD_LENGTH}
+      ARCDROP_AdminCredentialPolicy__RequireUppercase: ${ARCDROP_ADMIN_CREDENTIAL_POLICY_REQUIRE_UPPERCASE}
+      ARCDROP_AdminCredentialPolicy__RequireLowercase: ${ARCDROP_ADMIN_CREDENTIAL_POLICY_REQUIRE_LOWERCASE}
+      ARCDROP_AdminCredentialPolicy__RequireDigit: ${ARCDROP_ADMIN_CREDENTIAL_POLICY_REQUIRE_DIGIT}
+      ARCDROP_AdminCredentialPolicy__RequireSpecialCharacter: ${ARCDROP_ADMIN_CREDENTIAL_POLICY_REQUIRE_SPECIAL_CHARACTER}
+      ARCDROP_AdminCredentialPolicy__DisallowPasswordReuse: ${ARCDROP_ADMIN_CREDENTIAL_POLICY_DISALLOW_PASSWORD_REUSE}
+      ARCDROP_Jwt__Issuer: ${ARCDROP_JWT_ISSUER}
+      ARCDROP_Jwt__Audience: ${ARCDROP_JWT_AUDIENCE}
+      ARCDROP_Jwt__SigningKey: ${ARCDROP_JWT_SIGNING_KEY}
+      ARCDROP_Jwt__AccessTokenLifetimeMinutes: ${ARCDROP_JWT_ACCESS_TOKEN_LIFETIME_MINUTES}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  arcdrop-postgres-data:

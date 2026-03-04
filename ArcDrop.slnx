@@ -1,0 +1,41 @@
+<Solution>
+  <Folder Name="/apps/" />
+  <Folder Name="/apps/desktop/" />
+  <Folder Name="/apps/desktop/arcdrop-maui/" />
+  <Folder Name="/apps/desktop/arcdrop-maui/src/">
+    <Project Path="apps/desktop/arcdrop-maui/src/ArcDrop.Maui/ArcDrop.Maui.csproj" />
+  </Folder>
+  <Folder Name="/apps/web/" />
+  <Folder Name="/apps/web/arcdrop-web/" />
+  <Folder Name="/apps/web/arcdrop-web/src/" />
+  <Folder Name="/apps/web/arcdrop-web/src/ArcDrop.Maui.Web/">
+    <Project Path="apps/web/arcdrop-web/src/ArcDrop.Maui.Web/ArcDrop.Web.csproj" />
+  </Folder>
+  <Folder Name="/packages/" />
+  <Folder Name="/packages/arcdrop-application/" />
+  <Folder Name="/packages/arcdrop-application/src/">
+    <Project Path="packages/arcdrop-application/src/ArcDrop.Application/ArcDrop.Application.csproj" />
+  </Folder>
+  <Folder Name="/packages/arcdrop-domain/" />
+  <Folder Name="/packages/arcdrop-domain/src/">
+    <Project Path="packages/arcdrop-domain/src/ArcDrop.Domain/ArcDrop.Domain.csproj" />
+  </Folder>
+  <Folder Name="/packages/arcdrop-infrastructure/" />
+  <Folder Name="/packages/arcdrop-infrastructure/src/">
+    <Project Path="packages/arcdrop-infrastructure/src/ArcDrop.Infrastructure/ArcDrop.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/packages/arcdrop-shared/" />
+  <Folder Name="/packages/arcdrop-shared/src/">
+    <Project Path="packages/arcdrop-shared/src/ArcDrop.Shared/ArcDrop.Shared.csproj" />
+  </Folder>
+  <Folder Name="/services/" />
+  <Folder Name="/services/arcdrop-api/" />
+  <Folder Name="/services/arcdrop-api/src/">
+    <Project Path="services/arcdrop-api/src/ArcDrop.Api/ArcDrop.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/arcdrop-api.tests/" />
+  <Folder Name="/tests/arcdrop-api.tests/src/">
+    <Project Path="tests/arcdrop-api.tests/src/ArcDrop.Api.Tests/ArcDrop.Api.Tests.csproj" />
+  </Folder>
+</Solution>

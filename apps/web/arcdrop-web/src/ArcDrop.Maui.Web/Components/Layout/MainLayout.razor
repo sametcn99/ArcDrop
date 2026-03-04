@@ -1,0 +1,45 @@
+﻿@inherits LayoutComponentBase
+@inject AuthSessionState AuthSession
+
+<div class="page">
+    <div class="sidebar">
+        <NavMenu />
+    </div>
+
+    <main>
+        <div class="top-row px-4">
+            <div class="top-row-context">
+                @if (AuthSession.IsAuthenticated)
+                {
+                    <span class="arc-badge arc-badge--success">Authenticated</span>
+                }
+                else
+                {
+                    <span class="arc-badge arc-badge--muted">Anonymous</span>
+                }
+            </div>
+            <div class="top-row-actions">
+                @if (AuthSession.IsAuthenticated)
+                {
+                    <a href="/auth/profile">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>@(!string.IsNullOrWhiteSpace(AuthSession.Username) ? AuthSession.Username : "Profile")
+                    </a>
+                }
+                else
+                {
+                    <a href="/auth/login">Sign In</a>
+                }
+            </div>
+        </div>
+
+        <article class="content px-4">
+            @Body
+        </article>
+    </main>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
