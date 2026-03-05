@@ -1,0 +1,671 @@
+@page "/settings"
+
+@inject IArcDropApiClient ApiClient
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Settings</PageTitle>
+
+<div class="page-header">
+    <div>
+        <h1>Settings</h1>
+        <p class="page-subtitle">Manage account, security, and AI configuration from one workspace.</p>
+    </div>
+</div>
+
+<div class="settings-shell card-shell">
+    <aside class="settings-nav" role="tablist" aria-label="Settings sections">
+        <button class="settings-nav__item @(IsActive(SettingsSection.Account) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.Account))" role="tab" aria-selected="@IsActive(SettingsSection.Account)">
+            Account
+        </button>
+        <button class="settings-nav__item @(IsActive(SettingsSection.Security) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.Security))" role="tab" aria-selected="@IsActive(SettingsSection.Security)">
+            Security
+        </button>
+        <button class="settings-nav__item @(IsActive(SettingsSection.AiProviders) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.AiProviders))" role="tab" aria-selected="@IsActive(SettingsSection.AiProviders)">
+            AI Providers
+        </button>
+        <button class="settings-nav__item @(IsActive(SettingsSection.AiOperations) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.AiOperations))" role="tab" aria-selected="@IsActive(SettingsSection.AiOperations)">
+            AI Operations
+        </button>
+    </aside>
+
+    <section class="settings-content" role="tabpanel">
+        @if (ActiveSection == SettingsSection.Account)
+        {
+            <div class="section-header">
+                <h2>Account</h2>
+            </div>
+
+            <div class="profile-info mb-3">
+                <div class="profile-info__item">
+                    <span class="profile-info__label">Status</span>
+                    <span>
+                        @if (IsAuthenticated)
+                        {
+                            <span class="arc-badge arc-badge--success">Authenticated</span>
+                        }
+                        else
+                        {
+                            <span class="arc-badge arc-badge--muted">Not Authenticated</span>
+                        }
+                    </span>
+                </div>
+                <div class="profile-info__item">
+                    <span class="profile-info__label">Username</span>
+                    <span class="profile-info__value">@(string.IsNullOrWhiteSpace(CurrentUsername) ? "N/A" : CurrentUsername)</span>
+                </div>
+                <div class="profile-info__item">
+                    <span class="profile-info__label">Token Expires</span>
+                    <span class="profile-info__value">@TokenExpiresText</span>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-outline-secondary" @onclick="LoadProfileAsync" disabled="@IsProfileBusy">
+                    @if (IsProfileBusy) { <span class="spinner-inline"></span> }
+                    Refresh Profile
+                </button>
+                <form method="post" action="/auth/session/logout" class="d-inline">
+                    <AntiforgeryToken />
+                    <button class="btn btn-outline-danger" type="submit">Sign Out</button>
+                </form>
+            </div>
+        }
+
+        @if (ActiveSection == SettingsSection.Security)
+        {
+            <div class="section-header">
+                <h2>Security</h2>
+            </div>
+            <p class="page-subtitle mb-3">Change your admin password. Your current password is required.</p>
+
+            <EditForm Model="RotationModel" OnValidSubmit="RotatePasswordAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="mb-3">
+                    <label class="form-label">Current Password</label>
+                    <InputText class="form-control" type="password" @bind-Value="RotationModel.CurrentPassword" placeholder="Current password" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">New Password</label>
+                    <InputText class="form-control" type="password" @bind-Value="RotationModel.NewPassword" placeholder="New password" />
+                </div>
+
+                <button class="btn btn-primary" type="submit" disabled="@IsSecurityBusy">
+                    @if (IsSecurityBusy) { <span class="spinner-inline"></span> }
+                    Rotate Password
+                </button>
+            </EditForm>
+        }
+
+        @if (ActiveSection == SettingsSection.AiProviders)
+        {
+            <div class="section-header">
+                <h2>AI Providers</h2>
+                @if (IsEditProviderMode)
+                {
+                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="BeginCreateProvider">Create New</button>
+                }
+            </div>
+
+            <EditForm Model="ProviderFormModel" OnValidSubmit="SaveProviderAsync">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="mb-3">
+                    <label class="form-label">Provider Name</label>
+                    <InputText class="form-control" @bind-Value="ProviderFormModel.ProviderName" disabled="@IsEditProviderMode" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">API Endpoint</label>
+                    <InputText class="form-control" @bind-Value="ProviderFormModel.ApiEndpoint" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Model</label>
+                    <InputText class="form-control" @bind-Value="ProviderFormModel.Model" />
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">API Key</label>
+                    <InputText class="form-control" type="password" @bind-Value="ProviderFormModel.ApiKey" />
+                    @if (IsEditProviderMode)
+                    {
+                        <small class="text-muted">Leave empty to keep the existing encrypted key.</small>
+                    }
+                </div>
+
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-primary" type="submit" disabled="@IsProviderBusy">
+                        @if (IsProviderBusy) { <span class="spinner-inline"></span> }
+                        @(IsEditProviderMode ? "Update" : "Create")
+                    </button>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="LoadProvidersAsync" disabled="@IsProviderBusy">Refresh</button>
+                </div>
+            </EditForm>
+
+            @if (Providers.Count > 0)
+            {
+                <div class="mt-4 settings-table-shell">
+                    <table class="table table-hover align-middle app-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Endpoint</th>
+                                <th>Model</th>
+                                <th>Key</th>
+                                <th>Updated</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var provider in Providers)
+                            {
+                                <tr>
+                                    <td>@provider.ProviderName</td>
+                                    <td>@provider.ApiEndpoint</td>
+                                    <td>@provider.Model</td>
+                                    <td>@(provider.HasApiKey ? provider.ApiKeyPreview : "No key")</td>
+                                    <td>@provider.UpdatedAtUtc.ToLocalTime().ToString("g")</td>
+                                    <td>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="(() => BeginEditProvider(provider))">Edit</button>
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="(() => DeleteProviderAsync(provider.ProviderName))">Delete</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+
+        @if (ActiveSection == SettingsSection.AiOperations)
+        {
+            <div class="section-header">
+                <h2>AI Operations</h2>
+            </div>
+
+            <div class="settings-split-grid">
+                <div class="card-shell settings-mini-card">
+                    <h3>Run Organization Operation</h3>
+                    <EditForm Model="OperationModel" OnValidSubmit="RunOperationAsync">
+                        <DataAnnotationsValidator />
+
+                        <div class="mb-2">
+                            <label class="form-label">Provider Name</label>
+                            <InputText class="form-control" @bind-Value="OperationModel.ProviderName" />
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label">Operation Type</label>
+                            <InputSelect class="form-select" @bind-Value="OperationModel.OperationType">
+                                <option value="tag-suggestions">tag-suggestions</option>
+                                <option value="collection-suggestions">collection-suggestions</option>
+                                <option value="title-cleanup">title-cleanup</option>
+                                <option value="summary-cleanup">summary-cleanup</option>
+                            </InputSelect>
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label">Bookmark URL</label>
+                            <InputText class="form-control" @bind-Value="OperationModel.BookmarkUrl" />
+                        </div>
+
+                        <div class="mb-2">
+                            <label class="form-label">Bookmark Title</label>
+                            <InputText class="form-control" @bind-Value="OperationModel.BookmarkTitle" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Bookmark Summary</label>
+                            <InputTextArea class="form-control" @bind-Value="OperationModel.BookmarkSummary" rows="2" />
+                        </div>
+
+                        <button class="btn btn-primary" type="submit" disabled="@IsOperationBusy">
+                            @if (IsOperationBusy) { <span class="spinner-inline"></span> }
+                            Run
+                        </button>
+                    </EditForm>
+                </div>
+
+                <div class="card-shell settings-mini-card">
+                    <h3>Lookup Operation</h3>
+                    <EditForm Model="LookupModel" OnValidSubmit="LookupOperationAsync">
+                        <DataAnnotationsValidator />
+                        <div class="mb-3">
+                            <label class="form-label">Operation ID</label>
+                            <InputText class="form-control" @bind-Value="LookupModel.OperationId" />
+                        </div>
+
+                        <button class="btn btn-outline-secondary" type="submit" disabled="@IsLookupBusy">
+                            @if (IsLookupBusy) { <span class="spinner-inline"></span> }
+                            Lookup
+                        </button>
+                    </EditForm>
+
+                    @if (LookupResult is not null)
+                    {
+                        <hr class="section-divider" />
+                        <p class="mb-1"><strong>Status:</strong> @LookupResult.OutcomeStatus</p>
+                        <p class="mb-1"><strong>Provider:</strong> @LookupResult.ProviderName</p>
+                        <p class="mb-1"><strong>Type:</strong> @LookupResult.OperationType</p>
+                        <p class="mb-0"><strong>Rows:</strong> @LookupResult.Results.Count</p>
+                    }
+                </div>
+            </div>
+
+            @if (LastOperationResult is not null)
+            {
+                <div class="settings-table-shell mt-4">
+                    <table class="table table-hover align-middle app-table">
+                        <thead>
+                            <tr>
+                                <th>Result Type</th>
+                                <th>Value</th>
+                                <th>Confidence</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in LastOperationResult.Results)
+                            {
+                                <tr>
+                                    <td>@row.ResultType</td>
+                                    <td>@row.Value</td>
+                                    <td>@(row.Confidence?.ToString("0.##") ?? "-")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+
+        @if (!string.IsNullOrWhiteSpace(ErrorText))
+        {
+            <div class="alert alert-danger mt-3" role="alert">@ErrorText</div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(StatusText) && string.IsNullOrWhiteSpace(ErrorText))
+        {
+            <p class="status-hint mt-3">@StatusText</p>
+        }
+    </section>
+</div>
+
+@code {
+    private enum SettingsSection
+    {
+        Account,
+        Security,
+        AiProviders,
+        AiOperations
+    }
+
+    private SettingsSection ActiveSection { get; set; } = SettingsSection.Account;
+
+    private RotateAdminPasswordRequest RotationModel { get; set; } = new();
+    private ProviderFormState ProviderFormModel { get; set; } = new();
+    private OrganizeBookmarkRequest OperationModel { get; set; } = new()
+    {
+        OperationType = "tag-suggestions",
+        BookmarkUrl = "https://example.com",
+        BookmarkTitle = "Example Bookmark"
+    };
+
+    private OperationLookupFormModel LookupModel { get; set; } = new();
+
+    private readonly List<AiProviderConfigResponse> Providers = [];
+
+    private string? CurrentUsername { get; set; }
+    private bool IsAuthenticated { get; set; }
+    private string TokenExpiresText { get; set; } = "N/A";
+
+    private bool IsProfileBusy { get; set; }
+    private bool IsSecurityBusy { get; set; }
+    private bool IsProviderBusy { get; set; }
+    private bool IsOperationBusy { get; set; }
+    private bool IsLookupBusy { get; set; }
+    private bool IsEditProviderMode { get; set; }
+
+    private string? ErrorText { get; set; }
+    private string StatusText { get; set; } = "Settings workspace ready.";
+
+    private OrganizeBookmarkResponse? LastOperationResult { get; set; }
+    private OrganizeBookmarkResponse? LookupResult { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProfileAsync();
+        await LoadProvidersAsync();
+    }
+
+    private void SetSection(SettingsSection section)
+    {
+        ActiveSection = section;
+        ErrorText = null;
+    }
+
+    private bool IsActive(SettingsSection section)
+        => ActiveSection == section;
+
+    private async Task LoadProfileAsync()
+    {
+        IsProfileBusy = true;
+        ErrorText = null;
+        StatusText = "Loading profile...";
+
+        try
+        {
+            await RefreshAuthenticationProjectionAsync();
+
+            if (!IsAuthenticated)
+            {
+                CurrentUsername = null;
+                StatusText = "Session is not authenticated.";
+                return;
+            }
+
+            // Explicit /me lookup verifies token validity for account-sensitive settings content.
+            var profile = await ApiClient.GetCurrentAdminAsync(CancellationToken.None);
+            CurrentUsername = profile?.Username;
+            StatusText = profile is null ? "Session is not authenticated." : "Profile loaded successfully.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Profile load failed.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load profile data.";
+            StatusText = "Profile load failed.";
+        }
+        finally
+        {
+            IsProfileBusy = false;
+        }
+    }
+
+    private async Task RotatePasswordAsync()
+    {
+        IsSecurityBusy = true;
+        ErrorText = null;
+        StatusText = "Rotating password...";
+
+        try
+        {
+            await ApiClient.RotatePasswordAsync(RotationModel, CancellationToken.None);
+            RotationModel = new RotateAdminPasswordRequest();
+            StatusText = "Password rotated successfully.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Rotation did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Password rotation failed. Check current password and policy constraints.";
+            StatusText = "Rotation did not complete.";
+        }
+        finally
+        {
+            IsSecurityBusy = false;
+        }
+    }
+
+    private async Task LoadProvidersAsync()
+    {
+        IsProviderBusy = true;
+        ErrorText = null;
+        StatusText = "Loading providers...";
+
+        try
+        {
+            var payload = await ApiClient.GetAiProvidersAsync(CancellationToken.None);
+            Providers.Clear();
+            Providers.AddRange(payload.OrderBy(x => x.ProviderName));
+            StatusText = $"Loaded {Providers.Count} provider profile(s).";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Provider load failed.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load provider profiles.";
+            StatusText = "Provider load failed.";
+        }
+        finally
+        {
+            IsProviderBusy = false;
+        }
+    }
+
+    private void BeginCreateProvider()
+    {
+        IsEditProviderMode = false;
+        ProviderFormModel = new ProviderFormState();
+        ErrorText = null;
+        StatusText = "Create a new provider profile.";
+    }
+
+    private void BeginEditProvider(AiProviderConfigResponse provider)
+    {
+        IsEditProviderMode = true;
+        ProviderFormModel = new ProviderFormState
+        {
+            ProviderName = provider.ProviderName,
+            ApiEndpoint = provider.ApiEndpoint,
+            Model = provider.Model,
+            ApiKey = string.Empty
+        };
+
+        ErrorText = null;
+        StatusText = $"Editing provider '{provider.ProviderName}'.";
+    }
+
+    private async Task SaveProviderAsync()
+    {
+        IsProviderBusy = true;
+        ErrorText = null;
+        StatusText = IsEditProviderMode ? "Updating provider..." : "Creating provider...";
+
+        try
+        {
+            // Provider update allows preserving existing encrypted key by submitting null.
+            if (IsEditProviderMode)
+            {
+                await ApiClient.UpdateAiProviderAsync(
+                    ProviderFormModel.ProviderName,
+                    new UpdateAiProviderConfigRequest
+                    {
+                        ApiEndpoint = ProviderFormModel.ApiEndpoint,
+                        Model = ProviderFormModel.Model,
+                        ApiKey = string.IsNullOrWhiteSpace(ProviderFormModel.ApiKey) ? null : ProviderFormModel.ApiKey
+                    },
+                    CancellationToken.None);
+            }
+            else
+            {
+                await ApiClient.UpsertAiProviderAsync(
+                    new UpsertAiProviderConfigRequest
+                    {
+                        ProviderName = ProviderFormModel.ProviderName,
+                        ApiEndpoint = ProviderFormModel.ApiEndpoint,
+                        Model = ProviderFormModel.Model,
+                        ApiKey = ProviderFormModel.ApiKey
+                    },
+                    CancellationToken.None);
+            }
+
+            if (!IsEditProviderMode)
+            {
+                ProviderFormModel = new ProviderFormState();
+            }
+
+            StatusText = IsEditProviderMode ? "Provider updated successfully." : "Provider created successfully.";
+            await LoadProvidersAsync();
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Save operation did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = IsEditProviderMode ? "Provider update failed." : "Provider create failed.";
+            StatusText = "Save operation did not complete.";
+        }
+        finally
+        {
+            IsProviderBusy = false;
+        }
+    }
+
+    private async Task DeleteProviderAsync(string providerName)
+    {
+        IsProviderBusy = true;
+        ErrorText = null;
+        StatusText = $"Deleting provider '{providerName}'...";
+
+        try
+        {
+            await ApiClient.DeleteAiProviderAsync(providerName, CancellationToken.None);
+            if (IsEditProviderMode && string.Equals(ProviderFormModel.ProviderName, providerName, StringComparison.OrdinalIgnoreCase))
+            {
+                BeginCreateProvider();
+            }
+
+            StatusText = "Provider deleted successfully.";
+            await LoadProvidersAsync();
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Delete operation did not complete.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Provider delete failed.";
+            StatusText = "Delete operation did not complete.";
+        }
+        finally
+        {
+            IsProviderBusy = false;
+        }
+    }
+
+    private async Task RunOperationAsync()
+    {
+        IsOperationBusy = true;
+        ErrorText = null;
+        StatusText = "Running organization operation...";
+
+        try
+        {
+            LastOperationResult = await ApiClient.OrganizeBookmarkAsync(OperationModel, CancellationToken.None);
+            StatusText = $"Operation completed with status '{LastOperationResult.OutcomeStatus}'.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Operation did not complete.";
+            LastOperationResult = null;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Organization command failed.";
+            StatusText = "Operation did not complete.";
+            LastOperationResult = null;
+        }
+        finally
+        {
+            IsOperationBusy = false;
+        }
+    }
+
+    private async Task LookupOperationAsync()
+    {
+        IsLookupBusy = true;
+        ErrorText = null;
+        StatusText = "Loading operation data...";
+
+        try
+        {
+            if (!Guid.TryParse(LookupModel.OperationId, out var operationId))
+            {
+                ErrorText = "Operation ID must be a valid GUID value.";
+                StatusText = "Lookup input validation failed.";
+                LookupResult = null;
+                return;
+            }
+
+            LookupResult = await ApiClient.GetOperationByIdAsync(operationId, CancellationToken.None);
+            StatusText = LookupResult is null ? "Operation was not found or session is not authorized." : "Operation loaded successfully.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Lookup request failed.";
+            LookupResult = null;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load operation details.";
+            StatusText = "Lookup request failed.";
+            LookupResult = null;
+        }
+        finally
+        {
+            IsLookupBusy = false;
+        }
+    }
+
+    private async Task RefreshAuthenticationProjectionAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        IsAuthenticated = authState.User.Identity?.IsAuthenticated is true;
+
+        if (!IsAuthenticated)
+        {
+            TokenExpiresText = "N/A";
+            return;
+        }
+
+        var expiresAtClaim = authState.User.FindFirst("arcdrop:expires_at_unix")?.Value;
+        if (long.TryParse(expiresAtClaim, out var expiresAtUnix))
+        {
+            TokenExpiresText = DateTimeOffset.FromUnixTimeSeconds(expiresAtUnix).ToLocalTime().ToString("g");
+            return;
+        }
+
+        TokenExpiresText = "N/A";
+    }
+
+    private sealed class ProviderFormState
+    {
+        [Required]
+        public string ProviderName { get; set; } = string.Empty;
+
+        [Required]
+        [Url]
+        public string ApiEndpoint { get; set; } = string.Empty;
+
+        [Required]
+        public string Model { get; set; } = string.Empty;
+
+        public string ApiKey { get; set; } = string.Empty;
+    }
+
+    private sealed class OperationLookupFormModel
+    {
+        [Required]
+        public string OperationId { get; set; } = string.Empty;
+    }
+}

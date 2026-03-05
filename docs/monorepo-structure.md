@@ -16,7 +16,7 @@ This document defines the mandatory folder conventions for ArcDrop. The goal is 
       arcdrop-avalonia/
     web/
       arcdrop-docs/
-      ArcDrop.Maui.Web/
+      ArcDrop.Web/
     extensions/
   services/
     ArcDrop.Api/

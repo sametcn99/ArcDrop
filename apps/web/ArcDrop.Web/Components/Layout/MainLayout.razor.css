@@ -38,6 +38,10 @@ main {
     gap: 0.75rem;
 }
 
+.top-row-profile {
+    font-size: 0.85rem;
+}
+
     .top-row ::deep a, .top-row ::deep .btn-link {
         white-space: nowrap;
         text-decoration: none;
@@ -54,6 +58,25 @@ main {
     .top-row {
         padding-left: 1rem;
         padding-right: 1rem;
+        min-height: 3.75rem;
+        height: auto;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        padding-top: 0.55rem;
+        padding-bottom: 0.55rem;
+    }
+
+    .top-row-context {
+        display: none;
+    }
+
+    .top-row-actions {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .top-row-actions ::deep .btn {
+        flex: 1;
     }
 }
 
@@ -80,6 +103,67 @@ main {
         padding-left: 2rem !important;
         padding-right: 1.5rem !important;
     }
+}
+
+.arc-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(7, 18, 17, 0.48);
+    backdrop-filter: blur(2px);
+    z-index: 1090;
+}
+
+.arc-modal {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1091;
+    width: min(560px, calc(100vw - 1.5rem));
+    max-height: calc(100vh - 1.5rem);
+    overflow-y: auto;
+    background: var(--arc-surface-raised);
+    border: 1px solid var(--arc-border-light);
+    border-radius: var(--arc-radius-lg);
+    box-shadow: var(--arc-shadow-lg);
+    padding: 1.1rem;
+}
+
+.arc-modal__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.9rem;
+}
+
+.arc-modal__header h2 {
+    margin-bottom: 0.25rem;
+}
+
+.arc-modal__close {
+    border: none;
+    background: transparent;
+    color: var(--arc-muted);
+    border-radius: 8px;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color var(--arc-transition), color var(--arc-transition);
+}
+
+.arc-modal__close:hover {
+    color: var(--arc-ink);
+    background: var(--arc-bg);
+}
+
+.arc-modal__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.95rem;
 }
 
 #blazor-error-ui {

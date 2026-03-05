@@ -13,7 +13,7 @@ $repositoryRoot = Resolve-Path (Join-Path $scriptDirectory "..\..")
 
 $composeFile = Join-Path $repositoryRoot "ops\docker\docker-compose.yml"
 $envFile = Join-Path $repositoryRoot "ops\docker\.env"
-$webProject = Join-Path $repositoryRoot "apps\web\ArcDrop.Maui.Web\ArcDrop.Web.csproj"
+$webProject = Join-Path $repositoryRoot "apps\web\ArcDrop.Web\ArcDrop.Web.csproj"
 $healthUrl = "http://localhost:8080/health"
 
 function Assert-ToolExists {

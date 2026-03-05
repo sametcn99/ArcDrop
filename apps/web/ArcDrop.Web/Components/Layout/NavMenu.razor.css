@@ -1,0 +1,250 @@
+.navbar-toggler {
+    appearance: none;
+    cursor: pointer;
+    width: 3.5rem;
+    height: 2.5rem;
+    color: white;
+    position: absolute;
+    top: 0.5rem;
+    right: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba%28255, 255, 255, 0.55%29' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e") no-repeat center/1.75rem rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+}
+
+.navbar-toggler:checked {
+    background-color: rgba(255, 255, 255, 0.5);
+}
+
+.navbar-brand-shell {
+    min-height: 3.75rem;
+    background-color: rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+}
+
+.navbar-brand-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    color: #a8e6cf;
+    flex-shrink: 0;
+}
+
+.navbar-brand {
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: #f2f8f5;
+}
+
+.nav-shell {
+    padding-top: 0.6rem;
+    padding-bottom: 1rem;
+}
+
+.nav-section-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(200, 220, 216, 0.55);
+    margin-bottom: 0.3rem;
+    margin-top: 1rem;
+    font-weight: 600;
+}
+
+.user-shell {
+    position: relative;
+    margin-bottom: 0.9rem;
+}
+
+.user-dropdown-trigger {
+    width: 100%;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.06);
+    color: #f2f8f5;
+    border-radius: 10px;
+    padding: 0.45rem 0.55rem;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.83rem;
+    font-weight: 550;
+    transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.user-dropdown-trigger:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.34);
+}
+
+.user-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    background: rgba(168, 230, 207, 0.18);
+    color: #c8f5df;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.72rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.user-text {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-dropdown-panel {
+    margin-top: 0.4rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(8, 20, 18, 0.96);
+    border-radius: 10px;
+    padding: 0.28rem;
+    box-shadow: 0 10px 18px rgba(0, 0, 0, 0.25);
+}
+
+.user-dropdown-panel a,
+.user-dropdown-panel form button {
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: rgba(220, 232, 228, 0.9);
+    text-align: left;
+    padding: 0.45rem 0.5rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    text-decoration: none;
+}
+
+.user-dropdown-panel a:hover,
+.user-dropdown-panel form button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+.bookmark-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.bookmark-refresh {
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(220, 232, 228, 0.86);
+    font-size: 0.72rem;
+    border-radius: 999px;
+    padding: 0.15rem 0.52rem;
+}
+
+.bookmark-refresh:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.bookmark-state {
+    font-size: 0.8rem;
+    color: rgba(220, 232, 228, 0.75);
+    padding-top: 0.4rem;
+}
+
+.bookmark-state--error {
+    color: #f2bbb4;
+}
+
+.bookmark-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.24rem;
+    margin-top: 0.45rem;
+}
+
+.bookmark-link {
+    color: rgba(220, 232, 228, 0.88);
+    border: 1px solid transparent;
+    border-radius: 10px;
+    text-decoration: none;
+    padding: 0.48rem 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.12rem;
+    transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.bookmark-link--all {
+    background: rgba(255, 255, 255, 0.07);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.bookmark-link:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: white;
+}
+
+.bookmark-link.active {
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+.bookmark-link__title {
+    font-size: 0.8rem;
+    font-weight: 520;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bookmark-link__meta {
+    font-size: 0.69rem;
+    color: rgba(195, 214, 208, 0.72);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.nav-scrollable {
+    display: none;
+}
+
+.navbar-toggler:checked ~ .nav-scrollable {
+    display: block;
+}
+
+@media (min-width: 641px) {
+    .navbar-toggler {
+        display: none;
+    }
+
+    .nav-scrollable {
+        display: block;
+        height: calc(100vh - 3.75rem);
+        overflow-y: auto;
+    }
+
+    .nav-scrollable::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .nav-scrollable::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .nav-scrollable::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+    }
+}

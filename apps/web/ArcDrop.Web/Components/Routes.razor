@@ -1,5 +1,6 @@
 ﻿@inject NavigationManager Navigation
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@rendermode InteractiveServer
 
 <Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)" OnNavigateAsync="HandleNavigateAsync">
     <Found Context="routeData">

@@ -1,0 +1,139 @@
+﻿@inject IArcDropApiClient ApiClient
+
+<div class="top-row navbar-brand-shell">
+    <div class="container-fluid px-3 d-flex align-items-center gap-2">
+        <span class="navbar-brand-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+            </svg>
+        </span>
+        <a class="navbar-brand" href="/bookmarks">ArcDrop</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable">
+    <nav class="nav-shell">
+        <div class="user-shell px-3">
+            <AuthorizeView>
+                <Authorized Context="authContext">
+                    <button class="user-dropdown-trigger" type="button" @onclick="ToggleUserMenu" aria-expanded="@IsUserMenuOpen">
+                        <span class="user-avatar">@UserInitial(authContext.User.Identity?.Name)</span>
+                        <span class="user-text">@(authContext.User.Identity?.Name ?? "Admin")</span>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+
+                    @if (IsUserMenuOpen)
+                    {
+                        <div class="user-dropdown-panel" @onclick:stopPropagation>
+                            <a href="/settings#account">Settings</a>
+                            <form method="post" action="/auth/session/logout">
+                                <AntiforgeryToken />
+                                <button type="submit">Sign Out</button>
+                            </form>
+                        </div>
+                    }
+                </Authorized>
+                <NotAuthorized>
+                    <a class="btn btn-sm btn-outline-secondary" href="/auth/login">Sign In</a>
+                </NotAuthorized>
+            </AuthorizeView>
+        </div>
+
+        <div class="bookmark-header px-3">
+            <p class="nav-section-label">Bookmarks</p>
+            <button class="bookmark-refresh" type="button" @onclick="LoadBookmarksAsync" disabled="@IsBusy">Refresh</button>
+        </div>
+
+        @if (IsBusy)
+        {
+            <div class="px-3 bookmark-state"><span class="spinner-inline"></span> Loading bookmarks...</div>
+        }
+        else if (!string.IsNullOrWhiteSpace(ErrorText))
+        {
+            <div class="px-3 bookmark-state bookmark-state--error">@ErrorText</div>
+        }
+        else if (Bookmarks.Count == 0)
+        {
+            <div class="px-3 bookmark-state">No bookmarks yet.</div>
+        }
+        else
+        {
+            <div class="bookmark-list px-2">
+                <NavLink class="bookmark-link bookmark-link--all" href="/bookmarks" Match="NavLinkMatch.Prefix">All Bookmarks</NavLink>
+                @foreach (var bookmark in Bookmarks)
+                {
+                    <NavLink class="bookmark-link" href="@($"/bookmarks/{bookmark.Id}")">
+                        <span class="bookmark-link__title">@bookmark.Title</span>
+                        <span class="bookmark-link__meta">@DomainFromUrl(bookmark.Url)</span>
+                    </NavLink>
+                }
+            </div>
+        }
+    </nav>
+</div>
+
+@code {
+    private readonly List<BookmarkDto> Bookmarks = [];
+    private bool IsBusy { get; set; }
+    private bool IsUserMenuOpen { get; set; }
+    private string? ErrorText { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadBookmarksAsync();
+    }
+
+    private void ToggleUserMenu()
+    {
+        IsUserMenuOpen = !IsUserMenuOpen;
+    }
+
+    private async Task LoadBookmarksAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+
+        try
+        {
+            // Sidebar ordering is deterministic so users can quickly scan recently updated entries.
+            var payload = await ApiClient.GetBookmarksAsync(CancellationToken.None);
+            Bookmarks.Clear();
+            Bookmarks.AddRange(payload.OrderByDescending(x => x.UpdatedAtUtc).Take(60));
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load bookmarks.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string DomainFromUrl(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return uri.Host;
+        }
+
+        return "unknown-source";
+    }
+
+    private static string UserInitial(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return "A";
+        }
+
+        return name.Trim()[0].ToString().ToUpperInvariant();
+    }
+}
+

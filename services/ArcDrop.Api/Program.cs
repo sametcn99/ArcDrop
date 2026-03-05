@@ -14,19 +14,26 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
+LoadDotEnvValues();
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Explicitly load ArcDrop-prefixed environment variables so self-host deployments can keep secrets
 // outside source-controlled files. Example key mapping: ARCDROP_Admin__Username.
 builder.Configuration.AddEnvironmentVariables(prefix: "ARCDROP_");
 
+// Map flat ARCDROP_* environment keys from .env to typed options sections.
+// This keeps secrets and deployment values outside appsettings while preserving existing option binding.
+ApplyEnvBackedConfiguration(builder.Configuration);
+
 var configuredConnectionString = builder.Configuration.GetConnectionString("ArcDropPostgres");
 if (ShouldUsePostgresEnvironmentFallback(configuredConnectionString))
 {
-    var postgresDatabase = builder.Configuration["POSTGRES_DB"];
-    var postgresUser = builder.Configuration["POSTGRES_USER"];
-    var postgresPassword = builder.Configuration["POSTGRES_PASSWORD"];
-    var postgresPort = builder.Configuration["POSTGRES_PORT"];
+    // Use only ARCDROP_* PostgreSQL keys so debug and fallback read the same env names.
+    var postgresDatabase = Environment.GetEnvironmentVariable("ARCDROP_POSTGRES_DB");
+    var postgresUser = Environment.GetEnvironmentVariable("ARCDROP_POSTGRES_USER");
+    var postgresPassword = Environment.GetEnvironmentVariable("ARCDROP_POSTGRES_PASSWORD");
+    var postgresPort = Environment.GetEnvironmentVariable("ARCDROP_POSTGRES_PORT");
 
     // Local debugging may run API outside Docker while credentials still live in env files.
     // This fallback only activates when ArcDropPostgres is missing or still set to placeholder values.
@@ -883,6 +890,94 @@ static bool IsTagStopWord(string token)
         "bookmark" or
         "title" or
         "summary";
+}
+
+static void ApplyEnvBackedConfiguration(ConfigurationManager configuration)
+{
+    SetConfigIfPresent(configuration, "Admin:Username", "ARCDROP_ADMIN_USERNAME");
+    SetConfigIfPresent(configuration, "Admin:Password", "ARCDROP_ADMIN_PASSWORD");
+
+    SetConfigIfPresent(configuration, "Jwt:Issuer", "ARCDROP_JWT_ISSUER");
+    SetConfigIfPresent(configuration, "Jwt:Audience", "ARCDROP_JWT_AUDIENCE");
+    SetConfigIfPresent(configuration, "Jwt:SigningKey", "ARCDROP_JWT_SIGNING_KEY");
+    SetConfigIfPresent(configuration, "Jwt:AccessTokenLifetimeMinutes", "ARCDROP_JWT_ACCESS_TOKEN_LIFETIME_MINUTES");
+
+    SetConfigIfPresent(configuration, "AdminCredentialPolicy:MinimumPasswordLength", "ARCDROP_ADMIN_CREDENTIAL_POLICY_MINIMUM_PASSWORD_LENGTH");
+    SetConfigIfPresent(configuration, "AdminCredentialPolicy:RequireUppercase", "ARCDROP_ADMIN_CREDENTIAL_POLICY_REQUIRE_UPPERCASE");
+    SetConfigIfPresent(configuration, "AdminCredentialPolicy:RequireLowercase", "ARCDROP_ADMIN_CREDENTIAL_POLICY_REQUIRE_LOWERCASE");
+    SetConfigIfPresent(configuration, "AdminCredentialPolicy:RequireDigit", "ARCDROP_ADMIN_CREDENTIAL_POLICY_REQUIRE_DIGIT");
+    SetConfigIfPresent(configuration, "AdminCredentialPolicy:RequireSpecialCharacter", "ARCDROP_ADMIN_CREDENTIAL_POLICY_REQUIRE_SPECIAL_CHARACTER");
+    SetConfigIfPresent(configuration, "AdminCredentialPolicy:DisallowPasswordReuse", "ARCDROP_ADMIN_CREDENTIAL_POLICY_DISALLOW_PASSWORD_REUSE");
+}
+
+static void SetConfigIfPresent(ConfigurationManager configuration, string key, string envName)
+{
+    var value = Environment.GetEnvironmentVariable(envName);
+    if (!string.IsNullOrWhiteSpace(value))
+    {
+        configuration[key] = value;
+    }
+}
+
+static void LoadDotEnvValues()
+{
+    foreach (var envFilePath in EnumerateDotEnvCandidates())
+    {
+        if (!File.Exists(envFilePath))
+        {
+            continue;
+        }
+
+        foreach (var rawLine in File.ReadLines(envFilePath))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            var separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..separatorIndex].Trim();
+            var value = line[(separatorIndex + 1)..].Trim();
+
+            // Keep existing process-level values authoritative and avoid logging secret material.
+            if (!string.IsNullOrWhiteSpace(key) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable(key)))
+            {
+                Environment.SetEnvironmentVariable(key, value);
+            }
+        }
+
+        // First discovered .env source wins to keep resolution deterministic.
+        break;
+    }
+}
+
+static IEnumerable<string> EnumerateDotEnvCandidates()
+{
+    var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var currentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
+
+    while (currentDirectory is not null)
+    {
+        var localEnv = Path.Combine(currentDirectory.FullName, ".env");
+        if (visited.Add(localEnv))
+        {
+            yield return localEnv;
+        }
+
+        var repoOpsEnv = Path.Combine(currentDirectory.FullName, "ops", "docker", ".env");
+        if (visited.Add(repoOpsEnv))
+        {
+            yield return repoOpsEnv;
+        }
+
+        currentDirectory = currentDirectory.Parent;
+    }
 }
 
 // Expose the implicit Program type for WebApplicationFactory integration tests.

@@ -25,7 +25,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\..\apps\web\ArcDrop.Maui.Web\Services\AuthRoutePolicy.cs" Link="WebAuth\AuthRoutePolicy.cs" />
+    <Compile Include="..\..\apps\web\ArcDrop.Web\Services\AuthRoutePolicy.cs" Link="WebAuth\AuthRoutePolicy.cs" />
   </ItemGroup>
 
 </Project>

@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 
+LoadDotEnvValues();
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -16,6 +18,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddCascadingAuthenticationState();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -31,9 +34,10 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 
 builder.Services.AddAuthorization();
 
-var configuredApiBaseUrl = Environment.GetEnvironmentVariable("ARCDROP_Api__BaseUrl")
-    ?? builder.Configuration["ArcDropApi:BaseUrl"]
-    ?? "http://localhost:8080/";
+var configuredApiBaseUrl =
+    Environment.GetEnvironmentVariable("ARCDROP_API_BASE_URL")
+    ?? Environment.GetEnvironmentVariable("ARCDROP_Api__BaseUrl")
+    ?? BuildApiBaseUrlFromPort(Environment.GetEnvironmentVariable("ARCDROP_API_PORT"));
 
 var apiBaseUri = Uri.TryCreate(configuredApiBaseUrl, UriKind.Absolute, out var parsedApiBaseUri)
     ? parsedApiBaseUri
@@ -156,4 +160,74 @@ static string BuildLoginRedirect(string errorCode, string? returnUrl)
 {
     var safeReturnUrl = AuthRoutePolicy.ResolveSafeReturnUrl(returnUrl);
     return $"/auth/login?error={Uri.EscapeDataString(errorCode)}&returnUrl={Uri.EscapeDataString(safeReturnUrl)}";
+}
+
+static string BuildApiBaseUrlFromPort(string? apiPort)
+{
+    if (!int.TryParse(apiPort, out var parsedPort) || parsedPort <= 0)
+    {
+        return "http://localhost:8080/";
+    }
+
+    return $"http://localhost:{parsedPort}/";
+}
+
+static void LoadDotEnvValues()
+{
+    foreach (var envFilePath in EnumerateDotEnvCandidates())
+    {
+        if (!File.Exists(envFilePath))
+        {
+            continue;
+        }
+
+        foreach (var rawLine in File.ReadLines(envFilePath))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            var separatorIndex = line.IndexOf('=');
+            if (separatorIndex <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..separatorIndex].Trim();
+            var value = line[(separatorIndex + 1)..].Trim();
+
+            // Do not overwrite explicitly provided process-level values.
+            if (!string.IsNullOrWhiteSpace(key) && string.IsNullOrEmpty(Environment.GetEnvironmentVariable(key)))
+            {
+                Environment.SetEnvironmentVariable(key, value);
+            }
+        }
+
+        break;
+    }
+}
+
+static IEnumerable<string> EnumerateDotEnvCandidates()
+{
+    var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var currentDirectory = new DirectoryInfo(Directory.GetCurrentDirectory());
+
+    while (currentDirectory is not null)
+    {
+        var localEnv = Path.Combine(currentDirectory.FullName, ".env");
+        if (visited.Add(localEnv))
+        {
+            yield return localEnv;
+        }
+
+        var repoOpsEnv = Path.Combine(currentDirectory.FullName, "ops", "docker", ".env");
+        if (visited.Add(repoOpsEnv))
+        {
+            yield return repoOpsEnv;
+        }
+
+        currentDirectory = currentDirectory.Parent;
+    }
 }

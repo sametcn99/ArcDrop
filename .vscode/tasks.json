@@ -22,7 +22,7 @@
       "command": "dotnet",
       "args": [
         "build",
-        "${workspaceFolder}/apps/web/ArcDrop.Maui.Web/ArcDrop.Web.csproj",
+        "${workspaceFolder}/apps/web/ArcDrop.Web/ArcDrop.Web.csproj",
         "-c",
         "Debug"
       ],

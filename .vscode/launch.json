@@ -27,16 +27,16 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build ArcDrop Web",
-      "program": "${workspaceFolder}/apps/web/ArcDrop.Maui.Web/bin/Debug/net10.0/ArcDrop.Web.dll",
-      "cwd": "${workspaceFolder}/apps/web/ArcDrop.Maui.Web",
+      "envFile": "${workspaceFolder}/ops/docker/.env",
+      "program": "${workspaceFolder}/apps/web/ArcDrop.Web/bin/Debug/net10.0/ArcDrop.Web.dll",
+      "cwd": "${workspaceFolder}/apps/web/ArcDrop.Web",
       "args": [
         "--urls",
         "http://localhost:5290"
       ],
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "DOTNET_ENVIRONMENT": "Development",
-        "ARCDROP_Api__BaseUrl": "http://localhost:5237/"
+        "DOTNET_ENVIRONMENT": "Development"
       },
       "serverReadyAction": {
         "action": "openExternally",

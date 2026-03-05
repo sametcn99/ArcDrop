@@ -5,8 +5,8 @@
     <Project Path="apps/desktop/ArcDrop.Maui/ArcDrop.Maui.csproj" />
   </Folder>
   <Folder Name="/apps/web/" />
-  <Folder Name="/apps/web/ArcDrop.Maui.Web/">
-    <Project Path="apps/web/ArcDrop.Maui.Web/ArcDrop.Web.csproj" />
+  <Folder Name="/apps/web/ArcDrop.Web/">
+    <Project Path="apps/web/ArcDrop.Web/ArcDrop.Web.csproj" />
   </Folder>
   <Folder Name="/packages/" />
   <Folder Name="/packages/ArcDrop.Application/">

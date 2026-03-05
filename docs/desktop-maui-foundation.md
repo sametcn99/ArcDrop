@@ -28,7 +28,7 @@ This document describes the baseline MAUI shell architecture introduced for ArcD
 ## Project Path
 
 - `apps/desktop/ArcDrop.Maui`
-- `apps/web/ArcDrop.Maui.Web`
+- `apps/web/ArcDrop.Web`
 
 ## Build Command
 
@@ -39,13 +39,13 @@ dotnet build apps/desktop/ArcDrop.Maui/ArcDrop.Maui.csproj -f net10.0-windows10.
 Web host build:
 
 ```powershell
-dotnet build apps/web/ArcDrop.Maui.Web/ArcDrop.Web.csproj
+dotnet build apps/web/ArcDrop.Web/ArcDrop.Web.csproj
 ```
 
 Web host run:
 
 ```powershell
-dotnet run --project apps/web/ArcDrop.Maui.Web/ArcDrop.Web.csproj
+dotnet run --project apps/web/ArcDrop.Web/ArcDrop.Web.csproj
 ```
 
 Default web host URL in local development: `http://localhost:5290/bookmarks`.
