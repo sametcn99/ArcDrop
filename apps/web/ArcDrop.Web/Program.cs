@@ -53,6 +53,8 @@ builder.Services.AddHttpClient("ArcDrop.ApiAuth", httpClient =>
     httpClient.BaseAddress = apiBaseUri;
 });
 
+builder.Services.AddSingleton<ISharedStateService, SharedStateService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

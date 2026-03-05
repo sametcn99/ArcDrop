@@ -1,4 +1,6 @@
 ﻿@inject IArcDropApiClient ApiClient
+@inject ISharedStateService SharedStateService
+@implements IDisposable
 
 <div class="top-row navbar-brand-shell">
     <div class="container-fluid px-3 d-flex align-items-center gap-2">
@@ -15,32 +17,6 @@
 
 <div class="nav-scrollable">
     <nav class="nav-shell">
-        <div class="user-shell px-3">
-            <AuthorizeView>
-                <Authorized Context="authContext">
-                    <button class="user-dropdown-trigger" type="button" @onclick="ToggleUserMenu" aria-expanded="@IsUserMenuOpen">
-                        <span class="user-avatar">@UserInitial(authContext.User.Identity?.Name)</span>
-                        <span class="user-text">@(authContext.User.Identity?.Name ?? "Admin")</span>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-                    </button>
-
-                    @if (IsUserMenuOpen)
-                    {
-                        <div class="user-dropdown-panel" @onclick:stopPropagation>
-                            <a href="/settings#account">Settings</a>
-                            <form method="post" action="/auth/session/logout">
-                                <AntiforgeryToken />
-                                <button type="submit">Sign Out</button>
-                            </form>
-                        </div>
-                    }
-                </Authorized>
-                <NotAuthorized>
-                    <a class="btn btn-sm btn-outline-secondary" href="/auth/login">Sign In</a>
-                </NotAuthorized>
-            </AuthorizeView>
-        </div>
-
         <div class="bookmark-header px-3">
             <p class="nav-section-label">Bookmarks</p>
             <button class="bookmark-refresh" type="button" @onclick="LoadBookmarksAsync" disabled="@IsBusy">Refresh</button>
@@ -64,10 +40,11 @@
                 <NavLink class="bookmark-link bookmark-link--all" href="/bookmarks" Match="NavLinkMatch.Prefix">All Bookmarks</NavLink>
                 @foreach (var bookmark in Bookmarks)
                 {
-                    <NavLink class="bookmark-link" href="@($"/bookmarks/{bookmark.Id}")">
+                    @* Sidebar bookmark entries should open the original bookmark URL in a new browser tab. *@
+                    <a class="bookmark-link" href="@bookmark.Url" target="_blank" rel="noopener noreferrer">
                         <span class="bookmark-link__title">@bookmark.Title</span>
                         <span class="bookmark-link__meta">@DomainFromUrl(bookmark.Url)</span>
-                    </NavLink>
+                    </a>
                 }
             </div>
         }
@@ -82,7 +59,23 @@
 
     protected override async Task OnInitializedAsync()
     {
+        SharedStateService.OnBookmarksUpdated += HandleBookmarksUpdated;
         await LoadBookmarksAsync();
+    }
+
+    private async void HandleBookmarksUpdated()
+    {
+        // Use InvokeAsync to ensure UI updates on the correct thread
+        await InvokeAsync(async () =>
+        {
+            await LoadBookmarksAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        SharedStateService.OnBookmarksUpdated -= HandleBookmarksUpdated;
     }
 
     private void ToggleUserMenu()

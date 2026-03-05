@@ -2,6 +2,8 @@
 @page "/bookmarks"
 
 @inject IArcDropApiClient ApiClient
+@inject ISharedStateService SharedStateService
+@implements IDisposable
 
 <PageTitle>Bookmarks</PageTitle>
 
@@ -10,10 +12,6 @@
         <h1>Bookmarks</h1>
         <p class="page-subtitle">Your reading queue and bookmark workspace.</p>
     </div>
-    <a class="btn btn-primary" href="/bookmarks/new">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; margin-right: 4px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        Add Bookmark
-    </a>
 </div>
 
 <div class="raindrop-board">
@@ -83,10 +81,11 @@
                             <p>@item.Summary</p>
                         }
                         <div class="bookmark-card__actions">
-                            <a class="btn btn-sm btn-outline-secondary" href="/bookmarks/@item.Id">
+                            @* Edit action opens an in-page dialog to keep users in the board workflow. *@
+                            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="(() => OpenEditDialog(item))">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                Open
-                            </a>
+                                Edit
+                            </button>
                         </div>
                     </article>
                 }
@@ -94,6 +93,53 @@
         }
     </section>
 </div>
+
+@if (IsEditDialogOpen)
+{
+    <div style="position:fixed;inset:0;background:rgba(7,18,17,0.48);z-index:1090;" @onclick="CloseEditDialog"></div>
+    <section style="position:fixed;left:50%;top:50%;transform:translate(-50%, -50%);z-index:1091;width:min(560px,calc(100vw - 1.5rem));max-height:calc(100vh - 1.5rem);overflow-y:auto;background:var(--arc-surface-raised);border:1px solid var(--arc-border-light);border-radius:var(--arc-radius-lg);box-shadow:var(--arc-shadow-lg);padding:1.1rem;">
+        <header style="display:flex;align-items:flex-start;justify-content:space-between;gap:0.75rem;margin-bottom:0.9rem;">
+            <div>
+                <h2 style="margin-bottom:0.25rem;">Edit Bookmark</h2>
+                <p class="page-subtitle">Update title, URL, or summary without leaving this page.</p>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseEditDialog" disabled="@IsSavingEdit">Close</button>
+        </header>
+
+        <EditForm Model="EditModel" OnValidSubmit="SaveEditAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="mb-3">
+                <label class="form-label">Title</label>
+                <InputText class="form-control" @bind-Value="EditModel.Title" @oninput="@(e => { EditModel.Title = e.Value?.ToString(); StateHasChanged(); })" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">URL</label>
+                <InputText class="form-control" @bind-Value="EditModel.Url" @oninput="@(e => { EditModel.Url = e.Value?.ToString(); StateHasChanged(); })" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Summary</label>
+                <InputTextArea class="form-control" @bind-Value="EditModel.Summary" rows="3" @oninput="@(e => { EditModel.Summary = e.Value?.ToString(); StateHasChanged(); })" />
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(EditErrorText))
+            {
+                <div class="alert alert-danger" role="alert">@EditErrorText</div>
+            }
+
+            <div style="display:flex;justify-content:flex-end;gap:0.5rem;">
+                <button class="btn btn-outline-secondary" type="button" @onclick="CloseEditDialog" disabled="@IsSavingEdit">Cancel</button>
+                <button class="btn btn-primary" type="submit" disabled="@IsSavingEdit">
+                    @if (IsSavingEdit) { <span class="spinner-inline"></span> }
+                    Save Changes
+                </button>
+            </div>
+        </EditForm>
+    </section>
+}
 
 @code {
     private enum BookmarkViewFilter
@@ -111,6 +157,27 @@
     private bool IsLoading { get; set; }
     private string? ErrorText { get; set; }
     private string StatusText { get; set; } = "Ready.";
+
+    private bool IsEditDialogOpen { get; set; }
+    private bool IsSavingEdit { get; set; }
+    private string? EditErrorText { get; set; }
+    private Guid? EditingBookmarkId { get; set; }
+    private UpdateBookmarkRequest EditModel { get; set; } = new();
+    private UpdateBookmarkRequest OriginalEditModel { get; set; } = new();
+
+    private bool HasEditChanges
+    {
+        get
+        {
+            if (EditingBookmarkId is null) return false;
+            
+            var titleChanged = !string.Equals(EditModel.Title?.Trim(), OriginalEditModel.Title?.Trim(), StringComparison.Ordinal);
+            var urlChanged = !string.Equals(EditModel.Url?.Trim(), OriginalEditModel.Url?.Trim(), StringComparison.Ordinal);
+            var summaryChanged = !string.Equals(EditModel.Summary?.Trim() ?? "", OriginalEditModel.Summary?.Trim() ?? "", StringComparison.Ordinal);
+            
+            return titleChanged || urlChanged || summaryChanged;
+        }
+    }
 
     private string _searchText = string.Empty;
 
@@ -130,7 +197,22 @@
 
     protected override async Task OnInitializedAsync()
     {
+        SharedStateService.OnBookmarksUpdated += HandleBookmarksUpdated;
         await LoadAsync();
+    }
+
+    private async void HandleBookmarksUpdated()
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        SharedStateService.OnBookmarksUpdated -= HandleBookmarksUpdated;
     }
 
     private async Task LoadAsync()
@@ -210,5 +292,82 @@
         }
 
         return "unknown-source";
+    }
+
+    private void OpenEditDialog(BookmarkDto item)
+    {
+        // Clone selected values into a dedicated edit model so list rendering remains immutable.
+        EditingBookmarkId = item.Id;
+        EditModel = new UpdateBookmarkRequest
+        {
+            Title = item.Title,
+            Url = item.Url,
+            Summary = item.Summary
+        };
+
+        OriginalEditModel = new UpdateBookmarkRequest
+        {
+            Title = item.Title,
+            Url = item.Url,
+            Summary = item.Summary
+        };
+
+        EditErrorText = null;
+        IsEditDialogOpen = true;
+    }
+
+    private void CloseEditDialog()
+    {
+        if (IsSavingEdit)
+        {
+            return;
+        }
+
+        IsEditDialogOpen = false;
+        EditingBookmarkId = null;
+        EditErrorText = null;
+        OriginalEditModel = new UpdateBookmarkRequest();
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (EditingBookmarkId is null)
+        {
+            EditErrorText = "No bookmark selected for edit.";
+            return;
+        }
+
+        IsSavingEdit = true;
+        EditErrorText = null;
+
+        try
+        {
+            // Refreshing from API after update keeps sidebar counters and filtered ordering consistent.
+            await ApiClient.UpdateBookmarkAsync(EditingBookmarkId.Value, EditModel, CancellationToken.None);
+            
+            // UI state'lerini manuel ve anında sıfırla
+            IsEditDialogOpen = false;
+            EditingBookmarkId = null;
+            EditErrorText = null;
+            OriginalEditModel = new UpdateBookmarkRequest();
+            
+            // Notify other components (like NavMenu) that something has changed
+            SharedStateService.NotifyBookmarksUpdated();
+            
+            await LoadAsync();
+            StateHasChanged();
+        }
+        catch (ApiClientException exception)
+        {
+            EditErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            EditErrorText = "Bookmark update failed.";
+        }
+        finally
+        {
+            IsSavingEdit = false;
+        }
     }
 }

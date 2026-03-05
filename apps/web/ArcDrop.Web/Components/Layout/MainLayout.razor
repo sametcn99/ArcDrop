@@ -1,6 +1,7 @@
 ﻿@inherits LayoutComponentBase
 @inject IArcDropApiClient ApiClient
 @inject NavigationManager NavigationManager
+@inject ISharedStateService SharedStateService
 
 <div class="page">
     <div class="sidebar">
@@ -128,10 +129,14 @@
 
         try
         {
-            // Dialog create keeps user in the current shell while still routing to the created resource.
-            var created = await ApiClient.CreateBookmarkAsync(CreateModel, CancellationToken.None);
+            // Create the bookmark
+            await ApiClient.CreateBookmarkAsync(CreateModel, CancellationToken.None);
+            
+            // Close dialog immediately
             IsCreateDialogOpen = false;
-            NavigationManager.NavigateTo($"/bookmarks/{created.Id}");
+            
+            // Notify other components to refresh (NavMenu and Bookmarks page)
+            SharedStateService.NotifyBookmarksUpdated();
         }
         catch (ApiClientException exception)
         {
