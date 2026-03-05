@@ -151,6 +151,101 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Verifies that collections support parent-child hierarchy and tree endpoint rendering.
+    /// This covers nested organization requirements for sidebar tree structures.
+    /// </summary>
+    [Fact]
+    public async Task CollectionCrud_Flow_ReturnsHierarchicalTree()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+
+        var client = _httpClient!;
+        var rootCreateResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
+            "Engineering",
+            "Top level folder",
+            ParentId: null));
+
+        Assert.Equal(HttpStatusCode.Created, rootCreateResponse.StatusCode);
+        var root = await rootCreateResponse.Content.ReadFromJsonAsync<CollectionResponse>();
+        Assert.NotNull(root);
+
+        var childCreateResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
+            "DotNet",
+            "Child folder",
+            root!.Id));
+
+        Assert.Equal(HttpStatusCode.Created, childCreateResponse.StatusCode);
+
+        var treeResponse = await client.GetAsync("/api/collections/tree");
+        Assert.Equal(HttpStatusCode.OK, treeResponse.StatusCode);
+
+        var treePayload = await treeResponse.Content.ReadFromJsonAsync<List<CollectionTreeNodeResponse>>();
+        Assert.NotNull(treePayload);
+        Assert.Single(treePayload!);
+        Assert.Equal("Engineering", treePayload[0].Name);
+        Assert.Single(treePayload[0].Children);
+        Assert.Equal("DotNet", treePayload[0].Children[0].Name);
+    }
+
+    /// <summary>
+    /// Verifies that bookmark membership can be synchronized across multiple collections.
+    /// This covers the many-to-many relation where one bookmark can belong to multiple collections.
+    /// </summary>
+    [Fact]
+    public async Task BookmarkCollectionMembership_CanBeSynchronizedAcrossMultipleCollections()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+
+        var client = _httpClient!;
+
+        var firstCollectionResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
+            "Read Later",
+            null,
+            ParentId: null));
+        var secondCollectionResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
+            "Research",
+            null,
+            ParentId: null));
+
+        Assert.Equal(HttpStatusCode.Created, firstCollectionResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Created, secondCollectionResponse.StatusCode);
+
+        var firstCollection = await firstCollectionResponse.Content.ReadFromJsonAsync<CollectionResponse>();
+        var secondCollection = await secondCollectionResponse.Content.ReadFromJsonAsync<CollectionResponse>();
+        Assert.NotNull(firstCollection);
+        Assert.NotNull(secondCollection);
+
+        var createBookmarkResponse = await client.PostAsJsonAsync("/api/bookmarks", new CreateBookmarkRequest(
+            "https://learn.microsoft.com",
+            "Microsoft Learn",
+            "Documentation portal"));
+
+        Assert.Equal(HttpStatusCode.Created, createBookmarkResponse.StatusCode);
+        var bookmark = await createBookmarkResponse.Content.ReadFromJsonAsync<BookmarkResponse>();
+        Assert.NotNull(bookmark);
+
+        var syncResponse = await client.PutAsJsonAsync($"/api/bookmarks/{bookmark!.Id}/collections", new SyncBookmarkCollectionsRequest(
+            [firstCollection!.Id, secondCollection!.Id]));
+
+        Assert.Equal(HttpStatusCode.OK, syncResponse.StatusCode);
+        var syncedBookmark = await syncResponse.Content.ReadFromJsonAsync<BookmarkResponse>();
+        Assert.NotNull(syncedBookmark);
+        Assert.Equal(2, syncedBookmark!.CollectionIds.Count);
+        Assert.Contains(firstCollection.Id, syncedBookmark.CollectionIds);
+        Assert.Contains(secondCollection.Id, syncedBookmark.CollectionIds);
+    }
+
+    /// <summary>
     /// Verifies that AI provider API keys are stored encrypted and never returned as raw secret values.
     /// This protects sensitive provider credentials from accidental plaintext persistence exposure.
     /// </summary>

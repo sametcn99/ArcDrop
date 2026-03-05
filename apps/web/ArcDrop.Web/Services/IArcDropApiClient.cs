@@ -20,6 +20,18 @@ public interface IArcDropApiClient
 
     Task DeleteBookmarkAsync(Guid id, CancellationToken cancellationToken);
 
+    Task<BookmarkDto> SyncBookmarkCollectionsAsync(Guid bookmarkId, IReadOnlyList<Guid> collectionIds, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<CollectionDto>> GetCollectionsAsync(CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<CollectionTreeNodeDto>> GetCollectionsTreeAsync(CancellationToken cancellationToken);
+
+    Task<CollectionDto> CreateCollectionAsync(CreateCollectionRequest request, CancellationToken cancellationToken);
+
+    Task<CollectionDto> UpdateCollectionAsync(Guid collectionId, UpdateCollectionRequest request, CancellationToken cancellationToken);
+
+    Task DeleteCollectionAsync(Guid collectionId, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<AiProviderConfigResponse>> GetAiProvidersAsync(CancellationToken cancellationToken);
 
     Task<AiProviderConfigResponse?> GetAiProviderByNameAsync(string providerName, CancellationToken cancellationToken);

@@ -3,6 +3,7 @@ using System;
 using ArcDrop.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace ArcDrop.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(ArcDropDbContext))]
-    partial class ArcDropDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260305052603_AddCollectionHierarchyAndMembershipSync")]
+    partial class AddCollectionHierarchyAndMembershipSync
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

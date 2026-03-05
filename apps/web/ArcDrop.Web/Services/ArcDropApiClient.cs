@@ -133,6 +133,85 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     }
 
     /// <inheritdoc />
+    public async Task<BookmarkDto> SyncBookmarkCollectionsAsync(Guid bookmarkId, IReadOnlyList<Guid> collectionIds, CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var response = await _httpClient.PutAsJsonAsync(
+                $"api/bookmarks/{bookmarkId}/collections",
+                new SyncBookmarkCollectionsRequest { CollectionIds = collectionIds },
+                cancellationToken);
+
+            await EnsureSuccessOrThrowAsync(response, "Bookmark collection sync request", signOutOnUnauthorized: false, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken)
+                ?? throw new ApiClientException(ApiErrorKind.Client, "Bookmark collection sync response payload was empty.");
+        }, "Could not update bookmark collections.");
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CollectionDto>> GetCollectionsAsync(CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var response = await _httpClient.GetAsync("api/collections", cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection list request", signOutOnUnauthorized: false, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<List<CollectionDto>>(cancellationToken: cancellationToken)
+                ?? [];
+        }, "Could not load collections from ArcDrop API.");
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<CollectionTreeNodeDto>> GetCollectionsTreeAsync(CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var response = await _httpClient.GetAsync("api/collections/tree", cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection tree request", signOutOnUnauthorized: false, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<List<CollectionTreeNodeDto>>(cancellationToken: cancellationToken)
+                ?? [];
+        }, "Could not load collection tree from ArcDrop API.");
+    }
+
+    /// <inheritdoc />
+    public async Task<CollectionDto> CreateCollectionAsync(CreateCollectionRequest request, CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var response = await _httpClient.PostAsJsonAsync("api/collections", request, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection create request", signOutOnUnauthorized: false, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<CollectionDto>(cancellationToken: cancellationToken)
+                ?? throw new ApiClientException(ApiErrorKind.Client, "Collection create response payload was empty.");
+        }, "Could not create collection.");
+    }
+
+    /// <inheritdoc />
+    public async Task<CollectionDto> UpdateCollectionAsync(Guid collectionId, UpdateCollectionRequest request, CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var response = await _httpClient.PutAsJsonAsync($"api/collections/{collectionId}", request, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection update request", signOutOnUnauthorized: false, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<CollectionDto>(cancellationToken: cancellationToken)
+                ?? throw new ApiClientException(ApiErrorKind.Client, "Collection update response payload was empty.");
+        }, "Could not update collection.");
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteCollectionAsync(Guid collectionId, CancellationToken cancellationToken)
+    {
+        await ExecuteAsync(async () =>
+        {
+            using var response = await _httpClient.DeleteAsync($"api/collections/{collectionId}", cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection delete request", signOutOnUnauthorized: false, cancellationToken);
+        }, "Could not delete collection.");
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<AiProviderConfigResponse>> GetAiProvidersAsync(CancellationToken cancellationToken)
     {
         return await ExecuteAsync(async () =>

@@ -27,4 +27,5 @@ public sealed record BookmarkResponse(
     string Title,
     string? Summary,
     DateTimeOffset CreatedAtUtc,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    IReadOnlyList<Guid> CollectionIds);

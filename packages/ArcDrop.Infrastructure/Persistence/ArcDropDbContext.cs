@@ -80,10 +80,18 @@ public sealed class ArcDropDbContext(DbContextOptions<ArcDropDbContext> options)
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Name).HasMaxLength(256).IsRequired();
             entity.Property(x => x.Description).HasMaxLength(2000);
+            entity.Property(x => x.ParentId);
             entity.Property(x => x.CreatedAtUtc).IsRequired();
             entity.Property(x => x.UpdatedAtUtc).IsRequired();
 
+            // Self-referencing hierarchy allows tree-based sidebar rendering and nested organization.
+            entity.HasOne(x => x.Parent)
+                .WithMany(x => x.Children)
+                .HasForeignKey(x => x.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(x => x.Name).IsUnique().HasDatabaseName("ux_collections_name");
+            entity.HasIndex(x => x.ParentId).HasDatabaseName("ix_collections_parent_id");
         });
 
         modelBuilder.Entity<Tag>(entity =>

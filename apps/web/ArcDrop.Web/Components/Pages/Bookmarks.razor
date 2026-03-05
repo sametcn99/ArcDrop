@@ -3,6 +3,7 @@
 
 @inject IArcDropApiClient ApiClient
 @inject ISharedStateService SharedStateService
+@inject NavigationManager NavigationManager
 @implements IDisposable
 
 <PageTitle>Bookmarks</PageTitle>
@@ -17,22 +18,21 @@
 <div class="raindrop-board">
     <aside class="raindrop-sidebar card-shell">
         <h2>Collections</h2>
-        <button class="collection-item @FilterClass(BookmarkViewFilter.All)" @onclick="(() => SetFilter(BookmarkViewFilter.All))">
+        <button class="collection-item @(SelectedCollectionId is null ? "is-active" : string.Empty)" @onclick="(() => SelectCollection(null))">
             <span>All bookmarks</span>
             <strong>@_allBookmarks.Count</strong>
         </button>
-        <button class="collection-item @FilterClass(BookmarkViewFilter.Recent)" @onclick="(() => SetFilter(BookmarkViewFilter.Recent))">
-            <span>Updated this week</span>
-            <strong>@RecentCount</strong>
-        </button>
-        <button class="collection-item @FilterClass(BookmarkViewFilter.WithSummary)" @onclick="(() => SetFilter(BookmarkViewFilter.WithSummary))">
-            <span>With summary</span>
-            <strong>@WithSummaryCount</strong>
-        </button>
-        <button class="collection-item @FilterClass(BookmarkViewFilter.WithoutSummary)" @onclick="(() => SetFilter(BookmarkViewFilter.WithoutSummary))">
-            <span>Without summary</span>
-            <strong>@WithoutSummaryCount</strong>
-        </button>
+
+        @foreach (var collection in AvailableCollections.OrderBy(collection => CollectionDepth(collection.Id)).ThenBy(collection => collection.Name))
+        {
+            var collectionBookmarkCount = _allBookmarks.Count(bookmark => bookmark.CollectionIds.Contains(collection.Id));
+            <button class="collection-item @(SelectedCollectionId == collection.Id ? "is-active" : string.Empty)"
+                    style="margin-left:@(CollectionDepth(collection.Id) * 0.7)rem;"
+                    @onclick="(() => SelectCollection(collection.Id))">
+                <span>@collection.Name</span>
+                <strong>@collectionBookmarkCount</strong>
+            </button>
+        }
     </aside>
 
     <section>
@@ -112,17 +112,39 @@
 
             <div class="mb-3">
                 <label class="form-label">Title</label>
-                <InputText class="form-control" @bind-Value="EditModel.Title" @oninput="@(e => { EditModel.Title = e.Value?.ToString(); StateHasChanged(); })" />
+                <InputText class="form-control" @bind-Value="EditModel.Title" @oninput="@(e => { EditModel.Title = e.Value?.ToString() ?? string.Empty; StateHasChanged(); })" />
             </div>
 
             <div class="mb-3">
                 <label class="form-label">URL</label>
-                <InputText class="form-control" @bind-Value="EditModel.Url" @oninput="@(e => { EditModel.Url = e.Value?.ToString(); StateHasChanged(); })" />
+                <InputText class="form-control" @bind-Value="EditModel.Url" @oninput="@(e => { EditModel.Url = e.Value?.ToString() ?? string.Empty; StateHasChanged(); })" />
             </div>
 
             <div class="mb-3">
                 <label class="form-label">Summary</label>
                 <InputTextArea class="form-control" @bind-Value="EditModel.Summary" rows="3" @oninput="@(e => { EditModel.Summary = e.Value?.ToString(); StateHasChanged(); })" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Collections</label>
+                @if (AvailableCollections.Count == 0)
+                {
+                    <div class="form-text">No collections available yet.</div>
+                }
+                else
+                {
+                    <div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--arc-border-light); border-radius: 8px; padding: 0.5rem;">
+                        @foreach (var collection in AvailableCollections)
+                        {
+                            <label class="d-flex align-items-center gap-2" style="padding: 0.15rem 0; margin-left:@(CollectionDepth(collection.Id) * 0.7)rem;">
+                                <input type="checkbox"
+                                       checked="@SelectedEditCollectionIds.Contains(collection.Id)"
+                                       @onchange="(args => ToggleEditCollectionSelection(collection.Id, args.Value))" />
+                                <span>@collection.Name</span>
+                            </label>
+                        }
+                    </div>
+                }
             </div>
 
             @if (!string.IsNullOrWhiteSpace(EditErrorText))
@@ -142,17 +164,12 @@
 }
 
 @code {
-    private enum BookmarkViewFilter
-    {
-        All,
-        Recent,
-        WithSummary,
-        WithoutSummary
-    }
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "collectionId")]
+    public Guid? SelectedCollectionId { get; set; }
 
     private readonly List<BookmarkDto> _allBookmarks = [];
     private List<BookmarkDto> FilteredBookmarks { get; set; } = [];
-    private BookmarkViewFilter ActiveFilter { get; set; } = BookmarkViewFilter.All;
 
     private bool IsLoading { get; set; }
     private string? ErrorText { get; set; }
@@ -164,6 +181,8 @@
     private Guid? EditingBookmarkId { get; set; }
     private UpdateBookmarkRequest EditModel { get; set; } = new();
     private UpdateBookmarkRequest OriginalEditModel { get; set; } = new();
+    private IReadOnlyList<CollectionDto> AvailableCollections { get; set; } = [];
+    private HashSet<Guid> SelectedEditCollectionIds { get; set; } = [];
 
     private bool HasEditChanges
     {
@@ -181,10 +200,6 @@
 
     private string _searchText = string.Empty;
 
-    private int RecentCount => _allBookmarks.Count(x => x.UpdatedAtUtc >= DateTimeOffset.UtcNow.AddDays(-7));
-    private int WithSummaryCount => _allBookmarks.Count(x => !string.IsNullOrWhiteSpace(x.Summary));
-    private int WithoutSummaryCount => _allBookmarks.Count - WithSummaryCount;
-
     private string SearchText
     {
         get => _searchText;
@@ -198,7 +213,14 @@
     protected override async Task OnInitializedAsync()
     {
         SharedStateService.OnBookmarksUpdated += HandleBookmarksUpdated;
+        SharedStateService.OnCollectionsUpdated += HandleCollectionsUpdated;
+        await LoadCollectionsAsync();
         await LoadAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        ApplyFilter();
     }
 
     private async void HandleBookmarksUpdated()
@@ -210,9 +232,31 @@
         });
     }
 
+    private async void HandleCollectionsUpdated()
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadCollectionsAsync();
+            StateHasChanged();
+        });
+    }
+
     public void Dispose()
     {
         SharedStateService.OnBookmarksUpdated -= HandleBookmarksUpdated;
+        SharedStateService.OnCollectionsUpdated -= HandleCollectionsUpdated;
+    }
+
+    private async Task LoadCollectionsAsync()
+    {
+        try
+        {
+            AvailableCollections = await ApiClient.GetCollectionsAsync(CancellationToken.None);
+        }
+        catch
+        {
+            AvailableCollections = [];
+        }
     }
 
     private async Task LoadAsync()
@@ -246,25 +290,21 @@
         }
     }
 
-    private void SetFilter(BookmarkViewFilter filter)
+    private void SelectCollection(Guid? collectionId)
     {
-        ActiveFilter = filter;
-        ApplyFilter();
-    }
+        var target = collectionId.HasValue
+            ? $"/bookmarks?collectionId={collectionId.Value}"
+            : "/bookmarks";
 
-    private string FilterClass(BookmarkViewFilter filter)
-        => ActiveFilter == filter ? "is-active" : string.Empty;
+        NavigationManager.NavigateTo(target);
+    }
 
     private void ApplyFilter()
     {
-        // Apply collection filter first, then search text so the sidebar behavior stays deterministic.
-        IEnumerable<BookmarkDto> candidates = ActiveFilter switch
-        {
-            BookmarkViewFilter.Recent => _allBookmarks.Where(x => x.UpdatedAtUtc >= DateTimeOffset.UtcNow.AddDays(-7)),
-            BookmarkViewFilter.WithSummary => _allBookmarks.Where(x => !string.IsNullOrWhiteSpace(x.Summary)),
-            BookmarkViewFilter.WithoutSummary => _allBookmarks.Where(x => string.IsNullOrWhiteSpace(x.Summary)),
-            _ => _allBookmarks
-        };
+        // Collection filter is query-driven so sidebar and page URLs remain shareable.
+        IEnumerable<BookmarkDto> candidates = SelectedCollectionId.HasValue
+            ? _allBookmarks.Where(x => x.CollectionIds.Contains(SelectedCollectionId.Value))
+            : _allBookmarks;
 
         if (string.IsNullOrWhiteSpace(SearchText))
         {
@@ -312,6 +352,8 @@
             Summary = item.Summary
         };
 
+        SelectedEditCollectionIds = item.CollectionIds.ToHashSet();
+
         EditErrorText = null;
         IsEditDialogOpen = true;
     }
@@ -327,6 +369,7 @@
         EditingBookmarkId = null;
         EditErrorText = null;
         OriginalEditModel = new UpdateBookmarkRequest();
+        SelectedEditCollectionIds = [];
     }
 
     private async Task SaveEditAsync()
@@ -344,14 +387,16 @@
         {
             // Refreshing from API after update keeps sidebar counters and filtered ordering consistent.
             await ApiClient.UpdateBookmarkAsync(EditingBookmarkId.Value, EditModel, CancellationToken.None);
-            
-            // UI state'lerini manuel ve anında sıfırla
+            await ApiClient.SyncBookmarkCollectionsAsync(EditingBookmarkId.Value, SelectedEditCollectionIds.ToList(), CancellationToken.None);
+
+            // Reset dialog state immediately after a successful save operation.
             IsEditDialogOpen = false;
             EditingBookmarkId = null;
             EditErrorText = null;
             OriginalEditModel = new UpdateBookmarkRequest();
-            
-            // Notify other components (like NavMenu) that something has changed
+            SelectedEditCollectionIds = [];
+
+            // Notify sidebar and board components so tree/list views stay consistent.
             SharedStateService.NotifyBookmarksUpdated();
             
             await LoadAsync();
@@ -369,5 +414,32 @@
         {
             IsSavingEdit = false;
         }
+    }
+
+    private void ToggleEditCollectionSelection(Guid collectionId, object? rawValue)
+    {
+        var isChecked = rawValue as bool? == true;
+        if (isChecked)
+        {
+            SelectedEditCollectionIds.Add(collectionId);
+            return;
+        }
+
+        SelectedEditCollectionIds.Remove(collectionId);
+    }
+
+    private int CollectionDepth(Guid collectionId)
+    {
+        var lookup = AvailableCollections.ToDictionary(x => x.Id, x => x.ParentId);
+        var depth = 0;
+        var current = lookup.TryGetValue(collectionId, out var parentId) ? parentId : null;
+
+        while (current is not null && lookup.TryGetValue(current.Value, out var nextParentId))
+        {
+            depth++;
+            current = nextParentId;
+        }
+
+        return depth;
     }
 }

@@ -1,0 +1,84 @@
+@inject NavigationManager NavigationManager
+
+@if (Node is null)
+{
+    return;
+}
+
+<div class="collection-tree-node" style="margin-left:@(Depth * 0.7)rem;">
+    <div class="collection-tree-node__header @(IsActive ? "is-active" : string.Empty)">
+        @if (HasNestedContent)
+        {
+            <button class="sidebar-collapse-toggle"
+                    type="button"
+                    aria-label="Toggle collection content"
+                    aria-expanded="@IsExpanded"
+                    @onclick="ToggleExpanded">
+                <span class="sidebar-collapse-icon @(IsExpanded ? "is-expanded" : string.Empty)"></span>
+            </button>
+        }
+        else
+        {
+            <div class="sidebar-collapse-toggle sidebar-collapse-toggle--placeholder"></div>
+        }
+
+        <a class="collection-tree-node__header-link"
+           href="@($"/bookmarks?collectionId={Node.Id}")">
+            <span class="collection-tree-node__name">@Node.Name</span>
+            <span class="collection-tree-node__count">@Node.Bookmarks.Count</span>
+        </a>
+    </div>
+
+    @if (IsExpanded && Node.Bookmarks.Count > 0)
+    {
+        <div class="collection-tree-node__bookmarks">
+            @foreach (var bookmark in Node.Bookmarks)
+            {
+                <a class="bookmark-link" href="@bookmark.Url" target="_blank" rel="noopener noreferrer">
+                    <span class="bookmark-link__title">@bookmark.Title</span>
+                    <span class="bookmark-link__meta">@DomainFromUrl(bookmark.Url)</span>
+                </a>
+            }
+        </div>
+    }
+
+    @if (IsExpanded && Node.Children.Count > 0)
+    {
+        <div class="collection-tree-node__children">
+            @foreach (var child in Node.Children)
+            {
+                <CollectionTreeNode Node="child" Depth="@(Depth + 1)" ActiveCollectionId="ActiveCollectionId" />
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public CollectionTreeNodeDto Node { get; set; } = null!;
+
+    [Parameter]
+    public int Depth { get; set; }
+
+    [Parameter]
+    public Guid? ActiveCollectionId { get; set; }
+
+    private bool IsActive => ActiveCollectionId.HasValue && ActiveCollectionId.Value == Node.Id;
+    private bool IsExpanded { get; set; } = true;
+    private bool HasNestedContent => Node.Bookmarks.Count > 0 || Node.Children.Count > 0;
+
+    private void ToggleExpanded()
+    {
+        IsExpanded = !IsExpanded;
+    }
+
+    private static string DomainFromUrl(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return uri.Host;
+        }
+
+        return "unknown-source";
+    }
+}

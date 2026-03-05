@@ -1,6 +1,7 @@
 # ArcDrop API Bootstrap Guide
 
 Implements `TASK-002`, `TASK-003`, `TASK-004`, `TASK-009`, and first `TASK-010` backend slice.
+The latest update extends this bootstrap with hierarchical collections and bookmark-to-collection synchronization.
 
 ## Covered Requirements
 
@@ -9,6 +10,7 @@ Implements `TASK-002`, `TASK-003`, `TASK-004`, `TASK-009`, and first `TASK-010` 
 - `NFR-005`: Configuration supports secret injection through environment variables.
 - `FR-007`: AI provider configuration endpoints with encrypted secret persistence.
 - `FR-008`: AI organization command endpoint with ArcDrop system prompt template application.
+- `FR-004`: Collection hierarchy and bookmark-to-collection membership management.
 - `NFR-006`: AI operation logs persisted with timestamp, operation type, and success/failure outcome.
 
 ## Configuration
@@ -48,7 +50,13 @@ Important settings:
 - `GET /api/bookmarks/{id}`
 - `POST /api/bookmarks`
 - `PUT /api/bookmarks/{id}`
+- `PUT /api/bookmarks/{id}/collections`: synchronize one bookmark across multiple collection IDs.
 - `DELETE /api/bookmarks/{id}`
+- `GET /api/collections`: list all collections as flat rows.
+- `GET /api/collections/tree`: list collections as a nested tree with bookmarked items under each node.
+- `POST /api/collections`: create a root or child collection.
+- `PUT /api/collections/{id}`: update collection metadata and parent assignment with cycle protection.
+- `DELETE /api/collections/{id}`: delete a collection when no child collections remain.
 
 ## Migration Commands
 

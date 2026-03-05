@@ -622,6 +622,209 @@ aiGroup.MapGet("/operations/{operationId:guid}", async (
 // These handlers intentionally implement explicit validation and timestamp control,
 // making behavior deterministic for integration testing and future client workflows.
 var bookmarksGroup = app.MapGroup("/api/bookmarks");
+var collectionsGroup = app.MapGroup("/api/collections");
+
+collectionsGroup.MapGet("/", async (ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var collections = await dbContext.Collections
+        .AsNoTracking()
+        .OrderBy(x => x.Name)
+        .Select(x => new CollectionResponse(
+            x.Id,
+            x.Name,
+            x.Description,
+            x.ParentId,
+            x.CreatedAtUtc,
+            x.UpdatedAtUtc))
+        .ToListAsync(cancellationToken);
+
+    return Results.Ok(collections);
+});
+
+collectionsGroup.MapGet("/tree", async (ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var collections = await dbContext.Collections
+        .AsNoTracking()
+        .Include(x => x.Bookmarks)
+        .ThenInclude(link => link.Bookmark)
+        .OrderBy(x => x.Name)
+        .ToListAsync(cancellationToken);
+
+    var tree = BuildCollectionTreeResponse(collections);
+    return Results.Ok(tree);
+});
+
+collectionsGroup.MapPost("/", async (CreateCollectionRequest request, ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Name))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            [nameof(request.Name)] = ["Collection name is required."]
+        });
+    }
+
+    var trimmedName = request.Name.Trim();
+    var duplicateExists = await dbContext.Collections
+        .AsNoTracking()
+        .AnyAsync(x => x.Name == trimmedName, cancellationToken);
+
+    if (duplicateExists)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            [nameof(request.Name)] = ["Collection name must be unique."]
+        });
+    }
+
+    if (request.ParentId.HasValue)
+    {
+        var parentExists = await dbContext.Collections
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == request.ParentId.Value, cancellationToken);
+
+        if (!parentExists)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                [nameof(request.ParentId)] = ["Parent collection was not found."]
+            });
+        }
+    }
+
+    var utcNow = DateTimeOffset.UtcNow;
+    var collection = new Collection
+    {
+        Id = Guid.NewGuid(),
+        Name = trimmedName,
+        Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
+        ParentId = request.ParentId,
+        CreatedAtUtc = utcNow,
+        UpdatedAtUtc = utcNow
+    };
+
+    dbContext.Collections.Add(collection);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Created($"/api/collections/{collection.Id}", new CollectionResponse(
+        collection.Id,
+        collection.Name,
+        collection.Description,
+        collection.ParentId,
+        collection.CreatedAtUtc,
+        collection.UpdatedAtUtc));
+});
+
+collectionsGroup.MapPut("/{id:guid}", async (Guid id, UpdateCollectionRequest request, ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Name))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            [nameof(request.Name)] = ["Collection name is required."]
+        });
+    }
+
+    var collection = await dbContext.Collections
+        .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    if (collection is null)
+    {
+        return Results.NotFound();
+    }
+
+    if (request.ParentId == id)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            [nameof(request.ParentId)] = ["Collection cannot be its own parent."]
+        });
+    }
+
+    if (request.ParentId.HasValue)
+    {
+        var parentCandidate = await dbContext.Collections
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == request.ParentId.Value, cancellationToken);
+
+        if (parentCandidate is null)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                [nameof(request.ParentId)] = ["Parent collection was not found."]
+            });
+        }
+
+        var hierarchyItems = await dbContext.Collections
+            .AsNoTracking()
+            .Select(x => new CollectionHierarchyItem(x.Id, x.ParentId))
+            .ToListAsync(cancellationToken);
+
+        if (WouldCreateCollectionCycle(id, request.ParentId.Value, hierarchyItems))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                [nameof(request.ParentId)] = ["Parent collection would create a cycle."]
+            });
+        }
+    }
+
+    var normalizedName = request.Name.Trim();
+    var duplicateExists = await dbContext.Collections
+        .AsNoTracking()
+        .AnyAsync(x => x.Id != id && x.Name == normalizedName, cancellationToken);
+
+    if (duplicateExists)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            [nameof(request.Name)] = ["Collection name must be unique."]
+        });
+    }
+
+    collection.Name = normalizedName;
+    collection.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+    collection.ParentId = request.ParentId;
+    collection.UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(new CollectionResponse(
+        collection.Id,
+        collection.Name,
+        collection.Description,
+        collection.ParentId,
+        collection.CreatedAtUtc,
+        collection.UpdatedAtUtc));
+});
+
+collectionsGroup.MapDelete("/{id:guid}", async (Guid id, ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var collection = await dbContext.Collections
+        .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    if (collection is null)
+    {
+        return Results.NotFound();
+    }
+
+    var hasChildren = await dbContext.Collections
+        .AsNoTracking()
+        .AnyAsync(x => x.ParentId == id, cancellationToken);
+
+    if (hasChildren)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["collection"] = ["Delete child collections first."]
+        });
+    }
+
+    dbContext.Collections.Remove(collection);
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.NoContent();
+});
 
 bookmarksGroup.MapGet("/", async (ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
 {
@@ -635,7 +838,10 @@ bookmarksGroup.MapGet("/", async (ArcDropDbContext dbContext, CancellationToken 
             x.Title,
             x.Summary,
             x.CreatedAtUtc,
-            x.UpdatedAtUtc))
+            x.UpdatedAtUtc,
+            x.Collections
+                .Select(link => link.CollectionId)
+                .ToList()))
         .ToListAsync(cancellationToken);
 
     return Results.Ok(bookmarks);
@@ -645,6 +851,7 @@ bookmarksGroup.MapGet("/{id:guid}", async (Guid id, ArcDropDbContext dbContext, 
 {
     var bookmark = await dbContext.Bookmarks
         .AsNoTracking()
+        .Include(x => x.Collections)
         .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
 
     if (bookmark is null)
@@ -658,7 +865,10 @@ bookmarksGroup.MapGet("/{id:guid}", async (Guid id, ArcDropDbContext dbContext, 
         bookmark.Title,
         bookmark.Summary,
         bookmark.CreatedAtUtc,
-        bookmark.UpdatedAtUtc));
+        bookmark.UpdatedAtUtc,
+        bookmark.Collections
+            .Select(link => link.CollectionId)
+            .ToList()));
 });
 
 bookmarksGroup.MapPost("/", async (CreateBookmarkRequest request, ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
@@ -699,7 +909,8 @@ bookmarksGroup.MapPost("/", async (CreateBookmarkRequest request, ArcDropDbConte
         bookmark.Title,
         bookmark.Summary,
         bookmark.CreatedAtUtc,
-        bookmark.UpdatedAtUtc);
+        bookmark.UpdatedAtUtc,
+        []);
 
     return Results.Created($"/api/bookmarks/{bookmark.Id}", response);
 });
@@ -722,7 +933,9 @@ bookmarksGroup.MapPut("/{id:guid}", async (Guid id, UpdateBookmarkRequest reques
         });
     }
 
-    var bookmark = await dbContext.Bookmarks.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+    var bookmark = await dbContext.Bookmarks
+        .Include(x => x.Collections)
+        .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
     if (bookmark is null)
     {
         return Results.NotFound();
@@ -741,7 +954,84 @@ bookmarksGroup.MapPut("/{id:guid}", async (Guid id, UpdateBookmarkRequest reques
         bookmark.Title,
         bookmark.Summary,
         bookmark.CreatedAtUtc,
-        bookmark.UpdatedAtUtc));
+        bookmark.UpdatedAtUtc,
+        bookmark.Collections
+            .Select(link => link.CollectionId)
+            .ToList()));
+});
+
+bookmarksGroup.MapPut("/{id:guid}/collections", async (
+    Guid id,
+    SyncBookmarkCollectionsRequest request,
+    ArcDropDbContext dbContext,
+    CancellationToken cancellationToken) =>
+{
+    var bookmark = await dbContext.Bookmarks
+        .Include(x => x.Collections)
+        .SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    if (bookmark is null)
+    {
+        return Results.NotFound();
+    }
+
+    var targetCollectionIds = (request.CollectionIds ?? [])
+        .Distinct()
+        .ToList();
+
+    if (targetCollectionIds.Count > 0)
+    {
+        var existingCollectionIds = await dbContext.Collections
+            .AsNoTracking()
+            .Where(x => targetCollectionIds.Contains(x.Id))
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        if (existingCollectionIds.Count != targetCollectionIds.Count)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                [nameof(request.CollectionIds)] = ["One or more collection IDs were not found."]
+            });
+        }
+    }
+
+    var linksToRemove = bookmark.Collections
+        .Where(link => !targetCollectionIds.Contains(link.CollectionId))
+        .ToList();
+
+    if (linksToRemove.Count > 0)
+    {
+        dbContext.BookmarkCollectionLinks.RemoveRange(linksToRemove);
+    }
+
+    var existingLinks = bookmark.Collections
+        .Select(link => link.CollectionId)
+        .ToHashSet();
+
+    foreach (var collectionId in targetCollectionIds.Where(collectionId => !existingLinks.Contains(collectionId)))
+    {
+        bookmark.Collections.Add(new BookmarkCollectionLink
+        {
+            BookmarkId = bookmark.Id,
+            CollectionId = collectionId
+        });
+    }
+
+    bookmark.UpdatedAtUtc = DateTimeOffset.UtcNow;
+    await dbContext.SaveChangesAsync(cancellationToken);
+
+    return Results.Ok(new BookmarkResponse(
+        bookmark.Id,
+        bookmark.Url,
+        bookmark.Title,
+        bookmark.Summary,
+        bookmark.CreatedAtUtc,
+        bookmark.UpdatedAtUtc,
+        bookmark.Collections
+            .Select(link => link.CollectionId)
+            .OrderBy(collectionId => collectionId)
+            .ToList()));
 });
 
 bookmarksGroup.MapDelete("/{id:guid}", async (Guid id, ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
@@ -892,6 +1182,67 @@ static bool IsTagStopWord(string token)
         "summary";
 }
 
+static IReadOnlyList<CollectionTreeNodeResponse> BuildCollectionTreeResponse(IReadOnlyList<Collection> collections)
+{
+    var childrenByParentId = collections
+        .ToLookup(x => x.ParentId);
+
+    CollectionTreeNodeResponse BuildNode(Collection collection)
+    {
+        var bookmarks = collection.Bookmarks
+            .Select(link => link.Bookmark)
+            .Where(bookmark => bookmark is not null)
+            .OrderByDescending(bookmark => bookmark.UpdatedAtUtc)
+            .Select(bookmark => new CollectionBookmarkItemResponse(
+                bookmark.Id,
+                bookmark.Title,
+                bookmark.Url,
+                bookmark.UpdatedAtUtc))
+            .ToList();
+
+        var children = childrenByParentId[collection.Id]
+            .OrderBy(item => item.Name)
+            .Select(BuildNode)
+            .ToList();
+
+        return new CollectionTreeNodeResponse(
+            collection.Id,
+            collection.Name,
+            collection.Description,
+            collection.ParentId,
+            collection.CreatedAtUtc,
+            collection.UpdatedAtUtc,
+            bookmarks,
+            children);
+    }
+
+    return childrenByParentId[null]
+        .OrderBy(root => root.Name)
+        .Select(BuildNode)
+        .ToList();
+}
+
+static bool WouldCreateCollectionCycle(Guid movingCollectionId, Guid candidateParentId, IReadOnlyList<CollectionHierarchyItem> hierarchyItems)
+{
+    var parentLookup = hierarchyItems.ToDictionary(item => item.Id, item => item.ParentId);
+    var currentParentId = candidateParentId;
+
+    while (true)
+    {
+        if (currentParentId == movingCollectionId)
+        {
+            return true;
+        }
+
+        if (!parentLookup.TryGetValue(currentParentId, out var nextParentId) || nextParentId is null)
+        {
+            return false;
+        }
+
+        currentParentId = nextParentId.Value;
+    }
+}
+
 static void ApplyEnvBackedConfiguration(ConfigurationManager configuration)
 {
     SetConfigIfPresent(configuration, "Admin:Username", "ARCDROP_ADMIN_USERNAME");
@@ -979,6 +1330,8 @@ static IEnumerable<string> EnumerateDotEnvCandidates()
         currentDirectory = currentDirectory.Parent;
     }
 }
+
+internal readonly record struct CollectionHierarchyItem(Guid Id, Guid? ParentId);
 
 // Expose the implicit Program type for WebApplicationFactory integration tests.
 public partial class Program;

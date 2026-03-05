@@ -1,5 +1,6 @@
 ﻿@inject IArcDropApiClient ApiClient
 @inject ISharedStateService SharedStateService
+@inject NavigationManager NavigationManager
 @implements IDisposable
 
 <div class="top-row navbar-brand-shell">
@@ -37,14 +38,50 @@
         else
         {
             <div class="bookmark-list px-2">
-                <NavLink class="bookmark-link bookmark-link--all" href="/bookmarks" Match="NavLinkMatch.Prefix">All Bookmarks</NavLink>
-                @foreach (var bookmark in Bookmarks)
+                <div class="bookmark-root-row">
+                    <NavLink class="bookmark-link bookmark-link--all" href="/bookmarks" Match="NavLinkMatch.Prefix">All Bookmarks</NavLink>
+                    <button class="sidebar-collapse-toggle"
+                            type="button"
+                            aria-label="Toggle all bookmarks"
+                            aria-expanded="@IsBookmarksExpanded"
+                            @onclick="ToggleBookmarksExpanded">
+                        <span class="sidebar-collapse-icon @(IsBookmarksExpanded ? "is-expanded" : string.Empty)"></span>
+                    </button>
+                </div>
+
+                @if (IsBookmarksExpanded)
                 {
-                    @* Sidebar bookmark entries should open the original bookmark URL in a new browser tab. *@
-                    <a class="bookmark-link" href="@bookmark.Url" target="_blank" rel="noopener noreferrer">
-                        <span class="bookmark-link__title">@bookmark.Title</span>
-                        <span class="bookmark-link__meta">@DomainFromUrl(bookmark.Url)</span>
-                    </a>
+                    @foreach (var bookmark in Bookmarks)
+                    {
+                        @* Sidebar bookmark entries should open the original bookmark URL in a new browser tab. *@
+                        <a class="bookmark-link" href="@bookmark.Url" target="_blank" rel="noopener noreferrer">
+                            <span class="bookmark-link__title">@bookmark.Title</span>
+                            <span class="bookmark-link__meta">@DomainFromUrl(bookmark.Url)</span>
+                        </a>
+                    }
+                }
+            </div>
+        }
+
+        <div class="bookmark-header collection-section__header px-3">
+            <p class="nav-section-label">Collections</p>
+            <button class="bookmark-refresh" type="button" @onclick="LoadCollectionTreeAsync" disabled="@IsBusy">Refresh</button>
+        </div>
+
+        @if (IsBusy)
+        {
+            <div class="px-3 bookmark-state"><span class="spinner-inline"></span> Loading collections...</div>
+        }
+        else if (CollectionTree.Count == 0)
+        {
+            <div class="px-3 bookmark-state">No collections yet.</div>
+        }
+        else
+        {
+            <div class="bookmark-list collection-section__list px-2">
+                @foreach (var node in CollectionTree)
+                {
+                    <CollectionTreeNode Node="node" Depth="0" ActiveCollectionId="ActiveCollectionId" />
                 }
             </div>
         }
@@ -53,14 +90,27 @@
 
 @code {
     private readonly List<BookmarkDto> Bookmarks = [];
+    private readonly List<CollectionTreeNodeDto> CollectionTree = [];
     private bool IsBusy { get; set; }
     private bool IsUserMenuOpen { get; set; }
+    private bool IsBookmarksExpanded { get; set; } = true;
     private string? ErrorText { get; set; }
+    private Guid? ActiveCollectionId { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
         SharedStateService.OnBookmarksUpdated += HandleBookmarksUpdated;
+        SharedStateService.OnCollectionsUpdated += HandleCollectionsUpdated;
+        NavigationManager.LocationChanged += HandleLocationChanged;
+        ActiveCollectionId = ParseActiveCollectionId();
         await LoadBookmarksAsync();
+        await LoadCollectionTreeAsync();
+    }
+
+    private void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
+    {
+        ActiveCollectionId = ParseActiveCollectionId();
+        _ = InvokeAsync(StateHasChanged);
     }
 
     private async void HandleBookmarksUpdated()
@@ -69,6 +119,16 @@
         await InvokeAsync(async () =>
         {
             await LoadBookmarksAsync();
+            await LoadCollectionTreeAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async void HandleCollectionsUpdated()
+    {
+        await InvokeAsync(async () =>
+        {
+            await LoadCollectionTreeAsync();
             StateHasChanged();
         });
     }
@@ -76,11 +136,18 @@
     public void Dispose()
     {
         SharedStateService.OnBookmarksUpdated -= HandleBookmarksUpdated;
+        SharedStateService.OnCollectionsUpdated -= HandleCollectionsUpdated;
+        NavigationManager.LocationChanged -= HandleLocationChanged;
     }
 
     private void ToggleUserMenu()
     {
         IsUserMenuOpen = !IsUserMenuOpen;
+    }
+
+    private void ToggleBookmarksExpanded()
+    {
+        IsBookmarksExpanded = !IsBookmarksExpanded;
     }
 
     private async Task LoadBookmarksAsync()
@@ -109,6 +176,31 @@
         }
     }
 
+    private async Task LoadCollectionTreeAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+
+        try
+        {
+            var payload = await ApiClient.GetCollectionsTreeAsync(CancellationToken.None);
+            CollectionTree.Clear();
+            CollectionTree.AddRange(payload);
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load collections.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     private static string DomainFromUrl(string url)
     {
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
@@ -127,6 +219,18 @@
         }
 
         return name.Trim()[0].ToString().ToUpperInvariant();
+    }
+
+    private Guid? ParseActiveCollectionId()
+    {
+        var uri = NavigationManager.ToAbsoluteUri(NavigationManager.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+        if (!query.TryGetValue("collectionId", out var rawId))
+        {
+            return null;
+        }
+
+        return Guid.TryParse(rawId.ToString(), out var parsedId) ? parsedId : null;
     }
 }
 

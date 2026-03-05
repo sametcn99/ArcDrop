@@ -21,6 +21,12 @@ public sealed class Collection
     public string? Description { get; set; }
 
     /// <summary>
+    /// Optional parent collection identifier used for hierarchical trees.
+    /// Null means this collection is a root node.
+    /// </summary>
+    public Guid? ParentId { get; set; }
+
+    /// <summary>
     /// Creation timestamp in UTC for deterministic ordering.
     /// </summary>
     public DateTimeOffset CreatedAtUtc { get; set; }
@@ -34,4 +40,14 @@ public sealed class Collection
     /// Normalized many-to-many links to bookmarks.
     /// </summary>
     public ICollection<BookmarkCollectionLink> Bookmarks { get; set; } = new List<BookmarkCollectionLink>();
+
+    /// <summary>
+    /// Parent collection navigation for hierarchical grouping.
+    /// </summary>
+    public Collection? Parent { get; set; }
+
+    /// <summary>
+    /// Child collections for nested navigation trees.
+    /// </summary>
+    public ICollection<Collection> Children { get; set; } = new List<Collection>();
 }

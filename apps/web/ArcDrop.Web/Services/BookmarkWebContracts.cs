@@ -11,7 +11,37 @@ public sealed record BookmarkDto(
     string Title,
     string? Summary,
     DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    IReadOnlyList<Guid> CollectionIds);
+
+/// <summary>
+/// Represents a collection node used by list and tree views in the web client.
+/// </summary>
+public sealed record CollectionDto(
+    Guid Id,
+    string Name,
+    string? Description,
+    Guid? ParentId,
+    DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc);
+
+/// <summary>
+/// Represents a lightweight bookmark projection nested under collection tree nodes.
+/// </summary>
+public sealed record CollectionBookmarkItemDto(Guid Id, string Title, string Url, DateTimeOffset UpdatedAtUtc);
+
+/// <summary>
+/// Represents a recursive collection tree response.
+/// </summary>
+public sealed record CollectionTreeNodeDto(
+    Guid Id,
+    string Name,
+    string? Description,
+    Guid? ParentId,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    IReadOnlyList<CollectionBookmarkItemDto> Bookmarks,
+    IReadOnlyList<CollectionTreeNodeDto> Children);
 
 /// <summary>
 /// Represents create bookmark request payload submitted from web forms.
@@ -41,6 +71,41 @@ public sealed class UpdateBookmarkRequest
     public string Title { get; set; } = string.Empty;
 
     public string? Summary { get; set; }
+}
+
+/// <summary>
+/// Represents create collection request payload submitted from web forms.
+/// </summary>
+public sealed class CreateCollectionRequest
+{
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public Guid? ParentId { get; set; }
+}
+
+/// <summary>
+/// Represents update collection request payload submitted from web forms.
+/// </summary>
+public sealed class UpdateCollectionRequest
+{
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    public string? Description { get; set; }
+
+    public Guid? ParentId { get; set; }
+}
+
+/// <summary>
+/// Represents one bookmark-to-collections synchronization request.
+/// </summary>
+public sealed class SyncBookmarkCollectionsRequest
+{
+    [Required]
+    public IReadOnlyList<Guid> CollectionIds { get; set; } = [];
 }
 
 /// <summary>
