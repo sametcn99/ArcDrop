@@ -19,6 +19,7 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddMemoryCache(options => options.SizeLimit = 20 * 1024 * 1024);
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -51,6 +52,28 @@ builder.Services.AddHttpClient<IArcDropApiClient, ArcDropApiClient>(httpClient =
 builder.Services.AddHttpClient("ArcDrop.ApiAuth", httpClient =>
 {
     httpClient.BaseAddress = apiBaseUri;
+});
+
+builder.Services.AddHttpClient<IBookmarkIconService, BookmarkIconService>(httpClient =>
+{
+    httpClient.Timeout = TimeSpan.FromSeconds(8);
+    httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("ArcDrop.Web/1.0 (+bookmark-icon-cache)");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = false,
+    AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip
+});
+
+builder.Services.AddHttpClient<IBookmarkMetadataService, BookmarkMetadataService>(httpClient =>
+{
+    httpClient.Timeout = TimeSpan.FromSeconds(8);
+    httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("ArcDrop.Web/1.0 (+bookmark-metadata-cache)");
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    AllowAutoRedirect = false,
+    AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip
 });
 
 builder.Services.AddSingleton<ISharedStateService, SharedStateService>();
@@ -152,6 +175,50 @@ app.MapPost("/auth/session/logout", async Task<IResult> (HttpContext httpContext
     return Results.LocalRedirect("/auth/login");
 });
 
+app.MapGet("/bookmark-icons", async Task<IResult> (
+    [FromQuery] string? url,
+    IBookmarkIconService bookmarkIconService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(url))
+    {
+        return Results.BadRequest();
+    }
+
+    // Cache both image hits and misses in the browser so card refreshes stay inexpensive.
+    var payload = await bookmarkIconService.GetIconAsync(url, cancellationToken);
+    httpContext.Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.CacheControl] = payload is null
+        ? "public,max-age=1800"
+        : "public,max-age=43200";
+
+    return payload is null
+        ? Results.NoContent()
+        : Results.File(payload.Content, payload.ContentType);
+});
+
+app.MapGet("/bookmark-metadata", async Task<IResult> (
+    [FromQuery] string? url,
+    IBookmarkMetadataService bookmarkMetadataService,
+    HttpContext httpContext,
+    CancellationToken cancellationToken) =>
+{
+    if (string.IsNullOrWhiteSpace(url))
+    {
+        return Results.BadRequest();
+    }
+
+    // Short browser caching keeps URL typing responsive while preserving freshness for edited pages.
+    var payload = await bookmarkMetadataService.GetMetadataAsync(url, cancellationToken);
+    httpContext.Response.Headers[Microsoft.Net.Http.Headers.HeaderNames.CacheControl] = payload is null
+        ? "public,max-age=600"
+        : "public,max-age=3600";
+
+    return payload is null
+        ? Results.NoContent()
+        : Results.Ok(new BookmarkMetadataResponse(payload.Title, payload.Description));
+});
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -233,3 +300,5 @@ static IEnumerable<string> EnumerateDotEnvCandidates()
         currentDirectory = currentDirectory.Parent;
     }
 }
+
+internal sealed record BookmarkMetadataResponse(string Title, string? Description);

@@ -1,0 +1,323 @@
+@inject IArcDropApiClient ApiClient
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager NavigationManager
+@inject ISharedStateService SharedStateService
+@implements IDisposable
+
+@if (IsOpen)
+{
+    <div class="arc-modal-backdrop" @onclick="CloseAsync"></div>
+    <section class="arc-modal" role="dialog" aria-modal="true" aria-labelledby="create-bookmark-title">
+        <header class="arc-modal__header">
+            <div>
+                <h2 id="create-bookmark-title">Add Bookmark</h2>
+                <p class="page-subtitle">Create a new bookmark without leaving this page.</p>
+            </div>
+            <button class="arc-modal__close" type="button" @onclick="CloseAsync" aria-label="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </header>
+
+        <EditForm Model="CreateModel" OnValidSubmit="CreateBookmarkAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="mb-3">
+                <label class="form-label">Title</label>
+                <InputText class="form-control" @bind-Value="CreateModel.Title" placeholder="Bookmark title" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">URL</label>
+                <input class="form-control"
+                       value="@CreateModel.Url"
+                       @oninput="HandleCreateUrlInputAsync"
+                       placeholder="https://example.com" />
+                @if (IsMetadataLoading)
+                {
+                    <div class="form-text mt-1"><span class="spinner-inline"></span> Fetching page title and description...</div>
+                }
+                else if (!string.IsNullOrWhiteSpace(MetadataErrorText))
+                {
+                    <div class="form-text text-danger mt-1">@MetadataErrorText</div>
+                }
+                else if (MetadataSuggestion is not null)
+                {
+                    <section class="bookmark-metadata-suggestion mt-2" aria-label="URL metadata suggestion">
+                        <p class="bookmark-metadata-suggestion__label">Suggested from URL</p>
+                        <h3>@MetadataSuggestion.Title</h3>
+                        @if (!string.IsNullOrWhiteSpace(MetadataSuggestion.Description))
+                        {
+                            <p>@MetadataSuggestion.Description</p>
+                        }
+                        <div class="bookmark-metadata-suggestion__actions">
+                            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="ApplyMetadataSuggestion">Use Suggestion</button>
+                            <button class="btn btn-sm btn-primary" type="button" @onclick="ApplyMetadataSuggestionAndSaveAsync" disabled="@IsCreating">
+                                @if (IsCreating) { <span class="spinner-inline"></span> }
+                                Use and Save
+                            </button>
+                        </div>
+                    </section>
+                }
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Summary</label>
+                <InputTextArea class="form-control" @bind-Value="CreateModel.Summary" rows="3" placeholder="Optional summary or note" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Collections</label>
+                @if (AvailableCollections.Count == 0)
+                {
+                    <div class="form-text">No collections available yet.</div>
+                }
+                else
+                {
+                    <div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--arc-border-light); border-radius: 8px; padding: 0.5rem;">
+                        @foreach (var collection in AvailableCollections)
+                        {
+                            <label class="d-flex align-items-center gap-2" style="padding: 0.15rem 0; margin-left:@(CollectionDepth(collection.Id) * 0.7)rem;">
+                                <input type="checkbox"
+                                       checked="@SelectedCollectionIds.Contains(collection.Id)"
+                                       @onchange="(args => ToggleCollectionSelection(collection.Id, args.Value))" />
+                                <span>@collection.Name</span>
+                            </label>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(CreateErrorText))
+            {
+                <div class="alert alert-danger" role="alert">@CreateErrorText</div>
+            }
+
+            <footer class="arc-modal__footer">
+                <button class="btn btn-outline-secondary" type="button" @onclick="CloseAsync" disabled="@IsCreating">Cancel</button>
+                <button class="btn btn-primary" type="submit" disabled="@IsCreating">
+                    @if (IsCreating) { <span class="spinner-inline"></span> }
+                    Save Bookmark
+                </button>
+            </footer>
+        </EditForm>
+    </section>
+}
+
+@code {
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<CollectionDto> AvailableCollections { get; set; } = [];
+
+    [Parameter]
+    public EventCallback OnCloseRequested { get; set; }
+
+    [Parameter]
+    public EventCallback OnCreated { get; set; }
+
+    private CreateBookmarkRequest CreateModel { get; set; } = new();
+    private HashSet<Guid> SelectedCollectionIds { get; set; } = [];
+    private bool IsCreating { get; set; }
+    private string? CreateErrorText { get; set; }
+    private bool IsMetadataLoading { get; set; }
+    private string? MetadataErrorText { get; set; }
+    private BookmarkMetadataSuggestion? MetadataSuggestion { get; set; }
+    private CancellationTokenSource? MetadataLookupCts { get; set; }
+    private string LastMetadataLookupUrl { get; set; } = string.Empty;
+    private bool WasOpen { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (IsOpen && !WasOpen)
+        {
+            ResetDialogState();
+        }
+
+        WasOpen = IsOpen;
+    }
+
+    private async Task CloseAsync()
+    {
+        if (IsCreating)
+        {
+            return;
+        }
+
+        await OnCloseRequested.InvokeAsync();
+    }
+
+    private async Task CreateBookmarkAsync()
+    {
+        IsCreating = true;
+        CreateErrorText = null;
+
+        try
+        {
+            // Create the bookmark first, then synchronize collection memberships.
+            var created = await ApiClient.CreateBookmarkAsync(CreateModel, CancellationToken.None);
+            await ApiClient.SyncBookmarkCollectionsAsync(created.Id, SelectedCollectionIds.ToList(), CancellationToken.None);
+
+            SharedStateService.NotifyBookmarksUpdated();
+            await OnCreated.InvokeAsync();
+            await OnCloseRequested.InvokeAsync();
+        }
+        catch (ApiClientException exception)
+        {
+            CreateErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            CreateErrorText = "Bookmark creation failed.";
+        }
+        finally
+        {
+            IsCreating = false;
+        }
+    }
+
+    private async Task HandleCreateUrlInputAsync(ChangeEventArgs args)
+    {
+        CreateModel.Url = args.Value?.ToString() ?? string.Empty;
+        await QueueMetadataLookupAsync(CreateModel.Url);
+    }
+
+    private async Task QueueMetadataLookupAsync(string? rawUrl)
+    {
+        MetadataLookupCts?.Cancel();
+        MetadataLookupCts?.Dispose();
+
+        var normalizedUrl = rawUrl?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            IsMetadataLoading = false;
+            MetadataSuggestion = null;
+            MetadataErrorText = null;
+            LastMetadataLookupUrl = string.Empty;
+            return;
+        }
+
+        // Debounced lookups keep typing responsive while metadata is fetched in near-real-time.
+        var currentCts = new CancellationTokenSource();
+        MetadataLookupCts = currentCts;
+        LastMetadataLookupUrl = normalizedUrl;
+        IsMetadataLoading = true;
+        MetadataErrorText = null;
+
+        try
+        {
+            await Task.Delay(450, currentCts.Token);
+
+            var requestUrl = new Uri($"{NavigationManager.BaseUri}bookmark-metadata?url={Uri.EscapeDataString(normalizedUrl)}");
+            using var client = HttpClientFactory.CreateClient();
+            using var response = await client.GetAsync(requestUrl, currentCts.Token);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            {
+                MetadataSuggestion = null;
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+            var payload = await response.Content.ReadFromJsonAsync<BookmarkMetadataResponse>(cancellationToken: currentCts.Token);
+            if (!string.Equals(LastMetadataLookupUrl, normalizedUrl, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            MetadataSuggestion = payload is null
+                ? null
+                : new BookmarkMetadataSuggestion(payload.Title, payload.Description);
+        }
+        catch (OperationCanceledException) when (currentCts.IsCancellationRequested)
+        {
+            // New URL input intentionally cancels stale metadata requests.
+        }
+        catch (Exception)
+        {
+            MetadataSuggestion = null;
+            MetadataErrorText = "Could not fetch page metadata for this URL.";
+        }
+        finally
+        {
+            if (ReferenceEquals(MetadataLookupCts, currentCts))
+            {
+                IsMetadataLoading = false;
+            }
+        }
+    }
+
+    private void ApplyMetadataSuggestion()
+    {
+        if (MetadataSuggestion is null)
+        {
+            return;
+        }
+
+        // Applying metadata stays user-initiated so manual edits are not overwritten unexpectedly.
+        CreateModel.Title = MetadataSuggestion.Title;
+        if (!string.IsNullOrWhiteSpace(MetadataSuggestion.Description))
+        {
+            CreateModel.Summary = MetadataSuggestion.Description;
+        }
+    }
+
+    private async Task ApplyMetadataSuggestionAndSaveAsync()
+    {
+        ApplyMetadataSuggestion();
+        await CreateBookmarkAsync();
+    }
+
+    private void ToggleCollectionSelection(Guid collectionId, object? rawValue)
+    {
+        var isChecked = rawValue as bool? == true;
+        if (isChecked)
+        {
+            SelectedCollectionIds.Add(collectionId);
+            return;
+        }
+
+        SelectedCollectionIds.Remove(collectionId);
+    }
+
+    private int CollectionDepth(Guid collectionId)
+    {
+        var lookup = AvailableCollections.ToDictionary(x => x.Id, x => x.ParentId);
+        var depth = 0;
+        var current = lookup.TryGetValue(collectionId, out var parentId) ? parentId : null;
+
+        while (current is not null && lookup.TryGetValue(current.Value, out var nextParentId))
+        {
+            depth++;
+            current = nextParentId;
+        }
+
+        return depth;
+    }
+
+    private void ResetDialogState()
+    {
+        CreateModel = new CreateBookmarkRequest();
+        SelectedCollectionIds = [];
+        CreateErrorText = null;
+        MetadataSuggestion = null;
+        MetadataErrorText = null;
+        IsMetadataLoading = false;
+        LastMetadataLookupUrl = string.Empty;
+
+        MetadataLookupCts?.Cancel();
+        MetadataLookupCts?.Dispose();
+        MetadataLookupCts = null;
+    }
+
+    public void Dispose()
+    {
+        MetadataLookupCts?.Cancel();
+        MetadataLookupCts?.Dispose();
+    }
+
+    private sealed record BookmarkMetadataResponse(string Title, string? Description);
+
+    private sealed record BookmarkMetadataSuggestion(string Title, string? Description);
+}

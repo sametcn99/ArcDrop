@@ -23,7 +23,7 @@
         }
 
         <a class="collection-tree-node__header-link"
-           href="@($"/bookmarks?collectionId={Node.Id}")">
+           href="@ResolvedHref">
             <span class="collection-tree-node__name">@Node.Name</span>
             <span class="collection-tree-node__count">@Node.Bookmarks.Count</span>
         </a>
@@ -63,9 +63,18 @@
     [Parameter]
     public Guid? ActiveCollectionId { get; set; }
 
-    private bool IsActive => ActiveCollectionId.HasValue && ActiveCollectionId.Value == Node.Id;
+    [Parameter]
+    public string? HrefOverride { get; set; }
+
+    [Parameter]
+    public bool ForceActive { get; set; }
+
+    private bool IsActive => ForceActive || (ActiveCollectionId.HasValue && ActiveCollectionId.Value == Node.Id);
     private bool IsExpanded { get; set; } = true;
     private bool HasNestedContent => Node.Bookmarks.Count > 0 || Node.Children.Count > 0;
+    private string ResolvedHref => string.IsNullOrWhiteSpace(HrefOverride)
+        ? $"/bookmarks?collectionId={Node.Id}"
+        : HrefOverride;
 
     private void ToggleExpanded()
     {

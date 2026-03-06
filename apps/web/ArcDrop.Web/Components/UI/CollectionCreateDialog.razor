@@ -1,0 +1,123 @@
+@inject IArcDropApiClient ApiClient
+@inject ISharedStateService SharedStateService
+
+@if (IsOpen)
+{
+    <div class="arc-modal-backdrop" @onclick="CloseAsync"></div>
+    <section class="arc-modal" role="dialog" aria-modal="true" aria-labelledby="create-collection-title">
+        <header class="arc-modal__header">
+            <div>
+                <h2 id="create-collection-title">New Collection</h2>
+                <p class="page-subtitle">Create nested collection folders for tree-based organization.</p>
+            </div>
+            <button class="arc-modal__close" type="button" @onclick="CloseAsync" aria-label="Close">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </header>
+
+        <EditForm Model="CreateCollectionModel" OnValidSubmit="CreateCollectionAsync">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="mb-3">
+                <label class="form-label">Name</label>
+                <InputText class="form-control" @bind-Value="CreateCollectionModel.Name" placeholder="Collection name" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Description</label>
+                <InputTextArea class="form-control" @bind-Value="CreateCollectionModel.Description" rows="2" placeholder="Optional description" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Parent Collection</label>
+                <InputSelect class="form-select" @bind-Value="CreateCollectionModel.ParentId">
+                    <option value="">Root</option>
+                    @foreach (var collection in AvailableCollections)
+                    {
+                        <option value="@collection.Id">@collection.Name</option>
+                    }
+                </InputSelect>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(CreateCollectionErrorText))
+            {
+                <div class="alert alert-danger" role="alert">@CreateCollectionErrorText</div>
+            }
+
+            <footer class="arc-modal__footer">
+                <button class="btn btn-outline-secondary" type="button" @onclick="CloseAsync" disabled="@IsCreatingCollection">Cancel</button>
+                <button class="btn btn-primary" type="submit" disabled="@IsCreatingCollection">
+                    @if (IsCreatingCollection) { <span class="spinner-inline"></span> }
+                    Save Collection
+                </button>
+            </footer>
+        </EditForm>
+    </section>
+}
+
+@code {
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    [Parameter]
+    public IReadOnlyList<CollectionDto> AvailableCollections { get; set; } = [];
+
+    [Parameter]
+    public EventCallback OnCloseRequested { get; set; }
+
+    [Parameter]
+    public EventCallback OnCreated { get; set; }
+
+    private CreateCollectionRequest CreateCollectionModel { get; set; } = new();
+    private bool IsCreatingCollection { get; set; }
+    private string? CreateCollectionErrorText { get; set; }
+    private bool WasOpen { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (IsOpen && !WasOpen)
+        {
+            CreateCollectionErrorText = null;
+            CreateCollectionModel = new CreateCollectionRequest();
+        }
+
+        WasOpen = IsOpen;
+    }
+
+    private async Task CloseAsync()
+    {
+        if (IsCreatingCollection)
+        {
+            return;
+        }
+
+        await OnCloseRequested.InvokeAsync();
+    }
+
+    private async Task CreateCollectionAsync()
+    {
+        IsCreatingCollection = true;
+        CreateCollectionErrorText = null;
+
+        try
+        {
+            await ApiClient.CreateCollectionAsync(CreateCollectionModel, CancellationToken.None);
+            SharedStateService.NotifyCollectionsUpdated();
+            await OnCreated.InvokeAsync();
+            await OnCloseRequested.InvokeAsync();
+        }
+        catch (ApiClientException exception)
+        {
+            CreateCollectionErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            CreateCollectionErrorText = "Collection creation failed.";
+        }
+        finally
+        {
+            IsCreatingCollection = false;
+        }
+    }
+}

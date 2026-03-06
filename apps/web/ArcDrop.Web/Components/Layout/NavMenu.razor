@@ -18,70 +18,34 @@
 
 <div class="nav-scrollable">
     <nav class="nav-shell">
-        <div class="bookmark-header px-3">
-            <p class="nav-section-label">Bookmarks</p>
-            <button class="bookmark-refresh" type="button" @onclick="LoadBookmarksAsync" disabled="@IsBusy">Refresh</button>
-        </div>
-
-        @if (IsBusy)
-        {
-            <div class="px-3 bookmark-state"><span class="spinner-inline"></span> Loading bookmarks...</div>
-        }
-        else if (!string.IsNullOrWhiteSpace(ErrorText))
-        {
-            <div class="px-3 bookmark-state bookmark-state--error">@ErrorText</div>
-        }
-        else if (Bookmarks.Count == 0)
-        {
-            <div class="px-3 bookmark-state">No bookmarks yet.</div>
-        }
-        else
-        {
-            <div class="bookmark-list px-2">
-                <div class="bookmark-root-row">
-                    <NavLink class="bookmark-link bookmark-link--all" href="/bookmarks" Match="NavLinkMatch.Prefix">All Bookmarks</NavLink>
-                    <button class="sidebar-collapse-toggle"
-                            type="button"
-                            aria-label="Toggle all bookmarks"
-                            aria-expanded="@IsBookmarksExpanded"
-                            @onclick="ToggleBookmarksExpanded">
-                        <span class="sidebar-collapse-icon @(IsBookmarksExpanded ? "is-expanded" : string.Empty)"></span>
-                    </button>
-                </div>
-
-                @if (IsBookmarksExpanded)
-                {
-                    @foreach (var bookmark in Bookmarks)
-                    {
-                        @* Sidebar bookmark entries should open the original bookmark URL in a new browser tab. *@
-                        <a class="bookmark-link" href="@bookmark.Url" target="_blank" rel="noopener noreferrer">
-                            <span class="bookmark-link__title">@bookmark.Title</span>
-                            <span class="bookmark-link__meta">@DomainFromUrl(bookmark.Url)</span>
-                        </a>
-                    }
-                }
-            </div>
-        }
-
         <div class="bookmark-header collection-section__header px-3">
             <p class="nav-section-label">Collections</p>
-            <button class="bookmark-refresh" type="button" @onclick="LoadCollectionTreeAsync" disabled="@IsBusy">Refresh</button>
+            <button class="bookmark-refresh" type="button" @onclick="LoadCollectionsSidebarAsync" disabled="@IsBusy">Refresh</button>
         </div>
 
         @if (IsBusy)
         {
             <div class="px-3 bookmark-state"><span class="spinner-inline"></span> Loading collections...</div>
         }
-        else if (CollectionTree.Count == 0)
+        else if (!string.IsNullOrWhiteSpace(ErrorText))
+        {
+            <div class="px-3 bookmark-state bookmark-state--error">@ErrorText</div>
+        }
+        else if (CollectionTree.Count == 0 && UnassignedBookmarkCount == 0)
         {
             <div class="px-3 bookmark-state">No collections yet.</div>
         }
         else
         {
             <div class="bookmark-list collection-section__list px-2">
-                @foreach (var node in CollectionTree)
+                @foreach (var node in GetSidebarCollectionNodes())
                 {
-                    <CollectionTreeNode Node="node" Depth="0" ActiveCollectionId="ActiveCollectionId" />
+                    <CollectionTreeNode @key="node.Id"
+                                        Node="node"
+                                        Depth="0"
+                                        ActiveCollectionId="ActiveCollectionId"
+                                        HrefOverride="@(IsOtherCollectionNode(node) ? GetOtherCollectionHref() : null)"
+                                        ForceActive="@(IsOtherCollectionNode(node) && IsOtherCollectionActive)" />
                 }
             </div>
         }
@@ -89,13 +53,16 @@
 </div>
 
 @code {
-    private readonly List<BookmarkDto> Bookmarks = [];
+    private const string OtherVirtualCollectionKey = "other";
+    private static readonly Guid OtherVirtualCollectionId = Guid.Empty;
+
     private readonly List<CollectionTreeNodeDto> CollectionTree = [];
     private bool IsBusy { get; set; }
-    private bool IsUserMenuOpen { get; set; }
-    private bool IsBookmarksExpanded { get; set; } = true;
     private string? ErrorText { get; set; }
     private Guid? ActiveCollectionId { get; set; }
+    private bool IsOtherCollectionActive { get; set; }
+    private int UnassignedBookmarkCount { get; set; }
+    private readonly List<BookmarkDto> UnassignedBookmarks = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -103,23 +70,23 @@
         SharedStateService.OnCollectionsUpdated += HandleCollectionsUpdated;
         NavigationManager.LocationChanged += HandleLocationChanged;
         ActiveCollectionId = ParseActiveCollectionId();
-        await LoadBookmarksAsync();
-        await LoadCollectionTreeAsync();
+        IsOtherCollectionActive = ParseOtherCollectionIsActive();
+        await LoadCollectionsSidebarAsync();
     }
 
     private void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs args)
     {
         ActiveCollectionId = ParseActiveCollectionId();
+        IsOtherCollectionActive = ParseOtherCollectionIsActive();
         _ = InvokeAsync(StateHasChanged);
     }
 
     private async void HandleBookmarksUpdated()
     {
-        // Use InvokeAsync to ensure UI updates on the correct thread
+        // Refresh both data sources so the virtual Other collection stays in sync with the tree.
         await InvokeAsync(async () =>
         {
-            await LoadBookmarksAsync();
-            await LoadCollectionTreeAsync();
+            await LoadCollectionsSidebarAsync();
             StateHasChanged();
         });
     }
@@ -128,7 +95,7 @@
     {
         await InvokeAsync(async () =>
         {
-            await LoadCollectionTreeAsync();
+            await LoadCollectionsSidebarAsync();
             StateHasChanged();
         });
     }
@@ -140,52 +107,26 @@
         NavigationManager.LocationChanged -= HandleLocationChanged;
     }
 
-    private void ToggleUserMenu()
-    {
-        IsUserMenuOpen = !IsUserMenuOpen;
-    }
-
-    private void ToggleBookmarksExpanded()
-    {
-        IsBookmarksExpanded = !IsBookmarksExpanded;
-    }
-
-    private async Task LoadBookmarksAsync()
+    private async Task LoadCollectionsSidebarAsync()
     {
         IsBusy = true;
         ErrorText = null;
 
         try
         {
-            // Sidebar ordering is deterministic so users can quickly scan recently updated entries.
-            var payload = await ApiClient.GetBookmarksAsync(CancellationToken.None);
-            Bookmarks.Clear();
-            Bookmarks.AddRange(payload.OrderByDescending(x => x.UpdatedAtUtc).Take(60));
-        }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-        }
-        catch (Exception)
-        {
-            ErrorText = "Could not load bookmarks.";
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
+            // The sidebar merges persisted collections with the virtual Other collection from uncategorized bookmarks.
+            var bookmarks = await ApiClient.GetBookmarksAsync(CancellationToken.None);
+            var collections = await ApiClient.GetCollectionsTreeAsync(CancellationToken.None);
 
-    private async Task LoadCollectionTreeAsync()
-    {
-        IsBusy = true;
-        ErrorText = null;
+            UnassignedBookmarkCount = bookmarks.Count(bookmark => bookmark.CollectionIds.Count == 0);
+            UnassignedBookmarks.Clear();
+            UnassignedBookmarks.AddRange(bookmarks
+                .Where(bookmark => bookmark.CollectionIds.Count == 0)
+                .OrderByDescending(bookmark => bookmark.UpdatedAtUtc)
+                .Take(40));
 
-        try
-        {
-            var payload = await ApiClient.GetCollectionsTreeAsync(CancellationToken.None);
             CollectionTree.Clear();
-            CollectionTree.AddRange(payload);
+            CollectionTree.AddRange(collections);
         }
         catch (ApiClientException exception)
         {
@@ -201,6 +142,45 @@
         }
     }
 
+    private IEnumerable<CollectionTreeNodeDto> GetSidebarCollectionNodes()
+    {
+        if (UnassignedBookmarks.Count > 0)
+        {
+            yield return BuildOtherCollectionNode();
+        }
+
+        foreach (var node in CollectionTree)
+        {
+            yield return node;
+        }
+    }
+
+    private CollectionTreeNodeDto BuildOtherCollectionNode()
+    {
+        // Represent uncategorized bookmarks as a virtual collection so the sidebar uses one rendering path.
+        return new CollectionTreeNodeDto(
+            OtherVirtualCollectionId,
+            "Other",
+            null,
+            null,
+            DateTimeOffset.MinValue,
+            DateTimeOffset.MinValue,
+            UnassignedBookmarks
+                .Select(bookmark => new CollectionBookmarkItemDto(bookmark.Id, bookmark.Title, bookmark.Url, bookmark.UpdatedAtUtc))
+                .ToArray(),
+            []);
+    }
+
+    private static bool IsOtherCollectionNode(CollectionTreeNodeDto node)
+    {
+        return node.Id == OtherVirtualCollectionId;
+    }
+
+    private static string GetOtherCollectionHref()
+    {
+        return "/bookmarks?virtualCollection=other";
+    }
+
     private static string DomainFromUrl(string url)
     {
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
@@ -209,16 +189,6 @@
         }
 
         return "unknown-source";
-    }
-
-    private static string UserInitial(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return "A";
-        }
-
-        return name.Trim()[0].ToString().ToUpperInvariant();
     }
 
     private Guid? ParseActiveCollectionId()
@@ -231,6 +201,14 @@
         }
 
         return Guid.TryParse(rawId.ToString(), out var parsedId) ? parsedId : null;
+    }
+
+    private bool ParseOtherCollectionIsActive()
+    {
+        var uri = NavigationManager.ToAbsoluteUri(NavigationManager.Uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(uri.Query);
+        return query.TryGetValue("virtualCollection", out var rawVirtualCollection)
+            && string.Equals(rawVirtualCollection.ToString(), OtherVirtualCollectionKey, StringComparison.OrdinalIgnoreCase);
     }
 }
 

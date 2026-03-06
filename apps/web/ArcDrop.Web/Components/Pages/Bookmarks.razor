@@ -4,6 +4,7 @@
 @inject IArcDropApiClient ApiClient
 @inject ISharedStateService SharedStateService
 @inject NavigationManager NavigationManager
+@inject IHttpClientFactory HttpClientFactory
 @implements IDisposable
 
 <PageTitle>Bookmarks</PageTitle>
@@ -18,9 +19,14 @@
 <div class="raindrop-board">
     <aside class="raindrop-sidebar card-shell">
         <h2>Collections</h2>
-        <button class="collection-item @(SelectedCollectionId is null ? "is-active" : string.Empty)" @onclick="(() => SelectCollection(null))">
+        <button class="collection-item @(SelectedCollectionId is null && !IsOtherCollectionSelected ? "is-active" : string.Empty)" @onclick="(() => SelectCollection(null))">
             <span>All bookmarks</span>
             <strong>@_allBookmarks.Count</strong>
+        </button>
+
+        <button class="collection-item @(IsOtherCollectionSelected ? "is-active" : string.Empty)" @onclick="SelectOtherCollection">
+            <span>Other</span>
+            <strong>@UnassignedBookmarkCount</strong>
         </button>
 
         @foreach (var collection in AvailableCollections.OrderBy(collection => CollectionDepth(collection.Id)).ThenBy(collection => collection.Name))
@@ -41,6 +47,8 @@
                    placeholder="Search title, URL, or summary"
                    @bind="SearchText"
                    @bind:event="oninput" />
+            <button class="btn btn-primary" type="button" @onclick="OpenCreateDialog">Add Bookmark</button>
+            <button class="btn btn-outline-secondary" type="button" @onclick="OpenCreateCollectionDialog">New Collection</button>
             <button class="btn btn-outline-secondary" @onclick="LoadAsync" disabled="@IsLoading">Refresh</button>
         </div>
 
@@ -70,11 +78,25 @@
                 @foreach (var item in FilteredBookmarks)
                 {
                     <article class="bookmark-card">
-                        <div class="bookmark-card__meta">
-                            <span>@item.UpdatedAtUtc.ToLocalTime().ToString("g")</span>
-                            <span class="bookmark-card__domain">@DomainFromUrl(item.Url)</span>
+                        <div class="bookmark-card__heading">
+                            <div class="bookmark-card__icon-shell" aria-hidden="true">
+                                <img class="bookmark-card__icon"
+                                     src="@BuildBookmarkIconUrl(item.Url)"
+                                     alt=""
+                                     width="44"
+                                     height="44"
+                                     onload="this.nextElementSibling.style.display='none'; this.style.display='block';"
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-flex';" />
+                                <span class="bookmark-card__icon-fallback">@DomainInitial(item.Url)</span>
+                            </div>
+                            <div class="bookmark-card__heading-copy">
+                                <div class="bookmark-card__meta">
+                                    <span>@item.UpdatedAtUtc.ToLocalTime().ToString("g")</span>
+                                    <span class="bookmark-card__domain">@DomainFromUrl(item.Url)</span>
+                                </div>
+                                <h3>@item.Title</h3>
+                            </div>
                         </div>
-                        <h3>@item.Title</h3>
                         <a href="@item.Url" target="_blank" rel="noopener noreferrer">@item.Url</a>
                         @if (!string.IsNullOrWhiteSpace(item.Summary))
                         {
@@ -82,7 +104,7 @@
                         }
                         <div class="bookmark-card__actions">
                             @* Edit action opens an in-page dialog to keep users in the board workflow. *@
-                            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="(() => OpenEditDialog(item))">
+                            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="(() => OpenEditDialogAsync(item))">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -1px; margin-right: 3px;"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                                 Edit
                             </button>
@@ -117,7 +139,35 @@
 
             <div class="mb-3">
                 <label class="form-label">URL</label>
-                <InputText class="form-control" @bind-Value="EditModel.Url" @oninput="@(e => { EditModel.Url = e.Value?.ToString() ?? string.Empty; StateHasChanged(); })" />
+                <input class="form-control"
+                       value="@EditModel.Url"
+                       @oninput="HandleEditUrlInputAsync" />
+                @if (IsEditMetadataLoading)
+                {
+                    <div class="form-text mt-1"><span class="spinner-inline"></span> Fetching page title and description...</div>
+                }
+                else if (!string.IsNullOrWhiteSpace(EditMetadataErrorText))
+                {
+                    <div class="form-text text-danger mt-1">@EditMetadataErrorText</div>
+                }
+                else if (EditMetadataSuggestion is not null)
+                {
+                    <section class="bookmark-metadata-suggestion mt-2" aria-label="URL metadata suggestion">
+                        <p class="bookmark-metadata-suggestion__label">Suggested from URL</p>
+                        <h3>@EditMetadataSuggestion.Title</h3>
+                        @if (!string.IsNullOrWhiteSpace(EditMetadataSuggestion.Description))
+                        {
+                            <p>@EditMetadataSuggestion.Description</p>
+                        }
+                        <div class="bookmark-metadata-suggestion__actions">
+                            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="ApplyEditMetadataSuggestion">Use Suggestion</button>
+                            <button class="btn btn-sm btn-primary" type="button" @onclick="ApplyEditMetadataSuggestionAndSaveAsync" disabled="@IsSavingEdit">
+                                @if (IsSavingEdit) { <span class="spinner-inline"></span> }
+                                Use and Save
+                            </button>
+                        </div>
+                    </section>
+                }
             </div>
 
             <div class="mb-3">
@@ -163,10 +213,26 @@
     </section>
 }
 
+<BookmarkCreateDialog IsOpen="IsCreateDialogOpen"
+                      AvailableCollections="AvailableCollections"
+                      OnCloseRequested="CloseCreateDialog"
+                      OnCreated="HandleBookmarkCreatedAsync" />
+
+<CollectionCreateDialog IsOpen="IsCreateCollectionDialogOpen"
+                        AvailableCollections="AvailableCollections"
+                        OnCloseRequested="CloseCreateCollectionDialog"
+                        OnCreated="HandleCollectionCreatedAsync" />
+
 @code {
+    private const string OtherVirtualCollectionKey = "other";
+
     [Parameter]
     [SupplyParameterFromQuery(Name = "collectionId")]
     public Guid? SelectedCollectionId { get; set; }
+
+    [Parameter]
+    [SupplyParameterFromQuery(Name = "virtualCollection")]
+    public string? VirtualCollection { get; set; }
 
     private readonly List<BookmarkDto> _allBookmarks = [];
     private List<BookmarkDto> FilteredBookmarks { get; set; } = [];
@@ -175,12 +241,19 @@
     private string? ErrorText { get; set; }
     private string StatusText { get; set; } = "Ready.";
 
+    private bool IsCreateDialogOpen { get; set; }
+    private bool IsCreateCollectionDialogOpen { get; set; }
     private bool IsEditDialogOpen { get; set; }
     private bool IsSavingEdit { get; set; }
     private string? EditErrorText { get; set; }
     private Guid? EditingBookmarkId { get; set; }
     private UpdateBookmarkRequest EditModel { get; set; } = new();
     private UpdateBookmarkRequest OriginalEditModel { get; set; } = new();
+    private bool IsEditMetadataLoading { get; set; }
+    private string? EditMetadataErrorText { get; set; }
+    private BookmarkMetadataSuggestion? EditMetadataSuggestion { get; set; }
+    private CancellationTokenSource? EditMetadataLookupCts { get; set; }
+    private string LastEditMetadataLookupUrl { get; set; } = string.Empty;
     private IReadOnlyList<CollectionDto> AvailableCollections { get; set; } = [];
     private HashSet<Guid> SelectedEditCollectionIds { get; set; } = [];
 
@@ -209,6 +282,10 @@
             ApplyFilter();
         }
     }
+
+    private bool IsOtherCollectionSelected => string.Equals(VirtualCollection, OtherVirtualCollectionKey, StringComparison.OrdinalIgnoreCase);
+
+    private int UnassignedBookmarkCount => _allBookmarks.Count(bookmark => bookmark.CollectionIds.Count == 0);
 
     protected override async Task OnInitializedAsync()
     {
@@ -245,6 +322,8 @@
     {
         SharedStateService.OnBookmarksUpdated -= HandleBookmarksUpdated;
         SharedStateService.OnCollectionsUpdated -= HandleCollectionsUpdated;
+        EditMetadataLookupCts?.Cancel();
+        EditMetadataLookupCts?.Dispose();
     }
 
     private async Task LoadCollectionsAsync()
@@ -257,6 +336,42 @@
         {
             AvailableCollections = [];
         }
+    }
+
+    private void OpenCreateDialog()
+    {
+        IsCreateDialogOpen = true;
+    }
+
+    private Task CloseCreateDialog()
+    {
+        IsCreateDialogOpen = false;
+        return Task.CompletedTask;
+    }
+
+    private void OpenCreateCollectionDialog()
+    {
+        IsCreateCollectionDialogOpen = true;
+    }
+
+    private Task CloseCreateCollectionDialog()
+    {
+        IsCreateCollectionDialogOpen = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleBookmarkCreatedAsync()
+    {
+        // New bookmark events update board counts and ordering immediately.
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task HandleCollectionCreatedAsync()
+    {
+        // New collection events refresh sidebar tree and collection dropdowns.
+        await LoadCollectionsAsync();
+        StateHasChanged();
     }
 
     private async Task LoadAsync()
@@ -299,12 +414,29 @@
         NavigationManager.NavigateTo(target);
     }
 
+    private void SelectOtherCollection()
+    {
+        NavigationManager.NavigateTo($"/bookmarks?virtualCollection={OtherVirtualCollectionKey}");
+    }
+
     private void ApplyFilter()
     {
         // Collection filter is query-driven so sidebar and page URLs remain shareable.
-        IEnumerable<BookmarkDto> candidates = SelectedCollectionId.HasValue
-            ? _allBookmarks.Where(x => x.CollectionIds.Contains(SelectedCollectionId.Value))
-            : _allBookmarks;
+        IEnumerable<BookmarkDto> candidates;
+
+        if (IsOtherCollectionSelected)
+        {
+            // Virtual "Other" bucket represents bookmarks not mapped to any collection.
+            candidates = _allBookmarks.Where(bookmark => bookmark.CollectionIds.Count == 0);
+        }
+        else if (SelectedCollectionId.HasValue)
+        {
+            candidates = _allBookmarks.Where(x => x.CollectionIds.Contains(SelectedCollectionId.Value));
+        }
+        else
+        {
+            candidates = _allBookmarks;
+        }
 
         if (string.IsNullOrWhiteSpace(SearchText))
         {
@@ -334,7 +466,27 @@
         return "unknown-source";
     }
 
-    private void OpenEditDialog(BookmarkDto item)
+    private static string DomainInitial(string url)
+    {
+        var domain = DomainFromUrl(url);
+        var initial = domain.FirstOrDefault(static character => char.IsLetterOrDigit(character));
+        return initial == default ? "?" : char.ToUpperInvariant(initial).ToString();
+    }
+
+    private static string BuildBookmarkIconUrl(string url)
+    {
+        // Browser cache keys are URL-based, so normalize to origin and reuse one icon URL
+        // across all bookmarks from the same site.
+        var cacheKeyUrl = url;
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            cacheKeyUrl = uri.GetLeftPart(UriPartial.Authority);
+        }
+
+        return $"/bookmark-icons?url={Uri.EscapeDataString(cacheKeyUrl)}";
+    }
+
+    private async Task OpenEditDialogAsync(BookmarkDto item)
     {
         // Clone selected values into a dedicated edit model so list rendering remains immutable.
         EditingBookmarkId = item.Id;
@@ -355,7 +507,11 @@
         SelectedEditCollectionIds = item.CollectionIds.ToHashSet();
 
         EditErrorText = null;
+        EditMetadataSuggestion = null;
+        EditMetadataErrorText = null;
+        IsEditMetadataLoading = false;
         IsEditDialogOpen = true;
+        await QueueEditMetadataLookupAsync(EditModel.Url);
     }
 
     private void CloseEditDialog()
@@ -368,8 +524,107 @@
         IsEditDialogOpen = false;
         EditingBookmarkId = null;
         EditErrorText = null;
+        EditMetadataSuggestion = null;
+        EditMetadataErrorText = null;
+        IsEditMetadataLoading = false;
+        LastEditMetadataLookupUrl = string.Empty;
+        EditMetadataLookupCts?.Cancel();
+        EditMetadataLookupCts?.Dispose();
+        EditMetadataLookupCts = null;
         OriginalEditModel = new UpdateBookmarkRequest();
         SelectedEditCollectionIds = [];
+    }
+
+    private async Task HandleEditUrlInputAsync(ChangeEventArgs args)
+    {
+        EditModel.Url = args.Value?.ToString() ?? string.Empty;
+        await QueueEditMetadataLookupAsync(EditModel.Url);
+    }
+
+    private async Task QueueEditMetadataLookupAsync(string? rawUrl)
+    {
+        EditMetadataLookupCts?.Cancel();
+        EditMetadataLookupCts?.Dispose();
+
+        var normalizedUrl = rawUrl?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedUrl))
+        {
+            IsEditMetadataLoading = false;
+            EditMetadataSuggestion = null;
+            EditMetadataErrorText = null;
+            LastEditMetadataLookupUrl = string.Empty;
+            return;
+        }
+
+        // Debounced lookups keep editing smooth while metadata remains close to real-time.
+        var currentCts = new CancellationTokenSource();
+        EditMetadataLookupCts = currentCts;
+        LastEditMetadataLookupUrl = normalizedUrl;
+        IsEditMetadataLoading = true;
+        EditMetadataErrorText = null;
+
+        try
+        {
+            await Task.Delay(450, currentCts.Token);
+
+            var requestUrl = new Uri($"{NavigationManager.BaseUri}bookmark-metadata?url={Uri.EscapeDataString(normalizedUrl)}");
+            using var client = HttpClientFactory.CreateClient();
+            using var response = await client.GetAsync(requestUrl, currentCts.Token);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+            {
+                EditMetadataSuggestion = null;
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+            var payload = await response.Content.ReadFromJsonAsync<BookmarkMetadataResponse>(cancellationToken: currentCts.Token);
+            if (!string.Equals(LastEditMetadataLookupUrl, normalizedUrl, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            EditMetadataSuggestion = payload is null
+                ? null
+                : new BookmarkMetadataSuggestion(payload.Title, payload.Description);
+        }
+        catch (OperationCanceledException) when (currentCts.IsCancellationRequested)
+        {
+            // New URL input intentionally cancels stale metadata requests.
+        }
+        catch (Exception)
+        {
+            EditMetadataSuggestion = null;
+            EditMetadataErrorText = "Could not fetch page metadata for this URL.";
+        }
+        finally
+        {
+            if (ReferenceEquals(EditMetadataLookupCts, currentCts))
+            {
+                IsEditMetadataLoading = false;
+            }
+        }
+    }
+
+    private void ApplyEditMetadataSuggestion()
+    {
+        if (EditMetadataSuggestion is null)
+        {
+            return;
+        }
+
+        // Applying metadata stays user-initiated so manual edits are never overwritten unexpectedly.
+        EditModel.Title = EditMetadataSuggestion.Title;
+        if (!string.IsNullOrWhiteSpace(EditMetadataSuggestion.Description))
+        {
+            EditModel.Summary = EditMetadataSuggestion.Description;
+        }
+    }
+
+    private async Task ApplyEditMetadataSuggestionAndSaveAsync()
+    {
+        ApplyEditMetadataSuggestion();
+        await SaveEditAsync();
     }
 
     private async Task SaveEditAsync()
@@ -393,6 +648,13 @@
             IsEditDialogOpen = false;
             EditingBookmarkId = null;
             EditErrorText = null;
+            EditMetadataSuggestion = null;
+            EditMetadataErrorText = null;
+            IsEditMetadataLoading = false;
+            LastEditMetadataLookupUrl = string.Empty;
+            EditMetadataLookupCts?.Cancel();
+            EditMetadataLookupCts?.Dispose();
+            EditMetadataLookupCts = null;
             OriginalEditModel = new UpdateBookmarkRequest();
             SelectedEditCollectionIds = [];
 
@@ -442,4 +704,8 @@
 
         return depth;
     }
+
+    private sealed record BookmarkMetadataResponse(string Title, string? Description);
+
+    private sealed record BookmarkMetadataSuggestion(string Title, string? Description);
 }

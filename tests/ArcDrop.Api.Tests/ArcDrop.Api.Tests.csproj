@@ -26,6 +26,10 @@
 
   <ItemGroup>
     <Compile Include="..\..\apps\web\ArcDrop.Web\Services\AuthRoutePolicy.cs" Link="WebAuth\AuthRoutePolicy.cs" />
+    <Compile Include="..\..\apps\web\ArcDrop.Web\Services\IBookmarkIconService.cs" Link="WebIcon\IBookmarkIconService.cs" />
+    <Compile Include="..\..\apps\web\ArcDrop.Web\Services\BookmarkIconService.cs" Link="WebIcon\BookmarkIconService.cs" />
+    <Compile Include="..\..\apps\web\ArcDrop.Web\Services\IBookmarkMetadataService.cs" Link="WebMetadata\IBookmarkMetadataService.cs" />
+    <Compile Include="..\..\apps\web\ArcDrop.Web\Services\BookmarkMetadataService.cs" Link="WebMetadata\BookmarkMetadataService.cs" />
   </ItemGroup>
 
 </Project>
