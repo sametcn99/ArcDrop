@@ -1,0 +1,123 @@
+<div class="section-header">
+    <h2>AI Operations</h2>
+</div>
+
+<div class="settings-split-grid">
+    <div class="card-shell settings-mini-card">
+        <h3>Run Organization Operation</h3>
+        <EditForm Model="OperationModel" OnValidSubmit="OnRunOperation">
+            <DataAnnotationsValidator />
+
+            <div class="mb-2">
+                <label class="form-label">Provider Name</label>
+                <InputText class="form-control" @bind-Value="OperationModel.ProviderName" />
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label">Operation Type</label>
+                <InputSelect class="form-select" @bind-Value="OperationModel.OperationType">
+                    <option value="tag-suggestions">tag-suggestions</option>
+                    <option value="collection-suggestions">collection-suggestions</option>
+                    <option value="title-cleanup">title-cleanup</option>
+                    <option value="summary-cleanup">summary-cleanup</option>
+                </InputSelect>
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label">Bookmark URL</label>
+                <InputText class="form-control" @bind-Value="OperationModel.BookmarkUrl" />
+            </div>
+
+            <div class="mb-2">
+                <label class="form-label">Bookmark Title</label>
+                <InputText class="form-control" @bind-Value="OperationModel.BookmarkTitle" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Bookmark Summary</label>
+                <InputTextArea class="form-control" @bind-Value="OperationModel.BookmarkSummary" rows="2" />
+            </div>
+
+            <button class="btn btn-primary" type="submit" disabled="@IsOperationBusy">
+                @if (IsOperationBusy) { <span class="spinner-inline"></span> }
+                Run
+            </button>
+        </EditForm>
+    </div>
+
+    <div class="card-shell settings-mini-card">
+        <h3>Lookup Operation</h3>
+        <EditForm Model="LookupModel" OnValidSubmit="OnLookupOperation">
+            <DataAnnotationsValidator />
+            <div class="mb-3">
+                <label class="form-label">Operation ID</label>
+                <InputText class="form-control" @bind-Value="LookupModel.OperationId" />
+            </div>
+
+            <button class="btn btn-outline-secondary" type="submit" disabled="@IsLookupBusy">
+                @if (IsLookupBusy) { <span class="spinner-inline"></span> }
+                Lookup
+            </button>
+        </EditForm>
+
+        @if (LookupResult is not null)
+        {
+            <hr class="section-divider" />
+            <p class="mb-1"><strong>Status:</strong> @LookupResult.OutcomeStatus</p>
+            <p class="mb-1"><strong>Provider:</strong> @LookupResult.ProviderName</p>
+            <p class="mb-1"><strong>Type:</strong> @LookupResult.OperationType</p>
+            <p class="mb-0"><strong>Rows:</strong> @LookupResult.Results.Count</p>
+        }
+    </div>
+</div>
+
+@if (LastOperationResult is not null)
+{
+    <div class="settings-table-shell mt-4">
+        <table class="table table-hover align-middle app-table">
+            <thead>
+                <tr>
+                    <th>Result Type</th>
+                    <th>Value</th>
+                    <th>Confidence</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in LastOperationResult.Results)
+                {
+                    <tr>
+                        <td>@row.ResultType</td>
+                        <td>@row.Value</td>
+                        <td>@(row.Confidence?.ToString("0.##") ?? "-")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public OrganizeBookmarkRequest OperationModel { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public OperationLookupFormModel LookupModel { get; set; } = default!;
+
+    [Parameter]
+    public bool IsOperationBusy { get; set; }
+
+    [Parameter]
+    public bool IsLookupBusy { get; set; }
+
+    [Parameter]
+    public OrganizeBookmarkResponse? LastOperationResult { get; set; }
+
+    [Parameter]
+    public OrganizeBookmarkResponse? LookupResult { get; set; }
+
+    [Parameter]
+    public EventCallback OnRunOperation { get; set; }
+
+    [Parameter]
+    public EventCallback OnLookupOperation { get; set; }
+}

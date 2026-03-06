@@ -227,3 +227,35 @@ public sealed record OrganizeBookmarkResponse(
     DateTimeOffset StartedAtUtc,
     DateTimeOffset CompletedAtUtc,
     IReadOnlyList<AiOperationResultResponse> Results);
+
+/// <summary>
+/// Enumerates supported bookmark data exchange formats for export and import operations.
+/// </summary>
+public enum ExportFormat
+{
+    Json,
+    Csv,
+    Html
+}
+
+/// <summary>
+/// Represents the request payload for exporting bookmarks.
+/// CollectionIds controls scope: null = all, empty = unassigned, populated = specific collections.
+/// </summary>
+public sealed class ExportBookmarksRequest
+{
+    [Required]
+    public ExportFormat Format { get; set; } = ExportFormat.Json;
+
+    public IReadOnlyList<Guid>? CollectionIds { get; set; }
+}
+
+/// <summary>
+/// Represents the response payload summarizing an import operation outcome.
+/// </summary>
+public sealed record ImportBookmarksResponse(
+    int CollectionsCreated,
+    int BookmarksCreated,
+    int BookmarksUpdated,
+    int BookmarksSkipped,
+    IReadOnlyList<string> Warnings);

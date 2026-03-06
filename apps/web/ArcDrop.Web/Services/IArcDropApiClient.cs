@@ -45,4 +45,16 @@ public interface IArcDropApiClient
     Task<OrganizeBookmarkResponse> OrganizeBookmarkAsync(OrganizeBookmarkRequest request, CancellationToken cancellationToken);
 
     Task<OrganizeBookmarkResponse?> GetOperationByIdAsync(Guid operationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Exports bookmarks and their collection assignments as a downloadable file in the requested format.
+    /// Returns raw file bytes with content-type metadata for client-side download triggering.
+    /// </summary>
+    Task<(byte[] FileBytes, string ContentType, string FileName)> ExportBookmarksAsync(ExportBookmarksRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Imports bookmarks and collections from an uploaded file.
+    /// Returns a summary of how many items were created, updated, or skipped.
+    /// </summary>
+    Task<ImportBookmarksResponse> ImportBookmarksAsync(Stream fileStream, string fileName, string format, CancellationToken cancellationToken);
 }

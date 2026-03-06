@@ -1,0 +1,35 @@
+<div class="section-header">
+    <h2>Security</h2>
+</div>
+<p class="page-subtitle mb-3">Change your admin password. Your current password is required.</p>
+
+<EditForm Model="RotationModel" OnValidSubmit="OnRotatePassword">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="mb-3">
+        <label class="form-label">Current Password</label>
+        <InputText class="form-control" type="password" @bind-Value="RotationModel.CurrentPassword" placeholder="Current password" />
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">New Password</label>
+        <InputText class="form-control" type="password" @bind-Value="RotationModel.NewPassword" placeholder="New password" />
+    </div>
+
+    <button class="btn btn-primary" type="submit" disabled="@IsSecurityBusy">
+        @if (IsSecurityBusy) { <span class="spinner-inline"></span> }
+        Rotate Password
+    </button>
+</EditForm>
+
+@code {
+    [Parameter, EditorRequired]
+    public RotateAdminPasswordRequest RotationModel { get; set; } = default!;
+
+    [Parameter]
+    public bool IsSecurityBusy { get; set; }
+
+    [Parameter]
+    public EventCallback OnRotatePassword { get; set; }
+}

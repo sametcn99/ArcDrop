@@ -1,0 +1,190 @@
+<div class="section-header">
+    <h2>Data</h2>
+</div>
+<p class="page-subtitle mb-3">Export and import bookmarks with collection structure in JSON, CSV, or HTML format.</p>
+
+<div class="settings-split-grid">
+    <div class="card-shell settings-mini-card">
+        <h3>Export Bookmarks</h3>
+
+        <div class="mb-2">
+            <label class="form-label">Format</label>
+            <select class="form-select" value="@ExportSelectedFormat" @onchange="HandleExportFormatChangedAsync">
+                <option value="Json">JSON</option>
+                <option value="Csv">CSV</option>
+                <option value="Html">HTML (Netscape)</option>
+            </select>
+        </div>
+
+        <div class="mb-2">
+            <label class="form-label">Scope</label>
+            <select class="form-select" value="@ExportScope" @onchange="HandleExportScopeChangedAsync">
+                <option value="All">All Bookmarks</option>
+                <option value="Unassigned">Unassigned Only</option>
+                <option value="Selected">Selected Collections</option>
+            </select>
+        </div>
+
+        @if (ExportScope == "Selected")
+        {
+            <div class="mb-2">
+                <label class="form-label">Select Collections</label>
+                <div class="collection-picker">
+                    @if (ExportCollections.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">No collections available.</p>
+                    }
+                    else
+                    {
+                        @foreach (var collection in ExportCollections)
+                        {
+                            <div class="form-check">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       id="@($"col-{collection.Id}")"
+                                       checked="@ExportSelectedCollectionIds.Contains(collection.Id)"
+                                       @onchange="((ChangeEventArgs e) => HandleCollectionToggleAsync(collection.Id, (bool)(e.Value ?? false)))" />
+                                <label class="form-check-label" for="@($"col-{collection.Id}")">
+                                    @collection.Name
+                                </label>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        }
+
+        <button class="btn btn-primary" @onclick="OnExport" disabled="@IsExportBusy">
+            @if (IsExportBusy) { <span class="spinner-inline"></span> }
+            Export
+        </button>
+    </div>
+
+    <div class="card-shell settings-mini-card">
+        <h3>Import Bookmarks</h3>
+
+        <div class="mb-2">
+            <label class="form-label">Format</label>
+            <select class="form-select" value="@ImportSelectedFormat" @onchange="HandleImportFormatChangedAsync">
+                <option value="json">JSON</option>
+                <option value="csv">CSV</option>
+                <option value="html">HTML (Netscape)</option>
+            </select>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label">File</label>
+            <InputFile class="form-control" OnChange="OnImportFileSelected" accept=".json,.csv,.html,.htm" />
+        </div>
+
+        <button class="btn btn-primary" @onclick="OnImport" disabled="@(IsImportBusy || !HasImportFile)">
+            @if (IsImportBusy) { <span class="spinner-inline"></span> }
+            Import
+        </button>
+
+        @if (ImportResult is not null)
+        {
+            <hr class="section-divider" />
+            <div class="import-summary">
+                <p class="mb-1"><strong>Collections Created:</strong> @ImportResult.CollectionsCreated</p>
+                <p class="mb-1"><strong>Bookmarks Created:</strong> @ImportResult.BookmarksCreated</p>
+                <p class="mb-1"><strong>Bookmarks Updated:</strong> @ImportResult.BookmarksUpdated</p>
+                <p class="mb-0"><strong>Bookmarks Skipped:</strong> @ImportResult.BookmarksSkipped</p>
+            </div>
+
+            @if (ImportResult.Warnings.Count > 0)
+            {
+                <div class="mt-2">
+                    <details>
+                        <summary class="text-muted small">@ImportResult.Warnings.Count warning(s)</summary>
+                        <ul class="small mt-1">
+                            @foreach (var warning in ImportResult.Warnings)
+                            {
+                                <li>@warning</li>
+                            }
+                        </ul>
+                    </details>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public ExportFormat ExportSelectedFormat { get; set; }
+
+    [Parameter]
+    public EventCallback<ExportFormat> ExportSelectedFormatChanged { get; set; }
+
+    [Parameter]
+    public string ExportScope { get; set; } = "All";
+
+    [Parameter]
+    public EventCallback<string> ExportScopeChanged { get; set; }
+
+    [Parameter]
+    public EventCallback OnExportScopeChanged { get; set; }
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<CollectionDto> ExportCollections { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public IReadOnlySet<Guid> ExportSelectedCollectionIds { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback<ExportCollectionToggleEventArgs> OnToggleExportCollection { get; set; }
+
+    [Parameter]
+    public bool IsExportBusy { get; set; }
+
+    [Parameter]
+    public EventCallback OnExport { get; set; }
+
+    [Parameter]
+    public string ImportSelectedFormat { get; set; } = "json";
+
+    [Parameter]
+    public EventCallback<string> ImportSelectedFormatChanged { get; set; }
+
+    [Parameter]
+    public bool IsImportBusy { get; set; }
+
+    [Parameter]
+    public bool HasImportFile { get; set; }
+
+    [Parameter]
+    public EventCallback<InputFileChangeEventArgs> OnImportFileSelected { get; set; }
+
+    [Parameter]
+    public EventCallback OnImport { get; set; }
+
+    [Parameter]
+    public ImportBookmarksResponse? ImportResult { get; set; }
+
+    private async Task HandleExportFormatChangedAsync(ChangeEventArgs args)
+    {
+        if (Enum.TryParse<ExportFormat>(args.Value?.ToString(), out var parsed))
+        {
+            await ExportSelectedFormatChanged.InvokeAsync(parsed);
+        }
+    }
+
+    private async Task HandleImportFormatChangedAsync(ChangeEventArgs args)
+    {
+        var newFormat = args.Value?.ToString() ?? "json";
+        await ImportSelectedFormatChanged.InvokeAsync(newFormat);
+    }
+
+    private async Task HandleExportScopeChangedAsync(ChangeEventArgs args)
+    {
+        var newScope = args.Value?.ToString() ?? "All";
+        await ExportScopeChanged.InvokeAsync(newScope);
+        await OnExportScopeChanged.InvokeAsync();
+    }
+
+    private async Task HandleCollectionToggleAsync(Guid collectionId, bool isChecked)
+    {
+        await OnToggleExportCollection.InvokeAsync(new ExportCollectionToggleEventArgs(collectionId, isChecked));
+    }
+}

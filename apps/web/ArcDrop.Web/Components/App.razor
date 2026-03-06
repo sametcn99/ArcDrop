@@ -23,6 +23,26 @@
     </CascadingAuthenticationState>
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script>
+        // File download helper for Blazor interop. Converts base64 data to a Blob
+        // and triggers a browser download without round-tripping through SignalR.
+        window.arcDropDownloadFile = function (base64Data, fileName, contentType) {
+            var raw = atob(base64Data);
+            var byteArray = new Uint8Array(raw.length);
+            for (var i = 0; i < raw.length; i++) {
+                byteArray[i] = raw.charCodeAt(i);
+            }
+            var blob = new Blob([byteArray], { type: contentType });
+            var url = URL.createObjectURL(blob);
+            var anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = fileName;
+            document.body.appendChild(anchor);
+            anchor.click();
+            document.body.removeChild(anchor);
+            URL.revokeObjectURL(url);
+        };
+    </script>
 </body>
 
 </html>

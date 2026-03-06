@@ -1013,6 +1013,24 @@ h1:focus { outline: none; }
     margin-bottom: 0.85rem;
 }
 
+/* Collection picker checkbox list for data export scope selection. */
+.collection-picker {
+    max-height: 180px;
+    overflow-y: auto;
+    border: 1px solid var(--arc-border-light);
+    border-radius: var(--arc-radius-sm);
+    padding: 0.5rem 0.75rem;
+    background: var(--arc-surface);
+}
+
+/* Import result summary block styling inside the Data settings tab. */
+.import-summary {
+    background: var(--arc-surface);
+    border: 1px solid var(--arc-border-light);
+    border-radius: var(--arc-radius-sm);
+    padding: 0.65rem 0.85rem;
+}
+
 @media (max-width: 980px) {
     .settings-shell {
         grid-template-columns: 1fr;

@@ -1,0 +1,109 @@
+<div class="section-header">
+    <h2>AI Providers</h2>
+    @if (IsEditProviderMode)
+    {
+        <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="OnBeginCreateProvider">Create New</button>
+    }
+</div>
+
+<EditForm Model="ProviderFormModel" OnValidSubmit="OnSaveProvider">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="mb-3">
+        <label class="form-label">Provider Name</label>
+        <InputText class="form-control" @bind-Value="ProviderFormModel.ProviderName" disabled="@IsEditProviderMode" />
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">API Endpoint</label>
+        <InputText class="form-control" @bind-Value="ProviderFormModel.ApiEndpoint" />
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">Model</label>
+        <InputText class="form-control" @bind-Value="ProviderFormModel.Model" />
+    </div>
+
+    <div class="mb-3">
+        <label class="form-label">API Key</label>
+        <InputText class="form-control" type="password" @bind-Value="ProviderFormModel.ApiKey" />
+        @if (IsEditProviderMode)
+        {
+            <small class="text-muted">Leave empty to keep the existing encrypted key.</small>
+        }
+    </div>
+
+    <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-primary" type="submit" disabled="@IsProviderBusy">
+            @if (IsProviderBusy) { <span class="spinner-inline"></span> }
+            @(IsEditProviderMode ? "Update" : "Create")
+        </button>
+        <button class="btn btn-outline-secondary" type="button" @onclick="OnLoadProviders" disabled="@IsProviderBusy">Refresh</button>
+    </div>
+</EditForm>
+
+@if (Providers.Count > 0)
+{
+    <div class="mt-4 settings-table-shell">
+        <table class="table table-hover align-middle app-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Endpoint</th>
+                    <th>Model</th>
+                    <th>Key</th>
+                    <th>Updated</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var provider in Providers)
+                {
+                    <tr>
+                        <td>@provider.ProviderName</td>
+                        <td>@provider.ApiEndpoint</td>
+                        <td>@provider.Model</td>
+                        <td>@(provider.HasApiKey ? provider.ApiKeyPreview : "No key")</td>
+                        <td>@provider.UpdatedAtUtc.ToLocalTime().ToString("g")</td>
+                        <td>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="(() => OnBeginEditProvider.InvokeAsync(provider))">Edit</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="(() => OnDeleteProvider.InvokeAsync(provider.ProviderName))">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public ProviderFormState ProviderFormModel { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<AiProviderConfigResponse> Providers { get; set; } = default!;
+
+    [Parameter]
+    public bool IsEditProviderMode { get; set; }
+
+    [Parameter]
+    public bool IsProviderBusy { get; set; }
+
+    [Parameter]
+    public EventCallback OnSaveProvider { get; set; }
+
+    [Parameter]
+    public EventCallback OnLoadProviders { get; set; }
+
+    [Parameter]
+    public EventCallback OnBeginCreateProvider { get; set; }
+
+    [Parameter]
+    public EventCallback<AiProviderConfigResponse> OnBeginEditProvider { get; set; }
+
+    [Parameter]
+    public EventCallback<string> OnDeleteProvider { get; set; }
+}

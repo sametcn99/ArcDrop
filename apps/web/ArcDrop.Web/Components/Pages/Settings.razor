@@ -2,6 +2,9 @@
 
 @inject IArcDropApiClient ApiClient
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IJSRuntime JS
+@inject ISharedStateService SharedStateService
+@using ArcDrop.Web.Components.UI.Settings
 
 <PageTitle>Settings</PageTitle>
 
@@ -26,262 +29,77 @@
         <button class="settings-nav__item @(IsActive(SettingsSection.AiOperations) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.AiOperations))" role="tab" aria-selected="@IsActive(SettingsSection.AiOperations)">
             AI Operations
         </button>
+        <button class="settings-nav__item @(IsActive(SettingsSection.Data) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.Data))" role="tab" aria-selected="@IsActive(SettingsSection.Data)">
+            Data
+        </button>
     </aside>
 
     <section class="settings-content" role="tabpanel">
         @if (ActiveSection == SettingsSection.Account)
         {
-            <div class="section-header">
-                <h2>Account</h2>
-            </div>
-
-            <div class="profile-info mb-3">
-                <div class="profile-info__item">
-                    <span class="profile-info__label">Status</span>
-                    <span>
-                        @if (IsAuthenticated)
-                        {
-                            <span class="arc-badge arc-badge--success">Authenticated</span>
-                        }
-                        else
-                        {
-                            <span class="arc-badge arc-badge--muted">Not Authenticated</span>
-                        }
-                    </span>
-                </div>
-                <div class="profile-info__item">
-                    <span class="profile-info__label">Username</span>
-                    <span class="profile-info__value">@(string.IsNullOrWhiteSpace(CurrentUsername) ? "N/A" : CurrentUsername)</span>
-                </div>
-                <div class="profile-info__item">
-                    <span class="profile-info__label">Token Expires</span>
-                    <span class="profile-info__value">@TokenExpiresText</span>
-                </div>
-            </div>
-
-            <div class="d-flex gap-2 flex-wrap">
-                <button class="btn btn-outline-secondary" @onclick="LoadProfileAsync" disabled="@IsProfileBusy">
-                    @if (IsProfileBusy) { <span class="spinner-inline"></span> }
-                    Refresh Profile
-                </button>
-                <form method="post" action="/auth/session/logout" class="d-inline">
-                    <AntiforgeryToken />
-                    <button class="btn btn-outline-danger" type="submit">Sign Out</button>
-                </form>
-            </div>
+            <SettingsAccountSection
+                IsAuthenticated="IsAuthenticated"
+                CurrentUsername="CurrentUsername"
+                TokenExpiresText="TokenExpiresText"
+                IsProfileBusy="IsProfileBusy"
+                OnRefreshProfile="LoadProfileAsync" />
         }
 
         @if (ActiveSection == SettingsSection.Security)
         {
-            <div class="section-header">
-                <h2>Security</h2>
-            </div>
-            <p class="page-subtitle mb-3">Change your admin password. Your current password is required.</p>
-
-            <EditForm Model="RotationModel" OnValidSubmit="RotatePasswordAsync">
-                <DataAnnotationsValidator />
-                <ValidationSummary />
-
-                <div class="mb-3">
-                    <label class="form-label">Current Password</label>
-                    <InputText class="form-control" type="password" @bind-Value="RotationModel.CurrentPassword" placeholder="Current password" />
-                </div>
-
-                <div class="mb-3">
-                    <label class="form-label">New Password</label>
-                    <InputText class="form-control" type="password" @bind-Value="RotationModel.NewPassword" placeholder="New password" />
-                </div>
-
-                <button class="btn btn-primary" type="submit" disabled="@IsSecurityBusy">
-                    @if (IsSecurityBusy) { <span class="spinner-inline"></span> }
-                    Rotate Password
-                </button>
-            </EditForm>
+            <SettingsSecuritySection
+                RotationModel="RotationModel"
+                IsSecurityBusy="IsSecurityBusy"
+                OnRotatePassword="RotatePasswordAsync" />
         }
 
         @if (ActiveSection == SettingsSection.AiProviders)
         {
-            <div class="section-header">
-                <h2>AI Providers</h2>
-                @if (IsEditProviderMode)
-                {
-                    <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="BeginCreateProvider">Create New</button>
-                }
-            </div>
-
-            <EditForm Model="ProviderFormModel" OnValidSubmit="SaveProviderAsync">
-                <DataAnnotationsValidator />
-                <ValidationSummary />
-
-                <div class="mb-3">
-                    <label class="form-label">Provider Name</label>
-                    <InputText class="form-control" @bind-Value="ProviderFormModel.ProviderName" disabled="@IsEditProviderMode" />
-                </div>
-
-                <div class="mb-3">
-                    <label class="form-label">API Endpoint</label>
-                    <InputText class="form-control" @bind-Value="ProviderFormModel.ApiEndpoint" />
-                </div>
-
-                <div class="mb-3">
-                    <label class="form-label">Model</label>
-                    <InputText class="form-control" @bind-Value="ProviderFormModel.Model" />
-                </div>
-
-                <div class="mb-3">
-                    <label class="form-label">API Key</label>
-                    <InputText class="form-control" type="password" @bind-Value="ProviderFormModel.ApiKey" />
-                    @if (IsEditProviderMode)
-                    {
-                        <small class="text-muted">Leave empty to keep the existing encrypted key.</small>
-                    }
-                </div>
-
-                <div class="d-flex gap-2 flex-wrap">
-                    <button class="btn btn-primary" type="submit" disabled="@IsProviderBusy">
-                        @if (IsProviderBusy) { <span class="spinner-inline"></span> }
-                        @(IsEditProviderMode ? "Update" : "Create")
-                    </button>
-                    <button class="btn btn-outline-secondary" type="button" @onclick="LoadProvidersAsync" disabled="@IsProviderBusy">Refresh</button>
-                </div>
-            </EditForm>
-
-            @if (Providers.Count > 0)
-            {
-                <div class="mt-4 settings-table-shell">
-                    <table class="table table-hover align-middle app-table">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Endpoint</th>
-                                <th>Model</th>
-                                <th>Key</th>
-                                <th>Updated</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var provider in Providers)
-                            {
-                                <tr>
-                                    <td>@provider.ProviderName</td>
-                                    <td>@provider.ApiEndpoint</td>
-                                    <td>@provider.Model</td>
-                                    <td>@(provider.HasApiKey ? provider.ApiKeyPreview : "No key")</td>
-                                    <td>@provider.UpdatedAtUtc.ToLocalTime().ToString("g")</td>
-                                    <td>
-                                        <div class="d-flex gap-2">
-                                            <button class="btn btn-sm btn-outline-secondary" @onclick="(() => BeginEditProvider(provider))">Edit</button>
-                                            <button class="btn btn-sm btn-outline-danger" @onclick="(() => DeleteProviderAsync(provider.ProviderName))">Delete</button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
+            <SettingsAiProvidersSection
+                ProviderFormModel="ProviderFormModel"
+                Providers="Providers"
+                IsEditProviderMode="IsEditProviderMode"
+                IsProviderBusy="IsProviderBusy"
+                OnSaveProvider="SaveProviderAsync"
+                OnLoadProviders="LoadProvidersAsync"
+                OnBeginCreateProvider="BeginCreateProvider"
+                OnBeginEditProvider="BeginEditProvider"
+                OnDeleteProvider="DeleteProviderAsync" />
         }
 
         @if (ActiveSection == SettingsSection.AiOperations)
         {
-            <div class="section-header">
-                <h2>AI Operations</h2>
-            </div>
+            <SettingsAiOperationsSection
+                OperationModel="OperationModel"
+                LookupModel="LookupModel"
+                IsOperationBusy="IsOperationBusy"
+                IsLookupBusy="IsLookupBusy"
+                LookupResult="LookupResult"
+                LastOperationResult="LastOperationResult"
+                OnRunOperation="RunOperationAsync"
+                OnLookupOperation="LookupOperationAsync" />
+        }
 
-            <div class="settings-split-grid">
-                <div class="card-shell settings-mini-card">
-                    <h3>Run Organization Operation</h3>
-                    <EditForm Model="OperationModel" OnValidSubmit="RunOperationAsync">
-                        <DataAnnotationsValidator />
-
-                        <div class="mb-2">
-                            <label class="form-label">Provider Name</label>
-                            <InputText class="form-control" @bind-Value="OperationModel.ProviderName" />
-                        </div>
-
-                        <div class="mb-2">
-                            <label class="form-label">Operation Type</label>
-                            <InputSelect class="form-select" @bind-Value="OperationModel.OperationType">
-                                <option value="tag-suggestions">tag-suggestions</option>
-                                <option value="collection-suggestions">collection-suggestions</option>
-                                <option value="title-cleanup">title-cleanup</option>
-                                <option value="summary-cleanup">summary-cleanup</option>
-                            </InputSelect>
-                        </div>
-
-                        <div class="mb-2">
-                            <label class="form-label">Bookmark URL</label>
-                            <InputText class="form-control" @bind-Value="OperationModel.BookmarkUrl" />
-                        </div>
-
-                        <div class="mb-2">
-                            <label class="form-label">Bookmark Title</label>
-                            <InputText class="form-control" @bind-Value="OperationModel.BookmarkTitle" />
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label">Bookmark Summary</label>
-                            <InputTextArea class="form-control" @bind-Value="OperationModel.BookmarkSummary" rows="2" />
-                        </div>
-
-                        <button class="btn btn-primary" type="submit" disabled="@IsOperationBusy">
-                            @if (IsOperationBusy) { <span class="spinner-inline"></span> }
-                            Run
-                        </button>
-                    </EditForm>
-                </div>
-
-                <div class="card-shell settings-mini-card">
-                    <h3>Lookup Operation</h3>
-                    <EditForm Model="LookupModel" OnValidSubmit="LookupOperationAsync">
-                        <DataAnnotationsValidator />
-                        <div class="mb-3">
-                            <label class="form-label">Operation ID</label>
-                            <InputText class="form-control" @bind-Value="LookupModel.OperationId" />
-                        </div>
-
-                        <button class="btn btn-outline-secondary" type="submit" disabled="@IsLookupBusy">
-                            @if (IsLookupBusy) { <span class="spinner-inline"></span> }
-                            Lookup
-                        </button>
-                    </EditForm>
-
-                    @if (LookupResult is not null)
-                    {
-                        <hr class="section-divider" />
-                        <p class="mb-1"><strong>Status:</strong> @LookupResult.OutcomeStatus</p>
-                        <p class="mb-1"><strong>Provider:</strong> @LookupResult.ProviderName</p>
-                        <p class="mb-1"><strong>Type:</strong> @LookupResult.OperationType</p>
-                        <p class="mb-0"><strong>Rows:</strong> @LookupResult.Results.Count</p>
-                    }
-                </div>
-            </div>
-
-            @if (LastOperationResult is not null)
-            {
-                <div class="settings-table-shell mt-4">
-                    <table class="table table-hover align-middle app-table">
-                        <thead>
-                            <tr>
-                                <th>Result Type</th>
-                                <th>Value</th>
-                                <th>Confidence</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in LastOperationResult.Results)
-                            {
-                                <tr>
-                                    <td>@row.ResultType</td>
-                                    <td>@row.Value</td>
-                                    <td>@(row.Confidence?.ToString("0.##") ?? "-")</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
+        @if (ActiveSection == SettingsSection.Data)
+        {
+            <SettingsDataSection
+                ExportSelectedFormat="ExportSelectedFormat"
+                ExportSelectedFormatChanged="HandleExportSelectedFormatChanged"
+                ExportScope="ExportScope"
+                ExportScopeChanged="HandleExportScopeChanged"
+                OnExportScopeChanged="OnExportScopeChanged"
+                ExportCollections="ExportCollections"
+                ExportSelectedCollectionIds="ExportSelectedCollectionIds"
+                OnToggleExportCollection="HandleExportCollectionToggleAsync"
+                IsExportBusy="IsExportBusy"
+                OnExport="ExportAsync"
+                ImportSelectedFormat="ImportSelectedFormat"
+                ImportSelectedFormatChanged="HandleImportSelectedFormatChanged"
+                IsImportBusy="IsImportBusy"
+                HasImportFile="ImportFile is not null"
+                OnImportFileSelected="OnImportFileSelected"
+                OnImport="ImportAsync"
+                ImportResult="ImportResult" />
         }
 
         @if (!string.IsNullOrWhiteSpace(ErrorText))
@@ -302,7 +120,8 @@
         Account,
         Security,
         AiProviders,
-        AiOperations
+        AiOperations,
+        Data
     }
 
     private SettingsSection ActiveSection { get; set; } = SettingsSection.Account;
@@ -336,6 +155,18 @@
 
     private OrganizeBookmarkResponse? LastOperationResult { get; set; }
     private OrganizeBookmarkResponse? LookupResult { get; set; }
+
+    // Data export/import state fields for the Data tab in Settings.
+    private ExportFormat ExportSelectedFormat { get; set; } = ExportFormat.Json;
+    private string ExportScope { get; set; } = "All";
+    private readonly List<CollectionDto> ExportCollections = [];
+    private readonly HashSet<Guid> ExportSelectedCollectionIds = [];
+    private bool IsExportBusy { get; set; }
+
+    private string ImportSelectedFormat { get; set; } = "json";
+    private IBrowserFile? ImportFile { get; set; }
+    private bool IsImportBusy { get; set; }
+    private ImportBookmarksResponse? ImportResult { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -648,24 +479,198 @@
         TokenExpiresText = "N/A";
     }
 
-    private sealed class ProviderFormState
+    /// <summary>
+    /// Loads collection list for the export collection picker when scope changes to "Selected".
+    /// </summary>
+    private async Task OnExportScopeChanged()
     {
-        [Required]
-        public string ProviderName { get; set; } = string.Empty;
-
-        [Required]
-        [Url]
-        public string ApiEndpoint { get; set; } = string.Empty;
-
-        [Required]
-        public string Model { get; set; } = string.Empty;
-
-        public string ApiKey { get; set; } = string.Empty;
+        if (ExportScope == "Selected" && ExportCollections.Count == 0)
+        {
+            try
+            {
+                var collections = await ApiClient.GetCollectionsAsync(CancellationToken.None);
+                ExportCollections.Clear();
+                ExportCollections.AddRange(collections.OrderBy(x => x.Name));
+            }
+            catch (ApiClientException exception)
+            {
+                ErrorText = exception.UserMessage;
+            }
+            catch (Exception)
+            {
+                ErrorText = "Could not load collections for export selection.";
+            }
+        }
     }
 
-    private sealed class OperationLookupFormModel
+    private Task HandleExportSelectedFormatChanged(ExportFormat newFormat)
     {
-        [Required]
-        public string OperationId { get; set; } = string.Empty;
+        ExportSelectedFormat = newFormat;
+        return Task.CompletedTask;
     }
+
+    private Task HandleImportSelectedFormatChanged(string newFormat)
+    {
+        ImportSelectedFormat = newFormat;
+        return Task.CompletedTask;
+    }
+
+    private Task HandleExportScopeChanged(string newScope)
+    {
+        ExportScope = newScope;
+        return Task.CompletedTask;
+    }
+
+    private Task HandleExportCollectionToggleAsync(ExportCollectionToggleEventArgs args)
+    {
+        ToggleExportCollection(args.CollectionId, args.IsChecked);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Toggles a collection's inclusion in the export selection set.
+    /// </summary>
+    private void ToggleExportCollection(Guid collectionId, bool isChecked)
+    {
+        if (isChecked)
+        {
+            ExportSelectedCollectionIds.Add(collectionId);
+        }
+        else
+        {
+            ExportSelectedCollectionIds.Remove(collectionId);
+        }
+    }
+
+    /// <summary>
+    /// Executes the bookmark export operation and triggers a browser file download
+    /// via JavaScript interop with the returned file bytes.
+    /// </summary>
+    private async Task ExportAsync()
+    {
+        IsExportBusy = true;
+        ErrorText = null;
+        StatusText = "Exporting bookmarks...";
+
+        try
+        {
+            // Build the export request based on selected scope and format.
+            IReadOnlyList<Guid>? collectionIds = ExportScope switch
+            {
+                "All" => null,
+                "Unassigned" => [],
+                "Selected" => ExportSelectedCollectionIds.ToList(),
+                _ => null
+            };
+
+            if (ExportScope == "Selected" && ExportSelectedCollectionIds.Count == 0)
+            {
+                ErrorText = "Select at least one collection for export.";
+                StatusText = "Export validation failed.";
+                return;
+            }
+
+            var request = new ExportBookmarksRequest
+            {
+                Format = ExportSelectedFormat,
+                CollectionIds = collectionIds
+            };
+
+            var (fileBytes, contentType, fileName) = await ApiClient.ExportBookmarksAsync(request, CancellationToken.None);
+
+            // Trigger browser file download using JavaScript Blob API.
+            await DownloadFileFromBytesAsync(fileBytes, fileName, contentType);
+            StatusText = "Export completed successfully.";
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Export failed.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Bookmark export failed unexpectedly.";
+            StatusText = "Export failed.";
+        }
+        finally
+        {
+            IsExportBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Handles file selection from the import file input component.
+    /// </summary>
+    private void OnImportFileSelected(InputFileChangeEventArgs e)
+    {
+        ImportFile = e.File;
+        ImportResult = null;
+        ErrorText = null;
+    }
+
+    /// <summary>
+    /// Executes the bookmark import operation by uploading the selected file to the API
+    /// and displaying the result summary.
+    /// </summary>
+    private async Task ImportAsync()
+    {
+        if (ImportFile is null)
+        {
+            ErrorText = "Select a file to import.";
+            return;
+        }
+
+        IsImportBusy = true;
+        ErrorText = null;
+        StatusText = "Importing bookmarks...";
+        ImportResult = null;
+
+        try
+        {
+            // Read the file stream and send it to the API for processing.
+            // Max file size: 10 MB to prevent accidental large uploads while supporting 50k bookmarks.
+            using var stream = ImportFile.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            ImportResult = await ApiClient.ImportBookmarksAsync(stream, ImportFile.Name, ImportSelectedFormat, CancellationToken.None);
+
+            var totalProcessed = ImportResult.BookmarksCreated + ImportResult.BookmarksUpdated + ImportResult.BookmarksSkipped;
+            StatusText = $"Import completed: {totalProcessed} bookmark(s) processed, {ImportResult.CollectionsCreated} collection(s) created.";
+
+            // Mirror create/update flows by notifying list/tree consumers after a successful import operation.
+            if (ImportResult.BookmarksCreated > 0 || ImportResult.BookmarksUpdated > 0)
+            {
+                SharedStateService.NotifyBookmarksUpdated();
+            }
+
+            if (ImportResult.CollectionsCreated > 0)
+            {
+                SharedStateService.NotifyCollectionsUpdated();
+            }
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Import failed.";
+        }
+        catch (Exception)
+        {
+            ErrorText = "Bookmark import failed unexpectedly.";
+            StatusText = "Import failed.";
+        }
+        finally
+        {
+            IsImportBusy = false;
+            // Clear the file reference after import to free memory and allow re-selecting the same file.
+            ImportFile = null;
+        }
+    }
+
+    /// <summary>
+    /// Triggers a browser-side file download by invoking the global arcDropDownloadFile JS function.
+    /// Parameters are passed safely through Blazor JS interop to avoid script injection risks.
+    /// </summary>
+    private async Task DownloadFileFromBytesAsync(byte[] bytes, string fileName, string contentType)
+    {
+        await JS.InvokeVoidAsync("arcDropDownloadFile", Convert.ToBase64String(bytes), fileName, contentType);
+    }
+
 }

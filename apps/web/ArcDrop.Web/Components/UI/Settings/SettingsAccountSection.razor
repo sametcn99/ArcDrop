@@ -1,0 +1,55 @@
+<div class="section-header">
+    <h2>Account</h2>
+</div>
+
+<div class="profile-info mb-3">
+    <div class="profile-info__item">
+        <span class="profile-info__label">Status</span>
+        <span>
+            @if (IsAuthenticated)
+            {
+                <span class="arc-badge arc-badge--success">Authenticated</span>
+            }
+            else
+            {
+                <span class="arc-badge arc-badge--muted">Not Authenticated</span>
+            }
+        </span>
+    </div>
+    <div class="profile-info__item">
+        <span class="profile-info__label">Username</span>
+        <span class="profile-info__value">@(string.IsNullOrWhiteSpace(CurrentUsername) ? "N/A" : CurrentUsername)</span>
+    </div>
+    <div class="profile-info__item">
+        <span class="profile-info__label">Token Expires</span>
+        <span class="profile-info__value">@TokenExpiresText</span>
+    </div>
+</div>
+
+<div class="d-flex gap-2 flex-wrap">
+    <button class="btn btn-outline-secondary" @onclick="OnRefreshProfile" disabled="@IsProfileBusy">
+        @if (IsProfileBusy) { <span class="spinner-inline"></span> }
+        Refresh Profile
+    </button>
+    <form method="post" action="/auth/session/logout" class="d-inline">
+        <AntiforgeryToken />
+        <button class="btn btn-outline-danger" type="submit">Sign Out</button>
+    </form>
+</div>
+
+@code {
+    [Parameter]
+    public bool IsAuthenticated { get; set; }
+
+    [Parameter]
+    public string? CurrentUsername { get; set; }
+
+    [Parameter]
+    public string TokenExpiresText { get; set; } = "N/A";
+
+    [Parameter]
+    public bool IsProfileBusy { get; set; }
+
+    [Parameter]
+    public EventCallback OnRefreshProfile { get; set; }
+}

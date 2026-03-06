@@ -333,6 +333,45 @@ public sealed class ArcDropApiClient : IArcDropApiClient
         }, "Could not load AI operation details.");
     }
 
+    /// <inheritdoc />
+    public async Task<(byte[] FileBytes, string ContentType, string FileName)> ExportBookmarksAsync(ExportBookmarksRequest request, CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var response = await _httpClient.PostAsJsonAsync("api/data/export", request, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark export request", signOutOnUnauthorized: false, cancellationToken);
+
+            var fileBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+
+            // Extract filename from Content-Disposition header or construct a fallback name.
+            var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+                ?? response.Content.Headers.ContentDisposition?.FileName?.Trim('"')
+                ?? $"arcdrop-export.{(request.Format == ExportFormat.Json ? "json" : request.Format == ExportFormat.Csv ? "csv" : "html")}";
+
+            return (fileBytes, contentType, fileName);
+        }, "Could not export bookmarks.");
+    }
+
+    /// <inheritdoc />
+    public async Task<ImportBookmarksResponse> ImportBookmarksAsync(Stream fileStream, string fileName, string format, CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            // Build multipart form content with the file and format field for the import endpoint.
+            using var content = new MultipartFormDataContent();
+            var streamContent = new StreamContent(fileStream);
+            content.Add(streamContent, "file", fileName);
+            content.Add(new StringContent(format), "format");
+
+            using var response = await _httpClient.PostAsync("api/data/import", content, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark import request", signOutOnUnauthorized: false, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<ImportBookmarksResponse>(cancellationToken: cancellationToken)
+                ?? throw new ApiClientException(ApiErrorKind.Client, "Import response payload was empty.");
+        }, "Could not import bookmarks.");
+    }
+
     private async Task<HttpRequestMessage> CreateAuthorizedRequestAsync(HttpMethod method, string requestUri, object? payload = null)
     {
         var message = new HttpRequestMessage(method, requestUri);
