@@ -1,8 +1,5 @@
 using ArcDrop.Api.Contracts;
-using ArcDrop.Api.Security;
-using ArcDrop.Domain.Entities;
-using ArcDrop.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
+using ArcDrop.Application.Ai;
 
 namespace ArcDrop.Api.Endpoints;
 
@@ -13,31 +10,25 @@ internal static class AiProviderEndpoints
 {
     public static void MapAiProviders(WebApplication app)
     {
-        var aiProviderGroup = app.MapGroup("/api/ai/providers").RequireAuthorization();
+        var aiProviderGroup = app.MapGroup("/api/ai/providers")
+            .WithTags("AI Providers")
+            .RequireAuthorization();
 
-        aiProviderGroup.MapGet("/", async (ArcDropDbContext dbContext, CancellationToken cancellationToken) =>
+        aiProviderGroup.MapGet("/", async (IAiProviderConfigService aiProviderService, CancellationToken cancellationToken) =>
         {
-            var providers = await dbContext.AiProviderConfigs
-                .AsNoTracking()
-                .OrderByDescending(x => x.UpdatedAtUtc)
-                .Select(x => new AiProviderConfigResponse(
-                    x.Id,
-                    x.ProviderName,
-                    x.ApiEndpoint,
-                    x.Model,
-                    HasApiKey: !string.IsNullOrWhiteSpace(x.ApiKeyCipherText),
-                    ApiKeyPreview: "****",
-                    x.CreatedAtUtc,
-                    x.UpdatedAtUtc))
-                .ToListAsync(cancellationToken);
-
-            return Results.Ok(providers);
-        });
+            var providers = await aiProviderService.GetProvidersAsync(cancellationToken);
+            return Results.Ok(providers.Select(MapResponse).ToList());
+        })
+        .WithName("ListAiProviders")
+        .WithSummary("Lists configured AI providers.")
+        .WithDescription("Returns the stored AI provider configuration profiles with masked secret previews for FR-007 operator management flows.")
+        .Produces<List<AiProviderConfigResponse>>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
 
         aiProviderGroup.MapPost("/", async (
             UpsertAiProviderConfigRequest request,
-            ArcDropDbContext dbContext,
-            IAiProviderSecretProtector secretProtector,
+            IAiProviderConfigService aiProviderService,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.ProviderName) ||
@@ -62,92 +53,55 @@ internal static class AiProviderEndpoints
                 });
             }
 
-            var providerName = request.ProviderName.Trim();
-            var existing = await dbContext.AiProviderConfigs
-                .SingleOrDefaultAsync(x => x.ProviderName == providerName, cancellationToken);
+            var result = await aiProviderService.UpsertProviderAsync(
+                new UpsertAiProviderConfigInput(request.ProviderName, request.ApiEndpoint, request.Model, request.ApiKey),
+                cancellationToken);
 
-            var utcNow = DateTimeOffset.UtcNow;
-            var encryptedApiKey = secretProtector.Protect(request.ApiKey.Trim());
-
-            if (existing is null)
+            if (result.Config is null)
             {
-                var entity = new AiProviderConfig
+                return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
-                    Id = Guid.NewGuid(),
-                    ProviderName = providerName,
-                    ApiEndpoint = request.ApiEndpoint.Trim(),
-                    Model = request.Model.Trim(),
-                    ApiKeyCipherText = encryptedApiKey,
-                    CreatedAtUtc = utcNow,
-                    UpdatedAtUtc = utcNow
-                };
-
-                dbContext.AiProviderConfigs.Add(entity);
-                await dbContext.SaveChangesAsync(cancellationToken);
-
-                return Results.Created(
-                    $"/api/ai/providers/{Uri.EscapeDataString(entity.ProviderName)}",
-                    new AiProviderConfigResponse(
-                        entity.Id,
-                        entity.ProviderName,
-                        entity.ApiEndpoint,
-                        entity.Model,
-                        HasApiKey: true,
-                        ApiKeyPreview: secretProtector.CreateMaskedPreview(request.ApiKey.Trim()),
-                        entity.CreatedAtUtc,
-                        entity.UpdatedAtUtc));
+                    [result.ValidationTarget ?? nameof(request.ProviderName)] = [result.ValidationError ?? "Provider save failed."]
+                });
             }
 
-            existing.ApiEndpoint = request.ApiEndpoint.Trim();
-            existing.Model = request.Model.Trim();
-            existing.ApiKeyCipherText = encryptedApiKey;
-            existing.UpdatedAtUtc = utcNow;
+            if (result.Created)
+            {
+                return Results.Created($"/api/ai/providers/{Uri.EscapeDataString(result.Config.ProviderName)}", MapResponse(result.Config));
+            }
 
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            return Results.Ok(new AiProviderConfigResponse(
-                existing.Id,
-                existing.ProviderName,
-                existing.ApiEndpoint,
-                existing.Model,
-                HasApiKey: true,
-                ApiKeyPreview: secretProtector.CreateMaskedPreview(request.ApiKey.Trim()),
-                existing.CreatedAtUtc,
-                existing.UpdatedAtUtc));
-        });
+            return Results.Ok(MapResponse(result.Config));
+        })
+        .WithName("UpsertAiProvider")
+        .WithSummary("Creates or replaces an AI provider profile.")
+        .WithDescription("Validates provider configuration, encrypts the supplied API key, and stores a provider profile used by AI organization workflows.")
+        .Accepts<UpsertAiProviderConfigRequest>("application/json")
+        .Produces<AiProviderConfigResponse>(StatusCodes.Status201Created)
+        .Produces<AiProviderConfigResponse>(StatusCodes.Status200OK)
+        .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
 
         aiProviderGroup.MapGet("/{providerName}", async (
             string providerName,
-            ArcDropDbContext dbContext,
+            IAiProviderConfigService aiProviderService,
             CancellationToken cancellationToken) =>
         {
-            var normalizedName = providerName.Trim();
-            var config = await dbContext.AiProviderConfigs
-                .AsNoTracking()
-                .SingleOrDefaultAsync(x => x.ProviderName == normalizedName, cancellationToken);
+            var config = await aiProviderService.GetProviderAsync(providerName, cancellationToken);
+            return config is null ? Results.NotFound() : Results.Ok(MapResponse(config));
+        })
+        .WithName("GetAiProviderByName")
+        .WithSummary("Returns one AI provider profile.")
+        .WithDescription("Loads one provider configuration profile by its operator-facing provider name.")
+        .Produces<AiProviderConfigResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status404NotFound);
 
-            if (config is null)
-            {
-                return Results.NotFound();
-            }
-
-            return Results.Ok(new AiProviderConfigResponse(
-                config.Id,
-                config.ProviderName,
-                config.ApiEndpoint,
-                config.Model,
-                HasApiKey: !string.IsNullOrWhiteSpace(config.ApiKeyCipherText),
-                ApiKeyPreview: "****",
-                config.CreatedAtUtc,
-                config.UpdatedAtUtc));
-        });
-
-        // Update endpoint allows endpoint/model edits without forcing API key re-entry.
         aiProviderGroup.MapPut("/{providerName}", async (
             string providerName,
             UpdateAiProviderConfigRequest request,
-            ArcDropDbContext dbContext,
-            IAiProviderSecretProtector secretProtector,
+            IAiProviderConfigService aiProviderService,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.ApiEndpoint) || string.IsNullOrWhiteSpace(request.Model))
@@ -167,60 +121,62 @@ internal static class AiProviderEndpoints
                 });
             }
 
-            var normalizedName = providerName.Trim();
-            var config = await dbContext.AiProviderConfigs
-                .SingleOrDefaultAsync(x => x.ProviderName == normalizedName, cancellationToken);
+            var result = await aiProviderService.UpdateProviderAsync(
+                new UpdateAiProviderConfigInput(providerName, request.ApiEndpoint, request.Model, request.ApiKey),
+                cancellationToken);
 
-            if (config is null)
+            if (result.NotFound)
             {
                 return Results.NotFound();
             }
 
-            config.ApiEndpoint = request.ApiEndpoint.Trim();
-            config.Model = request.Model.Trim();
-
-            var hasNewApiKey = !string.IsNullOrWhiteSpace(request.ApiKey);
-            if (hasNewApiKey)
+            if (result.Config is null)
             {
-                config.ApiKeyCipherText = secretProtector.Protect(request.ApiKey!.Trim());
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    [result.ValidationTarget ?? nameof(request.ApiEndpoint)] = [result.ValidationError ?? "Provider update failed."]
+                });
             }
 
-            config.UpdatedAtUtc = DateTimeOffset.UtcNow;
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            var apiKeyPreview = hasNewApiKey
-                ? secretProtector.CreateMaskedPreview(request.ApiKey!.Trim())
-                : "****";
-
-            return Results.Ok(new AiProviderConfigResponse(
-                config.Id,
-                config.ProviderName,
-                config.ApiEndpoint,
-                config.Model,
-                HasApiKey: !string.IsNullOrWhiteSpace(config.ApiKeyCipherText),
-                ApiKeyPreview: apiKeyPreview,
-                config.CreatedAtUtc,
-                config.UpdatedAtUtc));
-        });
+            return Results.Ok(MapResponse(result.Config));
+        })
+        .WithName("UpdateAiProvider")
+        .WithSummary("Updates an AI provider profile.")
+        .WithDescription("Updates endpoint and model settings and optionally rotates the encrypted provider API key for an existing profile.")
+        .Accepts<UpdateAiProviderConfigRequest>("application/json")
+        .Produces<AiProviderConfigResponse>(StatusCodes.Status200OK)
+        .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status404NotFound);
 
         aiProviderGroup.MapDelete("/{providerName}", async (
             string providerName,
-            ArcDropDbContext dbContext,
+            IAiProviderConfigService aiProviderService,
             CancellationToken cancellationToken) =>
         {
-            var normalizedName = providerName.Trim();
-            var config = await dbContext.AiProviderConfigs
-                .SingleOrDefaultAsync(x => x.ProviderName == normalizedName, cancellationToken);
+            var deleted = await aiProviderService.DeleteProviderAsync(providerName, cancellationToken);
+            return deleted ? Results.NoContent() : Results.NotFound();
+        })
+        .WithName("DeleteAiProvider")
+        .WithSummary("Deletes an AI provider profile.")
+        .WithDescription("Removes one stored AI provider configuration profile by name.")
+        .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden)
+        .Produces(StatusCodes.Status404NotFound);
+    }
 
-            if (config is null)
-            {
-                return Results.NotFound();
-            }
-
-            dbContext.AiProviderConfigs.Remove(config);
-            await dbContext.SaveChangesAsync(cancellationToken);
-
-            return Results.NoContent();
-        });
+    private static AiProviderConfigResponse MapResponse(AiProviderConfigItem config)
+    {
+        return new AiProviderConfigResponse(
+            config.Id,
+            config.ProviderName,
+            config.ApiEndpoint,
+            config.Model,
+            config.HasApiKey,
+            config.ApiKeyPreview,
+            config.CreatedAtUtc,
+            config.UpdatedAtUtc);
     }
 }

@@ -1,7 +1,7 @@
 # ArcDrop API Bootstrap Guide
 
 Implements `TASK-002`, `TASK-003`, `TASK-004`, `TASK-009`, and first `TASK-010` backend slice.
-The latest update extends this bootstrap with hierarchical collections and bookmark-to-collection synchronization.
+The latest update extends this bootstrap with hierarchical collections, bookmark-to-collection synchronization, and automated OpenAPI documentation surfaced through Scalar.
 
 ## Covered Requirements
 
@@ -12,6 +12,7 @@ The latest update extends this bootstrap with hierarchical collections and bookm
 - `FR-008`: AI organization command endpoint with ArcDrop system prompt template application.
 - `FR-004`: Collection hierarchy and bookmark-to-collection membership management.
 - `NFR-006`: AI operation logs persisted with timestamp, operation type, and success/failure outcome.
+- `FR-002`: Self-host operators can inspect the API contract through generated OpenAPI and interactive reference docs.
 
 ## Configuration
 
@@ -36,6 +37,8 @@ Important settings:
 ## Endpoints
 
 - `GET /health`: service health and admin configuration detection.
+- `GET /openapi/v1.json`: generated OpenAPI document for tooling, integration, and documentation flows.
+- `GET /docs`: Scalar interactive API reference backed by the generated OpenAPI document.
 - `POST /api/auth/login`: fixed-admin login and JWT token issuance.
 - `GET /api/auth/me`: authenticated profile check.
 - `POST /api/auth/rotate-password`: authenticated fixed-admin password rotation.
@@ -57,6 +60,22 @@ Important settings:
 - `POST /api/collections`: create a root or child collection.
 - `PUT /api/collections/{id}`: update collection metadata and parent assignment with cycle protection.
 - `DELETE /api/collections/{id}`: delete a collection when no child collections remain.
+
+## API Documentation
+
+The API publishes its contract in two automated forms:
+
+- Runtime document: `GET /openapi/v1.json`
+- Interactive reference UI: `GET /docs`
+
+The document is generated from Minimal API metadata at runtime and also emitted during build through `Microsoft.Extensions.ApiDescription.Server`. Build-time generation is guarded so the document pipeline does not try to run PostgreSQL migrations while resolving the contract.
+
+Generated metadata now includes:
+
+- Stable operation IDs for client generation and contract diffs.
+- Route summaries and detailed descriptions grouped by domain tags.
+- Request body metadata for JSON and multipart endpoints.
+- Explicit success, validation, authentication, authorization, not-found, and problem response metadata where applicable.
 
 ## Migration Commands
 

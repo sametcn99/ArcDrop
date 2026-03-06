@@ -1,3 +1,11 @@
+using ArcDrop.Application.Bookmarks;
+using ArcDrop.Application.Collections;
+using ArcDrop.Application.Ai;
+using ArcDrop.Application.Portability;
+using ArcDrop.Infrastructure.Ai;
+using ArcDrop.Infrastructure.Bookmarks;
+using ArcDrop.Infrastructure.Collections;
+using ArcDrop.Infrastructure.Portability;
 using ArcDrop.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -32,6 +40,14 @@ public static class InfrastructureServiceCollectionExtensions
                 npgsqlOptions.MigrationsAssembly(typeof(ArcDropDbContext).Assembly.FullName);
                 npgsqlOptions.EnableRetryOnFailure(maxRetryCount: 5);
             }));
+
+        // Register persistence-backed bookmark workflows once so composition roots can consume application contracts.
+        services.AddScoped<IBookmarkManagementService, EfCoreBookmarkManagementService>();
+        services.AddScoped<ICollectionManagementService, EfCoreCollectionManagementService>();
+        services.AddScoped<IAiProviderConfigService, EfCoreAiProviderConfigService>();
+        services.AddScoped<IAiOrganizationOperationStore, EfCoreAiOrganizationOperationStore>();
+        services.AddScoped<IAiOrganizationService, AiOrganizationService>();
+        services.AddScoped<IDataPortabilityService, EfCoreDataPortabilityService>();
 
         return services;
     }

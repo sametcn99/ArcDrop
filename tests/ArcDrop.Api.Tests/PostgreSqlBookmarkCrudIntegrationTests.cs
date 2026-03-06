@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using ArcDrop.Api.Contracts;
 using ArcDrop.Infrastructure.Persistence;
 using DotNet.Testcontainers.Builders;
@@ -45,8 +47,8 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
             Environment.SetEnvironmentVariable(
                 "ARCDROP_ConnectionStrings__ArcDropPostgres",
                 _postgresContainer.GetConnectionString());
-            Environment.SetEnvironmentVariable("ARCDROP_Admin__Username", "admin-test");
-            Environment.SetEnvironmentVariable("ARCDROP_Admin__Password", "integration-test-password");
+            Environment.SetEnvironmentVariable("ARCDROP_ADMIN_USERNAME", "admin-test");
+            Environment.SetEnvironmentVariable("ARCDROP_ADMIN_PASSWORD", "integration-test-password");
 
             _factory = new WebApplicationFactory<Program>()
                 .WithWebHostBuilder(_ => { });
@@ -70,8 +72,8 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
 
         // Clean up process-level environment overrides to avoid cross-test contamination.
         Environment.SetEnvironmentVariable("ARCDROP_ConnectionStrings__ArcDropPostgres", null);
-        Environment.SetEnvironmentVariable("ARCDROP_Admin__Username", null);
-        Environment.SetEnvironmentVariable("ARCDROP_Admin__Password", null);
+        Environment.SetEnvironmentVariable("ARCDROP_ADMIN_USERNAME", null);
+        Environment.SetEnvironmentVariable("ARCDROP_ADMIN_PASSWORD", null);
 
         if (_factory is not null)
         {
@@ -353,6 +355,134 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
 
         var getAfterDeleteResponse = await client.GetAsync("/api/ai/providers/Anthropic");
         Assert.Equal(HttpStatusCode.NotFound, getAfterDeleteResponse.StatusCode);
+    }
+
+    /// <summary>
+    /// Verifies that AI organization requests persist auditable operation records and return deterministic suggestions.
+    /// This protects the refactor that moved organization orchestration behind an application-layer service.
+    /// </summary>
+    [Fact]
+    public async Task AiOrganization_OrganizeAndFetchOperation_ReturnsPersistedResult()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+
+        var client = _httpClient!;
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest(
+            "admin-test",
+            "integration-test-password"));
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        var loginPayload = await loginResponse.Content.ReadFromJsonAsync<LoginResponse>();
+        Assert.NotNull(loginPayload);
+
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", loginPayload!.AccessToken);
+
+        var providerResponse = await client.PostAsJsonAsync("/api/ai/providers", new UpsertAiProviderConfigRequest(
+            "OpenAI",
+            "https://api.openai.com/v1",
+            "gpt-4.1",
+            "test-secret-key-12345"));
+        Assert.Equal(HttpStatusCode.Created, providerResponse.StatusCode);
+
+        var organizeResponse = await client.PostAsJsonAsync("/api/ai/organize", new OrganizeBookmarkRequest(
+            "OpenAI",
+            "tag-suggestions",
+            "https://learn.microsoft.com/dotnet",
+            "DotNet API Guide",
+            "Reference material for API and .NET workflows"));
+
+        Assert.Equal(HttpStatusCode.OK, organizeResponse.StatusCode);
+
+        var organizePayload = await organizeResponse.Content.ReadFromJsonAsync<OrganizeBookmarkResponse>();
+        Assert.NotNull(organizePayload);
+        Assert.Equal("success", organizePayload!.OutcomeStatus);
+        Assert.NotEmpty(organizePayload.Results);
+
+        var operationResponse = await client.GetAsync($"/api/ai/operations/{organizePayload.OperationId}");
+        Assert.Equal(HttpStatusCode.OK, operationResponse.StatusCode);
+
+        var operationPayload = await operationResponse.Content.ReadFromJsonAsync<OrganizeBookmarkResponse>();
+        Assert.NotNull(operationPayload);
+        Assert.Equal(organizePayload.OperationId, operationPayload!.OperationId);
+        Assert.Equal(organizePayload.OperationType, operationPayload.OperationType);
+        Assert.Equal(organizePayload.Results.Count, operationPayload.Results.Count);
+    }
+
+    /// <summary>
+    /// Verifies JSON export and import flows through the public HTTP contract.
+    /// This protects the endpoint refactor that moved portability orchestration behind a service boundary.
+    /// </summary>
+    [Fact]
+    public async Task DataPortability_ExportAndImportJson_RoundTripsPortableEnvelope()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+
+        var client = _httpClient!;
+        var collectionResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
+            "Exports",
+            "Data portability folder",
+            ParentId: null));
+        Assert.Equal(HttpStatusCode.Created, collectionResponse.StatusCode);
+
+        var collection = await collectionResponse.Content.ReadFromJsonAsync<CollectionResponse>();
+        Assert.NotNull(collection);
+
+        var bookmarkResponse = await client.PostAsJsonAsync("/api/bookmarks", new CreateBookmarkRequest(
+            "https://example.com/exported",
+            "Exported Bookmark",
+            "Portable content"));
+        Assert.Equal(HttpStatusCode.Created, bookmarkResponse.StatusCode);
+
+        var bookmark = await bookmarkResponse.Content.ReadFromJsonAsync<BookmarkResponse>();
+        Assert.NotNull(bookmark);
+
+        var syncResponse = await client.PutAsJsonAsync($"/api/bookmarks/{bookmark!.Id}/collections", new SyncBookmarkCollectionsRequest(
+            [collection!.Id]));
+        Assert.Equal(HttpStatusCode.OK, syncResponse.StatusCode);
+
+        var exportResponse = await client.PostAsJsonAsync("/api/data/export", new ExportBookmarksRequest(
+            ExportFormat.Json,
+            [collection.Id]));
+        Assert.Equal(HttpStatusCode.OK, exportResponse.StatusCode);
+
+        var exportContent = await exportResponse.Content.ReadAsStringAsync();
+        var envelope = JsonSerializer.Deserialize<BookmarkExportEnvelope>(exportContent, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true
+        });
+
+        Assert.NotNull(envelope);
+        Assert.Single(envelope!.Collections);
+        Assert.Single(envelope.Bookmarks);
+        Assert.Equal("Exports", envelope.Collections[0].Name);
+        Assert.Equal("https://example.com/exported", envelope.Bookmarks[0].Url);
+
+        using var multipartContent = new MultipartFormDataContent();
+        using var fileContent = new ByteArrayContent(Encoding.UTF8.GetBytes(exportContent));
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        multipartContent.Add(fileContent, "file", "arcdrop-bookmarks.json");
+        multipartContent.Add(new StringContent("json"), "format");
+
+        var importResponse = await client.PostAsync("/api/data/import", multipartContent);
+        Assert.Equal(HttpStatusCode.OK, importResponse.StatusCode);
+
+        var importSummary = await importResponse.Content.ReadFromJsonAsync<ImportBookmarksResponse>();
+        Assert.NotNull(importSummary);
+        Assert.Equal(0, importSummary!.CollectionsCreated);
+        Assert.Equal(0, importSummary.BookmarksCreated);
+        Assert.Equal(0, importSummary.BookmarksUpdated);
+        Assert.Equal(1, importSummary.BookmarksSkipped);
     }
 
     /// <summary>

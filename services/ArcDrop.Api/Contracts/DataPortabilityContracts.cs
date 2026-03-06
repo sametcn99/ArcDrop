@@ -27,6 +27,14 @@ public enum ExportFormat
 public sealed record ExportBookmarksRequest(ExportFormat Format, IReadOnlyList<Guid>? CollectionIds);
 
 /// <summary>
+/// Represents the multipart import form accepted by the bookmark import endpoint.
+/// This contract exists for OpenAPI metadata so Scalar can describe the file upload shape accurately.
+/// </summary>
+/// <param name="Format">Optional format hint used when the uploaded file extension is ambiguous.</param>
+/// <param name="File">Bookmark file payload uploaded as multipart form data.</param>
+public sealed record ImportBookmarksMultipartRequest(string? Format, IFormFile File);
+
+/// <summary>
 /// Represents a single bookmark entry within a portable export/import payload.
 /// Uses collection names instead of IDs so the file is transferable across ArcDrop instances.
 /// </summary>

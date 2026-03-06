@@ -18,6 +18,12 @@ public sealed class AdminCredentialRotationTests
     [Fact]
     public async Task RotatePassword_WithValidCurrentPassword_UpdatesLoginCredentials()
     {
+        using var environment = new TestEnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ARCDROP_ADMIN_USERNAME"] = "admin-dev",
+            ["ARCDROP_ADMIN_PASSWORD"] = "ChangeThisDevelopmentPassword"
+        });
+
         using var factory = new WebApplicationFactory<Program>();
         using var client = factory.CreateClient();
 
@@ -56,6 +62,12 @@ public sealed class AdminCredentialRotationTests
     [Fact]
     public async Task RotatePassword_WithInvalidCurrentPassword_ReturnsUnauthorized()
     {
+        using var environment = new TestEnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ARCDROP_ADMIN_USERNAME"] = "admin-dev",
+            ["ARCDROP_ADMIN_PASSWORD"] = "ChangeThisDevelopmentPassword"
+        });
+
         using var factory = new WebApplicationFactory<Program>();
         using var client = factory.CreateClient();
 
@@ -83,6 +95,12 @@ public sealed class AdminCredentialRotationTests
     [Fact]
     public async Task RotatePassword_WithWeakPassword_ReturnsValidationProblem()
     {
+        using var environment = new TestEnvironmentVariableScope(new Dictionary<string, string?>
+        {
+            ["ARCDROP_ADMIN_USERNAME"] = "admin-dev",
+            ["ARCDROP_ADMIN_PASSWORD"] = "ChangeThisDevelopmentPassword"
+        });
+
         using var factory = new WebApplicationFactory<Program>();
         using var client = factory.CreateClient();
 

@@ -1,4 +1,4 @@
-namespace ArcDrop.Api.Security;
+namespace ArcDrop.Application.Authentication;
 
 /// <summary>
 /// Provides JWT token issuance for authenticated fixed-admin sessions.

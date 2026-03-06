@@ -1,10 +1,10 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
-using ArcDrop.Api.Configuration;
+using ArcDrop.Application.Authentication;
 using Microsoft.IdentityModel.Tokens;
 
-namespace ArcDrop.Api.Security;
+namespace ArcDrop.Infrastructure.Security;
 
 /// <summary>
 /// Creates JWT access tokens for the fixed-admin authentication model.

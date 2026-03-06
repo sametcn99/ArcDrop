@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace ArcDrop.Api.Configuration;
+namespace ArcDrop.Application.Authentication;
 
 /// <summary>
 /// Represents JWT token settings used by the fixed-admin authentication flow.

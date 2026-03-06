@@ -1,5 +1,5 @@
 using ArcDrop.Api.Contracts;
-using ArcDrop.Api.Security;
+using ArcDrop.Application.Authentication;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 
@@ -12,12 +12,12 @@ internal static class AuthEndpoints
 {
     public static void MapAuth(WebApplication app)
     {
-        var authGroup = app.MapGroup("/api/auth");
+        var authGroup = app.MapGroup("/api/auth").WithTags("Authentication");
 
-        authGroup.MapPost("/login", (
+        authGroup.MapPost("/login", async (
             LoginRequest request,
-            IAdminCredentialService credentialService,
-            IAdminTokenService tokenService) =>
+            IAdminAuthenticationService authenticationService,
+            CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
             {
@@ -28,15 +28,21 @@ internal static class AuthEndpoints
                 });
             }
 
-            var isCredentialValid = credentialService.ValidateCredentials(request.Username, request.Password);
-            if (!isCredentialValid)
+            var loginResult = await authenticationService.LoginAsync(request.Username, request.Password, cancellationToken);
+            if (!loginResult.Success || string.IsNullOrWhiteSpace(loginResult.AccessToken) || !loginResult.ExpiresAtUtc.HasValue)
             {
                 return Results.Unauthorized();
             }
 
-            var (accessToken, expiresAtUtc) = tokenService.CreateAccessToken(credentialService.Username);
-            return Results.Ok(new LoginResponse(accessToken, expiresAtUtc));
+            return Results.Ok(new LoginResponse(loginResult.AccessToken, loginResult.ExpiresAtUtc.Value));
         })
+        .WithName("LoginAdmin")
+        .WithSummary("Authenticates the fixed admin account.")
+        .WithDescription("Validates fixed-admin credentials and returns a signed JWT access token for protected ArcDrop API operations. Implements FR-002 authentication bootstrap behavior.")
+        .Accepts<LoginRequest>("application/json")
+        .Produces<LoginResponse>(StatusCodes.Status200OK)
+        .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .AllowAnonymous();
 
         authGroup.MapGet("/me", [Authorize] (ClaimsPrincipal user) =>
@@ -48,12 +54,20 @@ internal static class AuthEndpoints
                 ?? "unknown";
 
             return Results.Ok(new CurrentAdminResponse(username, Authenticated: true));
-        });
+        })
+        .WithName("GetCurrentAdminProfile")
+        .WithSummary("Returns the authenticated admin profile.")
+        .WithDescription("Reads the current JWT identity and returns a compact authenticated profile for session validation flows.")
+        .Produces<CurrentAdminResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
 
-        authGroup.MapPost("/rotate-password", [Authorize(Roles = "Admin")] (
+        authGroup.MapPost("/rotate-password", [Authorize(Roles = "Admin")] async (
             RotateAdminPasswordRequest request,
             ClaimsPrincipal user,
-            IAdminCredentialService credentialService) =>
+            IAdminCredentialService credentialService,
+            IAdminAuthenticationService authenticationService,
+            CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.CurrentPassword) || string.IsNullOrWhiteSpace(request.NewPassword))
             {
@@ -68,7 +82,11 @@ internal static class AuthEndpoints
                 ?? user.Identity?.Name
                 ?? credentialService.Username;
 
-            var rotationResult = credentialService.TryRotatePassword(username, request.CurrentPassword, request.NewPassword);
+            var rotationResult = await authenticationService.RotatePasswordAsync(
+                username,
+                request.CurrentPassword,
+                request.NewPassword,
+                cancellationToken);
             if (!rotationResult.Success)
             {
                 var validationErrors = new Dictionary<string, string[]>
@@ -76,7 +94,7 @@ internal static class AuthEndpoints
                     [nameof(request.NewPassword)] = [rotationResult.ValidationError ?? "Password rotation failed."]
                 };
 
-                if (rotationResult.ValidationError is "Current credentials are invalid.")
+                if (rotationResult.CurrentCredentialsInvalid)
                 {
                     return Results.Unauthorized();
                 }
@@ -85,6 +103,14 @@ internal static class AuthEndpoints
             }
 
             return Results.NoContent();
-        });
+        })
+        .WithName("RotateAdminPassword")
+        .WithSummary("Rotates the fixed admin password.")
+        .WithDescription("Uses the current password as proof of possession, enforces configured password policy rules, and updates the fixed-admin credential used by self-host deployments.")
+        .Accepts<RotateAdminPasswordRequest>("application/json")
+        .Produces(StatusCodes.Status204NoContent)
+        .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
     }
 }

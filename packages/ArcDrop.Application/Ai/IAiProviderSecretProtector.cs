@@ -1,4 +1,4 @@
-namespace ArcDrop.Api.Security;
+namespace ArcDrop.Application.Ai;
 
 /// <summary>
 /// Provides encryption and masking operations for AI provider API keys.

@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace ArcDrop.Api.Configuration;
+namespace ArcDrop.Application.Authentication;
 
 /// <summary>
 /// Defines fixed-admin credential policy rules enforced during password rotation.

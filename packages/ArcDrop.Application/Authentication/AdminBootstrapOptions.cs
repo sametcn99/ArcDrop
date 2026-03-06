@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace ArcDrop.Api.Configuration;
+namespace ArcDrop.Application.Authentication;
 
 /// <summary>
 /// Represents the fixed-admin bootstrap credentials used by ArcDrop v1.
@@ -25,7 +25,6 @@ public sealed class AdminBootstrapOptions
 
     /// <summary>
     /// Login password for the fixed-admin account.
-    /// A stronger secret policy will be enforced in authentication milestones.
     /// </summary>
     [Required]
     [MinLength(8)]

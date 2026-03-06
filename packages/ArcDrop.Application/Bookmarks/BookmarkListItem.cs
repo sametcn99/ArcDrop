@@ -9,4 +9,6 @@ public sealed record BookmarkListItem(
     string Url,
     string Title,
     string? Summary,
-    DateTimeOffset UpdatedAtUtc);
+    DateTimeOffset UpdatedAtUtc,
+    DateTimeOffset? CreatedAtUtc = null,
+    IReadOnlyList<Guid>? CollectionIds = null);

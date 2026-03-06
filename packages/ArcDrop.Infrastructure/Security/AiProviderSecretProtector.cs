@@ -1,6 +1,7 @@
+using ArcDrop.Application.Ai;
 using Microsoft.AspNetCore.DataProtection;
 
-namespace ArcDrop.Api.Security;
+namespace ArcDrop.Infrastructure.Security;
 
 /// <summary>
 /// Uses ASP.NET Core data protection to encrypt AI provider secrets before database persistence.

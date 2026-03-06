@@ -1,9 +1,11 @@
 using ArcDrop.Api.Configuration;
 using ArcDrop.Api.Endpoints;
-using ArcDrop.Api.Security;
+using ArcDrop.Api.OpenApi;
 using ArcDrop.Application.Ai;
+using ArcDrop.Application.Authentication;
 using ArcDrop.Infrastructure.DependencyInjection;
 using ArcDrop.Infrastructure.Persistence;
+using ArcDrop.Infrastructure.Security;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -64,6 +66,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddDataProtection();
 builder.Services.AddSingleton<IAdminTokenService>(_ => new AdminTokenService(jwtOptions));
 builder.Services.AddSingleton<IAiProviderSecretProtector, AiProviderSecretProtector>();
+builder.Services.AddSingleton<IAdminAuthenticationService, AdminAuthenticationService>();
 builder.Services.AddSingleton<IOrganizationSuggestionService, DeterministicOrganizationSuggestionService>();
 builder.Services.AddSingleton<IAdminCredentialService>(serviceProvider =>
 {
@@ -73,24 +76,22 @@ builder.Services.AddSingleton<IAdminCredentialService>(serviceProvider =>
     return new InMemoryAdminCredentialService(adminOptions.Username, adminOptions.Password, credentialPolicy);
 });
 
-builder.Services.AddOpenApi();
+builder.Services.AddArcDropApiDocumentation();
 builder.Services.AddArcDropInfrastructure(builder.Configuration);
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
+if (!OpenApiBuildTimeExecutionDetector.IsActive())
 {
+    using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<ArcDropDbContext>();
     dbContext.Database.Migrate();
 }
 
-if (app.Environment.IsDevelopment())
-{
-    app.MapOpenApi();
-}
-
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapArcDropApiDocumentation();
 
 // Register endpoint modules after middleware setup to keep route wiring centralized and auditable.
 app.MapArcDropEndpoints();

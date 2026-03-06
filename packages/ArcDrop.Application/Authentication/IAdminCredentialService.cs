@@ -1,4 +1,4 @@
-namespace ArcDrop.Api.Security;
+namespace ArcDrop.Application.Authentication;
 
 /// <summary>
 /// Provides fixed-admin credential validation and secure password rotation behavior.
@@ -23,5 +23,5 @@ public interface IAdminCredentialService
     /// <summary>
     /// Attempts to rotate the fixed-admin password using current credential proof.
     /// </summary>
-    (bool Success, string? ValidationError) TryRotatePassword(string username, string currentPassword, string newPassword);
+    AdminPasswordRotationResult TryRotatePassword(string username, string currentPassword, string newPassword);
 }

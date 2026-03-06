@@ -1,13 +1,13 @@
 using System.Security.Cryptography;
 using System.Text;
-using ArcDrop.Api.Configuration;
+using ArcDrop.Application.Authentication;
 
-namespace ArcDrop.Api.Security;
+namespace ArcDrop.Infrastructure.Security;
 
 /// <summary>
 /// Holds fixed-admin credentials in process memory and enforces rotation policy checks.
 /// This implementation is intentionally simple for v1 bootstrap and can be replaced by
-/// encrypted persistence in later milestones without changing endpoint contracts.
+/// encrypted persistence in later milestones without changing application contracts.
 /// </summary>
 public sealed class InMemoryAdminCredentialService : IAdminCredentialService
 {
@@ -60,23 +60,23 @@ public sealed class InMemoryAdminCredentialService : IAdminCredentialService
     }
 
     /// <inheritdoc />
-    public (bool Success, string? ValidationError) TryRotatePassword(string username, string currentPassword, string newPassword)
+    public AdminPasswordRotationResult TryRotatePassword(string username, string currentPassword, string newPassword)
     {
         lock (_syncLock)
         {
             if (!SecureEquals(username.Trim(), _username) || !SecureEquals(currentPassword, _password))
             {
-                return (false, "Current credentials are invalid.");
+                return new AdminPasswordRotationResult(false, true, "Current credentials are invalid.");
             }
 
             var policyError = ValidatePasswordAgainstPolicy(newPassword);
             if (!string.IsNullOrWhiteSpace(policyError))
             {
-                return (false, policyError);
+                return new AdminPasswordRotationResult(false, false, policyError);
             }
 
             _password = newPassword;
-            return (true, null);
+            return new AdminPasswordRotationResult(true, false, null);
         }
     }
 

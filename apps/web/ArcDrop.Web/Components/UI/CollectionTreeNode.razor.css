@@ -32,25 +32,26 @@
 
 .sidebar-collapse-icon {
     display: inline-flex;
-    font-size: 0.9rem;
+    align-items: center;
+    justify-content: center;
+    width: 0.75rem;
+    height: 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 600;
     line-height: 1;
-    transform: rotate(-90deg);
-    transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: color 160ms ease;
 }
 
 .sidebar-collapse-icon.is-expanded {
-    transform: rotate(0deg);
     color: rgba(255, 255, 255, 0.7);
 }
 
 .sidebar-collapse-icon::before {
-    content: "▶";
-    font-size: 0.6rem;
+    content: "+";
 }
 
 .sidebar-collapse-icon.is-expanded::before {
-    content: "▼";
-    font-size: 0.6rem;
+    content: "-";
 }
 
 .collection-tree-node__header {
@@ -99,11 +100,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.collection-tree-node__header-link:hover .collection-tree-node__name {
-    color: #ffffff;
-    background: rgba(255, 255, 255, 0.11);
 }
 
 .collection-tree-node__header.is-active .collection-tree-node__name {

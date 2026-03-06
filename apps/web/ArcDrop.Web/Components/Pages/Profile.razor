@@ -17,11 +17,7 @@
         <div class="profile-info__item">
             <span class="profile-info__label">Status</span>
             <span>
-                @if (IsAuthenticated)
-                {
-                    <span class="arc-badge arc-badge--success">Authenticated</span>
-                }
-                else
+                @if (!IsAuthenticated)
                 {
                     <span class="arc-badge arc-badge--muted">Not Authenticated</span>
                 }
