@@ -7,6 +7,8 @@ Implements `FR-002`, `NFR-002`, and `TASK-012`.
 - Docker Desktop or Docker Engine with Compose support.
 - .NET SDK 10.0 (for local development and optional migration commands).
 
+For a containerized contributor environment with PostgreSQL, SDK tooling, and forwarded debug ports already configured, see `docs/devcontainer-setup.md`.
+
 ## 1. Prepare Environment Variables
 
 1. Open `ops/docker/.env.example`.

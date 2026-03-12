@@ -1,0 +1,71 @@
+{
+	"$schema": "https://raw.githubusercontent.com/devcontainers/spec/main/schemas/devContainer.base.schema.json",
+	"name": "ArcDrop Dev Container",
+	"dockerComposeFile": "docker-compose.yml",
+	"service": "workspace",
+	"runServices": ["postgres"],
+	"workspaceFolder": "/workspaces/ArcDrop",
+	"shutdownAction": "stopCompose",
+	"remoteUser": "ubuntu",
+	"overrideCommand": false,
+	"features": {
+		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "lts"
+		},
+		"ghcr.io/devcontainers/features/git-lfs:1": {},
+		"ghcr.io/devcontainers/features/github-cli:1": {}
+	},
+	"mounts": ["source=arcdrop-nuget,target=/home/ubuntu/.nuget/packages,type=volume"],
+	"containerEnv": {
+		"DOTNET_NOLOGO": "1",
+		"DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
+		"DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+		"NUGET_XMLDOC_MODE": "skip"
+	},
+	"forwardPorts": [5237, 5290, 5432, 8080],
+	"portsAttributes": {
+		"5237": {
+			"label": "ArcDrop API",
+			"onAutoForward": "notify"
+		},
+		"5290": {
+			"label": "ArcDrop Web",
+			"onAutoForward": "openBrowser"
+		},
+		"5432": {
+			"label": "ArcDrop PostgreSQL",
+			"onAutoForward": "silent"
+		},
+		"8080": {
+			"label": "ArcDrop Docker API",
+			"onAutoForward": "notify"
+		}
+	},
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
+	"customizations": {
+		"vscode": {
+			"settings": {
+				"dotnet.defaultSolution": "ArcDrop.slnx",
+				"files.watcherExclude": {
+					"**/bin/**": true,
+					"**/obj/**": true
+				},
+				"search.exclude": {
+					"**/bin": true,
+					"**/obj": true
+				},
+				"terminal.integrated.defaultProfile.linux": "bash"
+			},
+			"extensions": [
+				"ms-dotnettools.csdevkit",
+				"ms-dotnettools.csharp",
+				"ms-vscode.powershell",
+				"ms-azuretools.vscode-docker",
+				"ms-ossdata.vscode-postgresql",
+				"github.copilot",
+				"github.copilot-chat"
+			]
+		}
+	}
+}

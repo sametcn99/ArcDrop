@@ -1,0 +1,44 @@
+services:
+  workspace:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    command: /bin/sh -c "while sleep 1000; do :; done"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      DOTNET_ENVIRONMENT: Development
+    init: true
+    networks:
+      - arcdrop-devcontainer
+    volumes:
+      - ..:/workspaces/ArcDrop:cached
+    working_dir: /workspaces/ArcDrop
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: arcdrop
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_USER: arcdrop
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arcdrop -d arcdrop"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - arcdrop-devcontainer
+    ports:
+      # Publish PostgreSQL on a non-default host port so an existing local PostgreSQL instance does not block container startup.
+      - "${ARCDROP_DEVCONTAINER_POSTGRES_HOST_PORT:-55432}:5432"
+    restart: unless-stopped
+    volumes:
+      - arcdrop-devcontainer-postgres:/var/lib/postgresql/data
+
+networks:
+  arcdrop-devcontainer:
+
+volumes:
+  arcdrop-devcontainer-postgres:

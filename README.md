@@ -9,6 +9,7 @@ Self-host-first bookmarking platform with cross-platform desktop clients and AI-
 - Adds PostgreSQL schema, migration pipeline, and CRUD integration tests (`FR-003`, `TASK-003`).
 - Adds fixed-admin JWT login baseline and authentication tests (`FR-002`, `TASK-004` baseline).
 - Adds self-host Docker Compose assets and runbook baseline (`FR-002`, `NFR-002`, `TASK-012` baseline).
+- Adds VS Code dev container onboarding for .NET 10, PostgreSQL, and shared workspace tooling (`FR-001`, `NFR-001`, `TASK-001` contributor environment slice).
 - Adds AI provider configuration lifecycle API (create/read/update/delete) with encrypted secret persistence (`FR-007`, `TASK-009`).
 - Adds initial AI organization command and auditable operation logging endpoints (`FR-008`, `NFR-006`, `TASK-010` slice).
 - Adds MAUI MVVM shell and route navigation foundation (`FR-005`, `TASK-005` slice).
@@ -26,6 +27,7 @@ Self-host-first bookmarking platform with cross-platform desktop clients and AI-
 - MAUI-related web host: `apps/web/ArcDrop.Web`
 - API tests project: `tests/ArcDrop.Api.Tests`
 - Self-host quickstart: `docs/self-host-quickstart.md`
+- Dev container setup: `docs/devcontainer-setup.md`
 - Contributor guide: `CONTRIBUTING.md`
 - Engineering guardrails: `.github/copilot-instructions.md`
 - Implementation plans: `.github/plan/`
