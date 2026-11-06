@@ -1,6 +1,6 @@
 # ArcDrop Avalonia Desktop Foundation Guide
 
-Implements the Linux desktop client boundary defined in `.github/copilot-instructions.md` ("Linux path: Avalonia UI reusing shared core libraries") and extends the `FR-004` bookmark workflows plus `FR-002` fixed-admin authentication to a third client surface.
+Implements the Linux desktop client boundary ("Linux path: Avalonia UI reusing shared core libraries") and extends the `FR-004` bookmark workflows plus `FR-002` fixed-admin authentication to a third client surface.
 
 The Avalonia client reuses the shared `ArcDrop.Application` DTOs (`BookmarkListItem`, `BookmarkDetailItem`, `CreateBookmarkInput`, `UpdateBookmarkInput`) so the API contracts stay single-sourced across the Blazor web host, the MAUI client, and the Avalonia client.
 

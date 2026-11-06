@@ -20,10 +20,9 @@ The mandatory folder layout and dependency-direction rules live in `docs/monorep
 3. Run the API: `dotnet run --project services/ArcDrop.Api/ArcDrop.Api.csproj` (listens on `http://localhost:5237`).
 4. Run the web app: `dotnet run --project apps/web/ArcDrop.Web/ArcDrop.Web.csproj` (listens on `http://localhost:5290`).
 
-## Engineering guardrails
+## Engineering conventions
 
-- Read `.github/copilot-instructions.md` before making changes; it defines the traceability ID families (`FR-*`, `NFR-*`, `AC-*`, `MILE-*`, `TASK-*`, `RISK-*`) and technology boundaries.
-- Every change cites the requirement or task it implements in its description, doc header, or code comments, matching the existing style.
+- Keep change descriptions, doc headers, and code comments consistent with the existing style of the codebase.
 - Secrets are injected through `ARCDROP_`-prefixed environment variables; never commit credentials or signing keys.
 - All API data endpoints require an admin bearer token; clients must attach `Authorization: Bearer <token>` headers.
 
@@ -45,7 +44,3 @@ MAUI builds need the `maui-android` / `maui-windows` workloads (`dotnet workload
 - Keep PRs scoped to one requirement or task slice.
 - Update the relevant `docs/` guide and README status list when behavior changes.
 - Include integration test coverage for new endpoints or contract changes.
-
-## Implementation plans
-
-Active implementation plans live in `.github/plan/`. See `.github/plan/web-gap-closure.md` for the current web workspace roadmap.

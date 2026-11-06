@@ -35,5 +35,3 @@ Self-host-first bookmarking platform with cross-platform desktop clients and AI-
 - Self-host quickstart: `docs/self-host-quickstart.md`
 - Dev container setup: `docs/devcontainer-setup.md`
 - Contributor guide: `CONTRIBUTING.md`
-- Engineering guardrails: `.github/copilot-instructions.md`
-- Implementation plans: `.github/plan/` (active: `web-gap-closure.md`)
