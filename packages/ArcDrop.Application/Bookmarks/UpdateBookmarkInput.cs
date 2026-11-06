@@ -7,4 +7,5 @@ public sealed record UpdateBookmarkInput(
     Guid Id,
     string Url,
     string Title,
-    string? Summary);
+    string? Summary,
+    IReadOnlyList<string>? Tags = null);

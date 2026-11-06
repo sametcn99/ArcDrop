@@ -17,13 +17,13 @@
             <form method="post" action="/auth/session/login">
                 <AntiforgeryToken />
                 <div class="mb-3">
-                    <label class="form-label">Username</label>
-                    <input class="form-control" name="Username" autocomplete="username" placeholder="Enter username" required />
+                    <label class="form-label" for="login-username">Username</label>
+                    <input id="login-username" class="form-control" name="Username" autocomplete="username" placeholder="Enter username" required />
                 </div>
 
                 <div class="mb-3">
-                    <label class="form-label">Password</label>
-                    <input class="form-control" name="Password" type="password" autocomplete="current-password" placeholder="Enter password" required />
+                    <label class="form-label" for="login-password">Password</label>
+                    <input id="login-password" class="form-control" name="Password" type="password" autocomplete="current-password" placeholder="Enter password" required />
                 </div>
 
                 <input type="hidden" name="returnUrl" value="@ResolvedReturnUrl" />
@@ -51,7 +51,7 @@
     [SupplyParameterFromQuery(Name = "error")]
     public string? ErrorCode { get; set; }
 
-    private string StatusText { get; set; } = "Use fixed-admin credentials to access protected API operations.";
+    private string StatusText { get; set; } = "Sign in with your administrator account.";
     private string? ErrorText { get; set; }
     private string ResolvedReturnUrl { get; set; } = "/bookmarks";
 
@@ -68,7 +68,7 @@
         }
 
         StatusText = string.IsNullOrWhiteSpace(ErrorText)
-            ? "Use fixed-admin credentials to access protected API operations."
+            ? "Sign in with your administrator account."
             : "Sign-in did not complete.";
     }
 
@@ -79,6 +79,7 @@
             "invalid_credentials" => "Authentication failed. Verify username and password.",
             "auth_service_error" => "Authentication service is unavailable. Try again shortly.",
             "invalid_auth_payload" => "Authentication response was invalid. Sign in again.",
+            "session_expired" => "Your session has expired. Sign in again to continue.",
             _ => null
         };
 }

@@ -64,16 +64,31 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<BookmarkDto>> GetBookmarksAsync(CancellationToken cancellationToken)
+    public async Task<BookmarkListResultDto> GetBookmarksAsync(BookmarkListRequest request, CancellationToken cancellationToken)
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.GetAsync("api/bookmarks", cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark list request", signOutOnUnauthorized: false, cancellationToken);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Get, BuildBookmarkListUri(request));
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark list request", signOutOnUnauthorized: true, cancellationToken);
 
-            return await response.Content.ReadFromJsonAsync<List<BookmarkDto>>(cancellationToken: cancellationToken)
-                ?? [];
+            return await response.Content.ReadFromJsonAsync<BookmarkListResultDto>(cancellationToken: cancellationToken)
+                ?? new BookmarkListResultDto([], 0, 1, request.PageSize);
         }, "Could not load bookmarks from ArcDrop API.");
+    }
+
+    /// <inheritdoc />
+    public async Task<BookmarkStatsDto> GetBookmarkStatsAsync(CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Get, "api/bookmarks/stats");
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark stats request", signOutOnUnauthorized: true, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<BookmarkStatsDto>(cancellationToken: cancellationToken)
+                ?? new BookmarkStatsDto(0, 0);
+        }, "Could not load bookmark stats.");
     }
 
     /// <inheritdoc />
@@ -81,13 +96,14 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.GetAsync($"api/bookmarks/{id}", cancellationToken);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Get, $"api/bookmarks/{id}");
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
                 return null;
             }
 
-            await EnsureSuccessOrThrowAsync(response, "Bookmark detail request", signOutOnUnauthorized: false, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark detail request", signOutOnUnauthorized: true, cancellationToken);
             return await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken);
         }, "Could not load bookmark details.");
     }
@@ -97,8 +113,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.PostAsJsonAsync("api/bookmarks", request, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark create request", signOutOnUnauthorized: false, cancellationToken);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Post, "api/bookmarks", request);
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark create request", signOutOnUnauthorized: true, cancellationToken);
 
             var payload = await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Bookmark create response payload was empty.");
@@ -112,8 +129,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.PutAsJsonAsync($"api/bookmarks/{id}", request, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark update request", signOutOnUnauthorized: false, cancellationToken);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Put, $"api/bookmarks/{id}", request);
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark update request", signOutOnUnauthorized: true, cancellationToken);
 
             var payload = await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Bookmark update response payload was empty.");
@@ -127,8 +145,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.DeleteAsync($"api/bookmarks/{id}", cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark delete request", signOutOnUnauthorized: false, cancellationToken);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Delete, $"api/bookmarks/{id}");
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark delete request", signOutOnUnauthorized: true, cancellationToken);
         }, "Could not delete bookmark.");
     }
 
@@ -137,12 +156,13 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.PutAsJsonAsync(
+            using var httpRequest = await CreateAuthorizedRequestAsync(
+                HttpMethod.Put,
                 $"api/bookmarks/{bookmarkId}/collections",
-                new SyncBookmarkCollectionsRequest { CollectionIds = collectionIds },
-                cancellationToken);
+                new SyncBookmarkCollectionsRequest { CollectionIds = collectionIds });
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
 
-            await EnsureSuccessOrThrowAsync(response, "Bookmark collection sync request", signOutOnUnauthorized: false, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark collection sync request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Bookmark collection sync response payload was empty.");
@@ -154,8 +174,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.GetAsync("api/collections", cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Collection list request", signOutOnUnauthorized: false, cancellationToken);
+            using var listRequest = await CreateAuthorizedRequestAsync(HttpMethod.Get, "api/collections");
+            using var response = await _httpClient.SendAsync(listRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection list request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<List<CollectionDto>>(cancellationToken: cancellationToken)
                 ?? [];
@@ -167,8 +188,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.GetAsync("api/collections/tree", cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Collection tree request", signOutOnUnauthorized: false, cancellationToken);
+            using var treeRequest = await CreateAuthorizedRequestAsync(HttpMethod.Get, "api/collections/tree");
+            using var response = await _httpClient.SendAsync(treeRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection tree request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<List<CollectionTreeNodeDto>>(cancellationToken: cancellationToken)
                 ?? [];
@@ -180,8 +202,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.PostAsJsonAsync("api/collections", request, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Collection create request", signOutOnUnauthorized: false, cancellationToken);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Post, "api/collections", request);
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection create request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<CollectionDto>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Collection create response payload was empty.");
@@ -193,8 +216,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.PutAsJsonAsync($"api/collections/{collectionId}", request, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Collection update request", signOutOnUnauthorized: false, cancellationToken);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Put, $"api/collections/{collectionId}", request);
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection update request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<CollectionDto>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Collection update response payload was empty.");
@@ -206,8 +230,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.DeleteAsync($"api/collections/{collectionId}", cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Collection delete request", signOutOnUnauthorized: false, cancellationToken);
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Delete, $"api/collections/{collectionId}");
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Collection delete request", signOutOnUnauthorized: true, cancellationToken);
         }, "Could not delete collection.");
     }
 
@@ -338,8 +363,9 @@ public sealed class ArcDropApiClient : IArcDropApiClient
     {
         return await ExecuteAsync(async () =>
         {
-            using var response = await _httpClient.PostAsJsonAsync("api/data/export", request, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark export request", signOutOnUnauthorized: false, cancellationToken);
+            using var exportRequest = await CreateAuthorizedRequestAsync(HttpMethod.Post, "api/data/export", request);
+            using var response = await _httpClient.SendAsync(exportRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark export request", signOutOnUnauthorized: true, cancellationToken);
 
             var fileBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
@@ -364,12 +390,111 @@ public sealed class ArcDropApiClient : IArcDropApiClient
             content.Add(streamContent, "file", fileName);
             content.Add(new StringContent(format), "format");
 
-            using var response = await _httpClient.PostAsync("api/data/import", content, cancellationToken);
-            await EnsureSuccessOrThrowAsync(response, "Bookmark import request", signOutOnUnauthorized: false, cancellationToken);
+            using var importRequest = await CreateAuthorizedRequestAsync(HttpMethod.Post, "api/data/import");
+            importRequest.Content = content;
+            using var response = await _httpClient.SendAsync(importRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark import request", signOutOnUnauthorized: true, cancellationToken);
 
             return await response.Content.ReadFromJsonAsync<ImportBookmarksResponse>(cancellationToken: cancellationToken)
                 ?? throw new ApiClientException(ApiErrorKind.Client, "Import response payload was empty.");
         }, "Could not import bookmarks.");
+    }
+
+    /// <inheritdoc />
+    public async Task<BookmarkDto> SyncBookmarkTagsAsync(Guid bookmarkId, IReadOnlyList<string> tags, CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var httpRequest = await CreateAuthorizedRequestAsync(
+                HttpMethod.Put,
+                $"api/bookmarks/{bookmarkId}/tags",
+                new SyncBookmarkTagsRequest { Tags = tags });
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Bookmark tag sync request", signOutOnUnauthorized: true, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<BookmarkDto>(cancellationToken: cancellationToken)
+                ?? throw new ApiClientException(ApiErrorKind.Client, "Bookmark tag sync response payload was empty.");
+        }, "Could not update bookmark tags.");
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<TagDto>> GetTagsAsync(CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Get, "api/bookmarks/tags");
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "Tag list request", signOutOnUnauthorized: true, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<List<TagDto>>(cancellationToken: cancellationToken)
+                ?? [];
+        }, "Could not load tags.");
+    }
+
+    /// <inheritdoc />
+    public async Task<AiOperationListResultDto> ListAiOperationsAsync(int page, int pageSize, string? providerName, string? operationType, CancellationToken cancellationToken)
+    {
+        return await ExecuteAsync(async () =>
+        {
+            var query = new List<string>
+            {
+                $"page={page}",
+                $"pageSize={pageSize}"
+            };
+
+            if (!string.IsNullOrWhiteSpace(providerName))
+            {
+                query.Add($"providerName={Uri.EscapeDataString(providerName.Trim())}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(operationType))
+            {
+                query.Add($"operationType={Uri.EscapeDataString(operationType.Trim())}");
+            }
+
+            using var httpRequest = await CreateAuthorizedRequestAsync(HttpMethod.Get, $"api/ai/operations?{string.Join("&", query)}");
+            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+            await EnsureSuccessOrThrowAsync(response, "AI operation history request", signOutOnUnauthorized: true, cancellationToken);
+
+            return await response.Content.ReadFromJsonAsync<AiOperationListResultDto>(cancellationToken: cancellationToken)
+                ?? new AiOperationListResultDto([], 0, page, pageSize);
+        }, "Could not load AI operation history.");
+    }
+
+    private static string BuildBookmarkListUri(BookmarkListRequest request)
+    {
+        var query = new List<string>
+        {
+            $"page={request.Page}",
+            $"pageSize={request.PageSize}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            query.Add($"search={Uri.EscapeDataString(request.Search.Trim())}");
+        }
+
+        if (request.CollectionId is { } collectionId)
+        {
+            query.Add($"collectionId={collectionId}");
+        }
+
+        if (request.UnassignedOnly == true)
+        {
+            query.Add("unassignedOnly=true");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Tag))
+        {
+            query.Add($"tag={Uri.EscapeDataString(request.Tag.Trim())}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.Sort))
+        {
+            query.Add($"sort={Uri.EscapeDataString(request.Sort.Trim())}");
+        }
+
+        return $"api/bookmarks?{string.Join("&", query)}";
     }
 
     private async Task<HttpRequestMessage> CreateAuthorizedRequestAsync(HttpMethod method, string requestUri, object? payload = null)

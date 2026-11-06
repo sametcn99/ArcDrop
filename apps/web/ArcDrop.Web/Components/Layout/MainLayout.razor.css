@@ -192,3 +192,8 @@ main {
 	right: 0.75rem;
 	top: 0.5rem;
 }
+
+.top-row-logout-form {
+    display: inline-flex;
+    margin-left: 0.5rem;
+}

@@ -93,4 +93,13 @@ public sealed class AiOrganizationService(
     {
         return operationStore.GetOperationAsync(operationId, cancellationToken);
     }
+
+    /// <inheritdoc />
+    public async Task<AiOperationListResult> ListOperationsAsync(AiOperationListQuery query, CancellationToken cancellationToken)
+    {
+        var normalized = query.Normalized();
+        var (items, totalCount) = await operationStore.ListOperationsAsync(normalized, cancellationToken);
+
+        return new AiOperationListResult(items, totalCount, normalized.Page, normalized.PageSize);
+    }
 }

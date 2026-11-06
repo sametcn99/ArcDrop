@@ -45,4 +45,11 @@ public interface IAiOrganizationOperationStore
     /// Returns one persisted operation by identifier, or null when it does not exist.
     /// </summary>
     Task<AiOrganizationOperationItem?> GetOperationAsync(Guid operationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns one page of operation audit records ordered newest first, with the total matching count.
+    /// </summary>
+    Task<(IReadOnlyList<AiOperationSummaryItem> Items, int TotalCount)> ListOperationsAsync(
+        AiOperationListQuery query,
+        CancellationToken cancellationToken);
 }

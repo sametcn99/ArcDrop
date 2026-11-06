@@ -1,83 +1,76 @@
 @page "/settings"
 
+@using ArcDrop.Web.Components.UI
+@using ArcDrop.Web.Components.UI.Settings
+
 @inject IArcDropApiClient ApiClient
-@inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IJSRuntime JS
 @inject ISharedStateService SharedStateService
-@using ArcDrop.Web.Components.UI.Settings
+@inject NavigationManager NavigationManager
 
 <PageTitle>Settings</PageTitle>
 
 <div class="page-header">
     <div>
         <h1>Settings</h1>
-        <p class="page-subtitle">Manage account, security, and AI configuration from one workspace.</p>
+        <p class="page-subtitle">Manage account, security, AI configuration, and data portability from one workspace.</p>
     </div>
 </div>
 
 <div class="settings-shell card-shell">
     <aside class="settings-nav" role="tablist" aria-label="Settings sections">
-        <button class="settings-nav__item @(IsActive(SettingsSection.Account) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.Account))" role="tab" aria-selected="@IsActive(SettingsSection.Account)">
-            Account
-        </button>
-        <button class="settings-nav__item @(IsActive(SettingsSection.Security) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.Security))" role="tab" aria-selected="@IsActive(SettingsSection.Security)">
-            Security
-        </button>
-        <button class="settings-nav__item @(IsActive(SettingsSection.AiProviders) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.AiProviders))" role="tab" aria-selected="@IsActive(SettingsSection.AiProviders)">
-            AI Providers
-        </button>
-        <button class="settings-nav__item @(IsActive(SettingsSection.AiOperations) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.AiOperations))" role="tab" aria-selected="@IsActive(SettingsSection.AiOperations)">
-            AI Operations
-        </button>
-        <button class="settings-nav__item @(IsActive(SettingsSection.Data) ? "is-active" : string.Empty)" @onclick="(() => SetSection(SettingsSection.Data))" role="tab" aria-selected="@IsActive(SettingsSection.Data)">
-            Data
-        </button>
+        <button id="settings-tab-account"
+                class="settings-nav__item @(IsActive(SettingsSection.Account) ? "is-active" : string.Empty)"
+                @onclick="(() => SetSection(SettingsSection.Account))"
+                role="tab"
+                aria-selected="@IsActive(SettingsSection.Account)"
+                aria-controls="settings-panel">Account</button>
+        <button id="settings-tab-security"
+                class="settings-nav__item @(IsActive(SettingsSection.Security) ? "is-active" : string.Empty)"
+                @onclick="(() => SetSection(SettingsSection.Security))"
+                role="tab"
+                aria-selected="@IsActive(SettingsSection.Security)"
+                aria-controls="settings-panel">Security</button>
+        <button id="settings-tab-ai-providers"
+                class="settings-nav__item @(IsActive(SettingsSection.AiProviders) ? "is-active" : string.Empty)"
+                @onclick="(() => SetSection(SettingsSection.AiProviders))"
+                role="tab"
+                aria-selected="@IsActive(SettingsSection.AiProviders)"
+                aria-controls="settings-panel">AI Providers</button>
+        <button id="settings-tab-ai-operations"
+                class="settings-nav__item @(IsActive(SettingsSection.AiOperations) ? "is-active" : string.Empty)"
+                @onclick="(() => SetSection(SettingsSection.AiOperations))"
+                role="tab"
+                aria-selected="@IsActive(SettingsSection.AiOperations)"
+                aria-controls="settings-panel">AI Operations</button>
+        <button id="settings-tab-data"
+                class="settings-nav__item @(IsActive(SettingsSection.Data) ? "is-active" : string.Empty)"
+                @onclick="(() => SetSection(SettingsSection.Data))"
+                role="tab"
+                aria-selected="@IsActive(SettingsSection.Data)"
+                aria-controls="settings-panel">Data</button>
     </aside>
 
-    <section class="settings-content" role="tabpanel">
+    <section class="settings-content" id="settings-panel" role="tabpanel">
         @if (ActiveSection == SettingsSection.Account)
         {
-            <SettingsAccountSection
-                IsAuthenticated="IsAuthenticated"
-                CurrentUsername="CurrentUsername"
-                TokenExpiresText="TokenExpiresText"
-                IsProfileBusy="IsProfileBusy"
-                OnRefreshProfile="LoadProfileAsync" />
+            <AccountSessionPanel />
         }
 
         @if (ActiveSection == SettingsSection.Security)
         {
-            <SettingsSecuritySection
-                RotationModel="RotationModel"
-                IsSecurityBusy="IsSecurityBusy"
-                OnRotatePassword="RotatePasswordAsync" />
+            <PasswordRotationPanel />
         }
 
         @if (ActiveSection == SettingsSection.AiProviders)
         {
-            <SettingsAiProvidersSection
-                ProviderFormModel="ProviderFormModel"
-                Providers="Providers"
-                IsEditProviderMode="IsEditProviderMode"
-                IsProviderBusy="IsProviderBusy"
-                OnSaveProvider="SaveProviderAsync"
-                OnLoadProviders="LoadProvidersAsync"
-                OnBeginCreateProvider="BeginCreateProvider"
-                OnBeginEditProvider="BeginEditProvider"
-                OnDeleteProvider="DeleteProviderAsync" />
+            <AiProviderManager />
         }
 
         @if (ActiveSection == SettingsSection.AiOperations)
         {
-            <SettingsAiOperationsSection
-                OperationModel="OperationModel"
-                LookupModel="LookupModel"
-                IsOperationBusy="IsOperationBusy"
-                IsLookupBusy="IsLookupBusy"
-                LookupResult="LookupResult"
-                LastOperationResult="LastOperationResult"
-                OnRunOperation="RunOperationAsync"
-                OnLookupOperation="LookupOperationAsync" />
+            <AiOrganizeForm />
+            <p class="status-hint mt-3">Need the full audit trail? <a href="/ai/operations">Browse operation history</a>.</p>
         }
 
         @if (ActiveSection == SettingsSection.Data)
@@ -126,35 +119,8 @@
 
     private SettingsSection ActiveSection { get; set; } = SettingsSection.Account;
 
-    private RotateAdminPasswordRequest RotationModel { get; set; } = new();
-    private ProviderFormState ProviderFormModel { get; set; } = new();
-    private OrganizeBookmarkRequest OperationModel { get; set; } = new()
-    {
-        OperationType = "tag-suggestions",
-        BookmarkUrl = "https://example.com",
-        BookmarkTitle = "Example Bookmark"
-    };
-
-    private OperationLookupFormModel LookupModel { get; set; } = new();
-
-    private readonly List<AiProviderConfigResponse> Providers = [];
-
-    private string? CurrentUsername { get; set; }
-    private bool IsAuthenticated { get; set; }
-    private string TokenExpiresText { get; set; } = "N/A";
-
-    private bool IsProfileBusy { get; set; }
-    private bool IsSecurityBusy { get; set; }
-    private bool IsProviderBusy { get; set; }
-    private bool IsOperationBusy { get; set; }
-    private bool IsLookupBusy { get; set; }
-    private bool IsEditProviderMode { get; set; }
-
     private string? ErrorText { get; set; }
     private string StatusText { get; set; } = "Settings workspace ready.";
-
-    private OrganizeBookmarkResponse? LastOperationResult { get; set; }
-    private OrganizeBookmarkResponse? LookupResult { get; set; }
 
     // Data export/import state fields for the Data tab in Settings.
     private ExportFormat ExportSelectedFormat { get; set; } = ExportFormat.Json;
@@ -168,10 +134,24 @@
     private bool IsImportBusy { get; set; }
     private ImportBookmarksResponse? ImportResult { get; set; }
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        await LoadProfileAsync();
-        await LoadProvidersAsync();
+        // Hash deep links (for example /settings#security) select the initial tab.
+        ActiveSection = MapFragmentToSection(NavigationManager.Uri);
+    }
+
+    private static SettingsSection MapFragmentToSection(string uri)
+    {
+        var fragment = uri.Contains('#') ? uri[uri.IndexOf('#', StringComparison.Ordinal)..] : string.Empty;
+
+        return fragment.ToLowerInvariant() switch
+        {
+            "#security" => SettingsSection.Security,
+            "#ai" or "#ai-providers" => SettingsSection.AiProviders,
+            "#operations" or "#ai-operations" => SettingsSection.AiOperations,
+            "#data" => SettingsSection.Data,
+            _ => SettingsSection.Account
+        };
     }
 
     private void SetSection(SettingsSection section)
@@ -182,302 +162,6 @@
 
     private bool IsActive(SettingsSection section)
         => ActiveSection == section;
-
-    private async Task LoadProfileAsync()
-    {
-        IsProfileBusy = true;
-        ErrorText = null;
-        StatusText = "Loading profile...";
-
-        try
-        {
-            await RefreshAuthenticationProjectionAsync();
-
-            if (!IsAuthenticated)
-            {
-                CurrentUsername = null;
-                StatusText = "Session is not authenticated.";
-                return;
-            }
-
-            // Explicit /me lookup verifies token validity for account-sensitive settings content.
-            var profile = await ApiClient.GetCurrentAdminAsync(CancellationToken.None);
-            CurrentUsername = profile?.Username;
-            StatusText = profile is null ? "Session is not authenticated." : "Profile loaded successfully.";
-        }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-            StatusText = "Profile load failed.";
-        }
-        catch (Exception)
-        {
-            ErrorText = "Could not load profile data.";
-            StatusText = "Profile load failed.";
-        }
-        finally
-        {
-            IsProfileBusy = false;
-        }
-    }
-
-    private async Task RotatePasswordAsync()
-    {
-        IsSecurityBusy = true;
-        ErrorText = null;
-        StatusText = "Rotating password...";
-
-        try
-        {
-            await ApiClient.RotatePasswordAsync(RotationModel, CancellationToken.None);
-            RotationModel = new RotateAdminPasswordRequest();
-            StatusText = "Password rotated successfully.";
-        }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-            StatusText = "Rotation did not complete.";
-        }
-        catch (Exception)
-        {
-            ErrorText = "Password rotation failed. Check current password and policy constraints.";
-            StatusText = "Rotation did not complete.";
-        }
-        finally
-        {
-            IsSecurityBusy = false;
-        }
-    }
-
-    private async Task LoadProvidersAsync()
-    {
-        IsProviderBusy = true;
-        ErrorText = null;
-        StatusText = "Loading providers...";
-
-        try
-        {
-            var payload = await ApiClient.GetAiProvidersAsync(CancellationToken.None);
-            Providers.Clear();
-            Providers.AddRange(payload.OrderBy(x => x.ProviderName));
-            StatusText = $"Loaded {Providers.Count} provider profile(s).";
-        }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-            StatusText = "Provider load failed.";
-        }
-        catch (Exception)
-        {
-            ErrorText = "Could not load provider profiles.";
-            StatusText = "Provider load failed.";
-        }
-        finally
-        {
-            IsProviderBusy = false;
-        }
-    }
-
-    private void BeginCreateProvider()
-    {
-        IsEditProviderMode = false;
-        ProviderFormModel = new ProviderFormState();
-        ErrorText = null;
-        StatusText = "Create a new provider profile.";
-    }
-
-    private void BeginEditProvider(AiProviderConfigResponse provider)
-    {
-        IsEditProviderMode = true;
-        ProviderFormModel = new ProviderFormState
-        {
-            ProviderName = provider.ProviderName,
-            ApiEndpoint = provider.ApiEndpoint,
-            Model = provider.Model,
-            ApiKey = string.Empty
-        };
-
-        ErrorText = null;
-        StatusText = $"Editing provider '{provider.ProviderName}'.";
-    }
-
-    private async Task SaveProviderAsync()
-    {
-        IsProviderBusy = true;
-        ErrorText = null;
-        StatusText = IsEditProviderMode ? "Updating provider..." : "Creating provider...";
-
-        try
-        {
-            // Provider update allows preserving existing encrypted key by submitting null.
-            if (IsEditProviderMode)
-            {
-                await ApiClient.UpdateAiProviderAsync(
-                    ProviderFormModel.ProviderName,
-                    new UpdateAiProviderConfigRequest
-                    {
-                        ApiEndpoint = ProviderFormModel.ApiEndpoint,
-                        Model = ProviderFormModel.Model,
-                        ApiKey = string.IsNullOrWhiteSpace(ProviderFormModel.ApiKey) ? null : ProviderFormModel.ApiKey
-                    },
-                    CancellationToken.None);
-            }
-            else
-            {
-                await ApiClient.UpsertAiProviderAsync(
-                    new UpsertAiProviderConfigRequest
-                    {
-                        ProviderName = ProviderFormModel.ProviderName,
-                        ApiEndpoint = ProviderFormModel.ApiEndpoint,
-                        Model = ProviderFormModel.Model,
-                        ApiKey = ProviderFormModel.ApiKey
-                    },
-                    CancellationToken.None);
-            }
-
-            if (!IsEditProviderMode)
-            {
-                ProviderFormModel = new ProviderFormState();
-            }
-
-            StatusText = IsEditProviderMode ? "Provider updated successfully." : "Provider created successfully.";
-            await LoadProvidersAsync();
-        }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-            StatusText = "Save operation did not complete.";
-        }
-        catch (Exception)
-        {
-            ErrorText = IsEditProviderMode ? "Provider update failed." : "Provider create failed.";
-            StatusText = "Save operation did not complete.";
-        }
-        finally
-        {
-            IsProviderBusy = false;
-        }
-    }
-
-    private async Task DeleteProviderAsync(string providerName)
-    {
-        IsProviderBusy = true;
-        ErrorText = null;
-        StatusText = $"Deleting provider '{providerName}'...";
-
-        try
-        {
-            await ApiClient.DeleteAiProviderAsync(providerName, CancellationToken.None);
-            if (IsEditProviderMode && string.Equals(ProviderFormModel.ProviderName, providerName, StringComparison.OrdinalIgnoreCase))
-            {
-                BeginCreateProvider();
-            }
-
-            StatusText = "Provider deleted successfully.";
-            await LoadProvidersAsync();
-        }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-            StatusText = "Delete operation did not complete.";
-        }
-        catch (Exception)
-        {
-            ErrorText = "Provider delete failed.";
-            StatusText = "Delete operation did not complete.";
-        }
-        finally
-        {
-            IsProviderBusy = false;
-        }
-    }
-
-    private async Task RunOperationAsync()
-    {
-        IsOperationBusy = true;
-        ErrorText = null;
-        StatusText = "Running organization operation...";
-
-        try
-        {
-            LastOperationResult = await ApiClient.OrganizeBookmarkAsync(OperationModel, CancellationToken.None);
-            StatusText = $"Operation completed with status '{LastOperationResult.OutcomeStatus}'.";
-        }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-            StatusText = "Operation did not complete.";
-            LastOperationResult = null;
-        }
-        catch (Exception)
-        {
-            ErrorText = "Organization command failed.";
-            StatusText = "Operation did not complete.";
-            LastOperationResult = null;
-        }
-        finally
-        {
-            IsOperationBusy = false;
-        }
-    }
-
-    private async Task LookupOperationAsync()
-    {
-        IsLookupBusy = true;
-        ErrorText = null;
-        StatusText = "Loading operation data...";
-
-        try
-        {
-            if (!Guid.TryParse(LookupModel.OperationId, out var operationId))
-            {
-                ErrorText = "Operation ID must be a valid GUID value.";
-                StatusText = "Lookup input validation failed.";
-                LookupResult = null;
-                return;
-            }
-
-            LookupResult = await ApiClient.GetOperationByIdAsync(operationId, CancellationToken.None);
-            StatusText = LookupResult is null ? "Operation was not found or session is not authorized." : "Operation loaded successfully.";
-        }
-        catch (ApiClientException exception)
-        {
-            ErrorText = exception.UserMessage;
-            StatusText = "Lookup request failed.";
-            LookupResult = null;
-        }
-        catch (Exception)
-        {
-            ErrorText = "Could not load operation details.";
-            StatusText = "Lookup request failed.";
-            LookupResult = null;
-        }
-        finally
-        {
-            IsLookupBusy = false;
-        }
-    }
-
-    private async Task RefreshAuthenticationProjectionAsync()
-    {
-        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
-        IsAuthenticated = authState.User.Identity?.IsAuthenticated is true;
-
-        if (!IsAuthenticated)
-        {
-            TokenExpiresText = "N/A";
-            return;
-        }
-
-        var expiresAtClaim = authState.User.FindFirst("arcdrop:expires_at_unix")?.Value;
-        if (long.TryParse(expiresAtClaim, out var expiresAtUnix))
-        {
-            TokenExpiresText = DateTimeOffset.FromUnixTimeSeconds(expiresAtUnix).ToLocalTime().ToString("g");
-            return;
-        }
-
-        TokenExpiresText = "N/A";
-    }
 
     /// <summary>
     /// Loads collection list for the export collection picker when scope changes to "Selected".
@@ -491,6 +175,10 @@
                 var collections = await ApiClient.GetCollectionsAsync(CancellationToken.None);
                 ExportCollections.Clear();
                 ExportCollections.AddRange(collections.OrderBy(x => x.Name));
+            }
+            catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+            {
+                SessionRedirect.RedirectToLogin(NavigationManager);
             }
             catch (ApiClientException exception)
             {
@@ -523,23 +211,16 @@
 
     private Task HandleExportCollectionToggleAsync(ExportCollectionToggleEventArgs args)
     {
-        ToggleExportCollection(args.CollectionId, args.IsChecked);
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Toggles a collection's inclusion in the export selection set.
-    /// </summary>
-    private void ToggleExportCollection(Guid collectionId, bool isChecked)
-    {
-        if (isChecked)
+        if (args.IsChecked)
         {
-            ExportSelectedCollectionIds.Add(collectionId);
+            ExportSelectedCollectionIds.Add(args.CollectionId);
         }
         else
         {
-            ExportSelectedCollectionIds.Remove(collectionId);
+            ExportSelectedCollectionIds.Remove(args.CollectionId);
         }
+
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -581,6 +262,10 @@
             // Trigger browser file download using JavaScript Blob API.
             await DownloadFileFromBytesAsync(fileBytes, fileName, contentType);
             StatusText = "Export completed successfully.";
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
         }
         catch (ApiClientException exception)
         {
@@ -646,6 +331,10 @@
                 SharedStateService.NotifyCollectionsUpdated();
             }
         }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
+        }
         catch (ApiClientException exception)
         {
             ErrorText = exception.UserMessage;
@@ -672,5 +361,4 @@
     {
         await JS.InvokeVoidAsync("arcDropDownloadFile", Convert.ToBase64String(bytes), fileName, contentType);
     }
-
 }

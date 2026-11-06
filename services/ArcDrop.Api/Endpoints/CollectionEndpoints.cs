@@ -10,7 +10,9 @@ internal static class CollectionEndpoints
 {
     public static void MapCollections(WebApplication app)
     {
-        var collectionsGroup = app.MapGroup("/api/collections").WithTags("Collections");
+        var collectionsGroup = app.MapGroup("/api/collections")
+            .WithTags("Collections")
+            .RequireAuthorization();
 
         collectionsGroup.MapGet("/", async (ICollectionManagementService collectionService, CancellationToken cancellationToken) =>
         {

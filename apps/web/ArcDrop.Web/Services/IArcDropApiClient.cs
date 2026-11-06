@@ -10,7 +10,9 @@ public interface IArcDropApiClient
 
     Task RotatePasswordAsync(RotateAdminPasswordRequest request, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<BookmarkDto>> GetBookmarksAsync(CancellationToken cancellationToken);
+    Task<BookmarkListResultDto> GetBookmarksAsync(BookmarkListRequest request, CancellationToken cancellationToken);
+
+    Task<BookmarkStatsDto> GetBookmarkStatsAsync(CancellationToken cancellationToken);
 
     Task<BookmarkDto?> GetBookmarkByIdAsync(Guid id, CancellationToken cancellationToken);
 
@@ -21,6 +23,10 @@ public interface IArcDropApiClient
     Task DeleteBookmarkAsync(Guid id, CancellationToken cancellationToken);
 
     Task<BookmarkDto> SyncBookmarkCollectionsAsync(Guid bookmarkId, IReadOnlyList<Guid> collectionIds, CancellationToken cancellationToken);
+
+    Task<BookmarkDto> SyncBookmarkTagsAsync(Guid bookmarkId, IReadOnlyList<string> tags, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<TagDto>> GetTagsAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<CollectionDto>> GetCollectionsAsync(CancellationToken cancellationToken);
 
@@ -45,6 +51,8 @@ public interface IArcDropApiClient
     Task<OrganizeBookmarkResponse> OrganizeBookmarkAsync(OrganizeBookmarkRequest request, CancellationToken cancellationToken);
 
     Task<OrganizeBookmarkResponse?> GetOperationByIdAsync(Guid operationId, CancellationToken cancellationToken);
+
+    Task<AiOperationListResultDto> ListAiOperationsAsync(int page, int pageSize, string? providerName, string? operationType, CancellationToken cancellationToken);
 
     /// <summary>
     /// Exports bookmarks and their collection assignments as a downloadable file in the requested format.

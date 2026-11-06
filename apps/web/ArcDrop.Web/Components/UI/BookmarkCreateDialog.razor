@@ -1,19 +1,26 @@
+@using ArcDrop.Web.Components.UI
+
 @inject IArcDropApiClient ApiClient
-@inject IHttpClientFactory HttpClientFactory
-@inject NavigationManager NavigationManager
+@inject IUrlMetadataLookup MetadataLookup
 @inject ISharedStateService SharedStateService
 @implements IDisposable
 
 @if (IsOpen)
 {
     <div class="arc-modal-backdrop" @onclick="CloseAsync"></div>
-    <section class="arc-modal" role="dialog" aria-modal="true" aria-labelledby="create-bookmark-title">
+    <section class="arc-modal"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="create-bookmark-title"
+             tabindex="-1"
+             @ref="_dialogFocus"
+             @onkeydown="HandleKeyDownAsync">
         <header class="arc-modal__header">
             <div>
                 <h2 id="create-bookmark-title">Add Bookmark</h2>
                 <p class="page-subtitle">Create a new bookmark without leaving this page.</p>
             </div>
-            <button class="arc-modal__close" type="button" @onclick="CloseAsync" aria-label="Close">
+            <button class="arc-modal__close" type="button" @onclick="CloseAsync" aria-label="Close create dialog" disabled="@IsCreating">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </header>
@@ -23,13 +30,14 @@
             <ValidationSummary />
 
             <div class="mb-3">
-                <label class="form-label">Title</label>
-                <InputText class="form-control" @bind-Value="CreateModel.Title" placeholder="Bookmark title" />
+                <label class="form-label" for="create-title">Title</label>
+                <InputText id="create-title" class="form-control" @bind-Value="CreateModel.Title" placeholder="Bookmark title" />
             </div>
 
             <div class="mb-3">
-                <label class="form-label">URL</label>
-                <input class="form-control"
+                <label class="form-label" for="create-url">URL</label>
+                <input id="create-url"
+                       class="form-control"
                        value="@CreateModel.Url"
                        @oninput="HandleCreateUrlInputAsync"
                        placeholder="https://example.com" />
@@ -62,23 +70,30 @@
             </div>
 
             <div class="mb-3">
-                <label class="form-label">Summary</label>
-                <InputTextArea class="form-control" @bind-Value="CreateModel.Summary" rows="3" placeholder="Optional summary or note" />
+                <label class="form-label" for="create-summary">Summary</label>
+                <InputTextArea id="create-summary" class="form-control" @bind-Value="CreateModel.Summary" rows="3" placeholder="Optional summary or note" />
             </div>
 
             <div class="mb-3">
-                <label class="form-label">Collections</label>
+                <span class="form-label" id="create-tags-label">Tags</span>
+                <TagListInput InputId="create-tags" Tags="_tags" TagsChanged="HandleTagsChanged" />
+            </div>
+
+            <div class="mb-3">
+                <span class="form-label" id="create-collections-label">Collections</span>
                 @if (AvailableCollections.Count == 0)
                 {
                     <div class="form-text">No collections available yet.</div>
                 }
                 else
                 {
-                    <div style="max-height: 180px; overflow-y: auto; border: 1px solid var(--arc-border-light); border-radius: 8px; padding: 0.5rem;">
+                    <div class="collection-check-list" role="group" aria-labelledby="create-collections-label">
                         @foreach (var collection in AvailableCollections)
                         {
-                            <label class="d-flex align-items-center gap-2" style="padding: 0.15rem 0; margin-left:@(CollectionDepth(collection.Id) * 0.7)rem;">
+                            var checkboxId = $"create-collection-{collection.Id}";
+                            <label class="d-flex align-items-center gap-2" for="@checkboxId" style="padding: 0.15rem 0; margin-left:@(UrlUtilities.CollectionDepth(AvailableCollections, collection.Id) * 0.7)rem;">
                                 <input type="checkbox"
+                                       id="@checkboxId"
                                        checked="@SelectedCollectionIds.Contains(collection.Id)"
                                        @onchange="(args => ToggleCollectionSelection(collection.Id, args.Value))" />
                                 <span>@collection.Name</span>
@@ -118,14 +133,15 @@
     public EventCallback OnCreated { get; set; }
 
     private CreateBookmarkRequest CreateModel { get; set; } = new();
+    private List<string> _tags = [];
     private HashSet<Guid> SelectedCollectionIds { get; set; } = [];
     private bool IsCreating { get; set; }
     private string? CreateErrorText { get; set; }
     private bool IsMetadataLoading { get; set; }
     private string? MetadataErrorText { get; set; }
-    private BookmarkMetadataSuggestion? MetadataSuggestion { get; set; }
+    private UrlMetadataSuggestion? MetadataSuggestion { get; set; }
     private CancellationTokenSource? MetadataLookupCts { get; set; }
-    private string LastMetadataLookupUrl { get; set; } = string.Empty;
+    private ElementReference _dialogFocus;
     private bool WasOpen { get; set; }
 
     protected override void OnParametersSet()
@@ -138,6 +154,22 @@
         WasOpen = IsOpen;
     }
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Focus moves into the dialog when it opens so keyboard and Esc handling work immediately.
+        if (IsOpen && !WasOpen)
+        {
+            try
+            {
+                await _dialogFocus.FocusAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The dialog can close before focus completes during rapid interactions.
+            }
+        }
+    }
+
     private async Task CloseAsync()
     {
         if (IsCreating)
@@ -148,6 +180,14 @@
         await OnCloseRequested.InvokeAsync();
     }
 
+    private async Task HandleKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (string.Equals(args.Key, "Escape", StringComparison.Ordinal))
+        {
+            await CloseAsync();
+        }
+    }
+
     private async Task CreateBookmarkAsync()
     {
         IsCreating = true;
@@ -155,7 +195,8 @@
 
         try
         {
-            // Create the bookmark first, then synchronize collection memberships.
+            // Create the bookmark with tags, then synchronize collection memberships.
+            CreateModel.Tags = _tags;
             var created = await ApiClient.CreateBookmarkAsync(CreateModel, CancellationToken.None);
             await ApiClient.SyncBookmarkCollectionsAsync(created.Id, SelectedCollectionIds.ToList(), CancellationToken.None);
 
@@ -194,41 +235,20 @@
             IsMetadataLoading = false;
             MetadataSuggestion = null;
             MetadataErrorText = null;
-            LastMetadataLookupUrl = string.Empty;
             return;
         }
 
         // Debounced lookups keep typing responsive while metadata is fetched in near-real-time.
         var currentCts = new CancellationTokenSource();
         MetadataLookupCts = currentCts;
-        LastMetadataLookupUrl = normalizedUrl;
         IsMetadataLoading = true;
         MetadataErrorText = null;
 
         try
         {
             await Task.Delay(450, currentCts.Token);
-
-            var requestUrl = new Uri($"{NavigationManager.BaseUri}bookmark-metadata?url={Uri.EscapeDataString(normalizedUrl)}");
-            using var client = HttpClientFactory.CreateClient();
-            using var response = await client.GetAsync(requestUrl, currentCts.Token);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
-            {
-                MetadataSuggestion = null;
-                return;
-            }
-
-            response.EnsureSuccessStatusCode();
-            var payload = await response.Content.ReadFromJsonAsync<BookmarkMetadataResponse>(cancellationToken: currentCts.Token);
-            if (!string.Equals(LastMetadataLookupUrl, normalizedUrl, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            MetadataSuggestion = payload is null
-                ? null
-                : new BookmarkMetadataSuggestion(payload.Title, payload.Description);
+            var suggestion = await MetadataLookup.LookupAsync(normalizedUrl, currentCts.Token);
+            MetadataSuggestion = suggestion;
         }
         catch (OperationCanceledException) when (currentCts.IsCancellationRequested)
         {
@@ -269,6 +289,11 @@
         await CreateBookmarkAsync();
     }
 
+    private void HandleTagsChanged(IReadOnlyList<string> tags)
+    {
+        _tags = [.. tags];
+    }
+
     private void ToggleCollectionSelection(Guid collectionId, object? rawValue)
     {
         var isChecked = rawValue as bool? == true;
@@ -281,30 +306,15 @@
         SelectedCollectionIds.Remove(collectionId);
     }
 
-    private int CollectionDepth(Guid collectionId)
-    {
-        var lookup = AvailableCollections.ToDictionary(x => x.Id, x => x.ParentId);
-        var depth = 0;
-        var current = lookup.TryGetValue(collectionId, out var parentId) ? parentId : null;
-
-        while (current is not null && lookup.TryGetValue(current.Value, out var nextParentId))
-        {
-            depth++;
-            current = nextParentId;
-        }
-
-        return depth;
-    }
-
     private void ResetDialogState()
     {
         CreateModel = new CreateBookmarkRequest();
+        _tags = [];
         SelectedCollectionIds = [];
         CreateErrorText = null;
         MetadataSuggestion = null;
         MetadataErrorText = null;
         IsMetadataLoading = false;
-        LastMetadataLookupUrl = string.Empty;
 
         MetadataLookupCts?.Cancel();
         MetadataLookupCts?.Dispose();
@@ -316,8 +326,4 @@
         MetadataLookupCts?.Cancel();
         MetadataLookupCts?.Dispose();
     }
-
-    private sealed record BookmarkMetadataResponse(string Title, string? Description);
-
-    private sealed record BookmarkMetadataSuggestion(string Title, string? Description);
 }

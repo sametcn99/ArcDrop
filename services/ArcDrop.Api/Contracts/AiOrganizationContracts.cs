@@ -34,3 +34,25 @@ public sealed record OrganizeBookmarkResponse(
     DateTimeOffset StartedAtUtc,
     DateTimeOffset CompletedAtUtc,
     IReadOnlyList<AiOperationResultResponse> Results);
+
+/// <summary>
+/// Represents one AI operation audit row without result payloads, used by history listings.
+/// </summary>
+public sealed record AiOperationSummaryResponse(
+    Guid OperationId,
+    string ProviderName,
+    string OperationType,
+    string OutcomeStatus,
+    string BookmarkTitle,
+    string BookmarkUrl,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset CompletedAtUtc);
+
+/// <summary>
+/// Represents one page of AI operation audit history with paging metadata.
+/// </summary>
+public sealed record AiOperationListResponse(
+    IReadOnlyList<AiOperationSummaryResponse> Items,
+    int TotalCount,
+    int Page,
+    int PageSize);

@@ -8,6 +8,7 @@ using ArcDrop.Web.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Http.Resilience;
 
 LoadDotEnvValues();
 
@@ -36,22 +37,36 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 builder.Services.AddAuthorization();
 
 var configuredApiBaseUrl =
-    Environment.GetEnvironmentVariable("ARCDROP_API_BASE_URL")
-    ?? Environment.GetEnvironmentVariable("ARCDROP_Api__BaseUrl")
+    builder.Configuration["Api:BaseUrl"]
+    ?? Environment.GetEnvironmentVariable("ARCDROP_API_BASE_URL")
     ?? BuildApiBaseUrlFromPort(Environment.GetEnvironmentVariable("ARCDROP_API_PORT"));
 
 var apiBaseUri = Uri.TryCreate(configuredApiBaseUrl, UriKind.Absolute, out var parsedApiBaseUri)
     ? parsedApiBaseUri
-    : new Uri("http://localhost:8080/", UriKind.Absolute);
+    : new Uri("http://localhost:5237/", UriKind.Absolute);
 
 builder.Services.AddHttpClient<IArcDropApiClient, ArcDropApiClient>(httpClient =>
 {
     httpClient.BaseAddress = apiBaseUri;
+    httpClient.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddStandardResilienceHandler(options =>
+{
+    // Retry only idempotent verbs so create/import requests cannot be duplicated by transient retries.
+    options.Retry.ShouldHandle = args => ValueTask.FromResult(
+        HttpClientResiliencePredicates.IsTransient(args.Outcome)
+        && args.Outcome.Result?.RequestMessage?.Method is { } method
+        && IsRetryableMethod(method));
 });
 
 builder.Services.AddHttpClient("ArcDrop.ApiAuth", httpClient =>
 {
     httpClient.BaseAddress = apiBaseUri;
+    httpClient.Timeout = TimeSpan.FromSeconds(15);
+})
+.AddStandardResilienceHandler(options =>
+{
+    options.Retry.MaxRetryAttempts = 1;
 });
 
 builder.Services.AddHttpClient<IBookmarkIconService, BookmarkIconService>(httpClient =>
@@ -74,6 +89,11 @@ builder.Services.AddHttpClient<IBookmarkMetadataService, BookmarkMetadataService
 {
     AllowAutoRedirect = false,
     AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip
+});
+
+builder.Services.AddHttpClient<IUrlMetadataLookup, UrlMetadataLookupService>(httpClient =>
+{
+    httpClient.Timeout = TimeSpan.FromSeconds(8);
 });
 
 builder.Services.AddSingleton<ISharedStateService, SharedStateService>();
@@ -235,10 +255,18 @@ static string BuildApiBaseUrlFromPort(string? apiPort)
 {
     if (!int.TryParse(apiPort, out var parsedPort) || parsedPort <= 0)
     {
-        return "http://localhost:8080/";
+        return "http://localhost:5237/";
     }
 
     return $"http://localhost:{parsedPort}/";
+}
+
+static bool IsRetryableMethod(HttpMethod method)
+{
+    return method == HttpMethod.Get
+        || method == HttpMethod.Head
+        || method == HttpMethod.Put
+        || method == HttpMethod.Delete;
 }
 
 static void LoadDotEnvValues()

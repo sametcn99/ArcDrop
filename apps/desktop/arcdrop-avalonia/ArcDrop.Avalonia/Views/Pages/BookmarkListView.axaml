@@ -1,0 +1,49 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:ArcDrop.Avalonia.ViewModels.Pages"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d"
+             x:Class="ArcDrop.Avalonia.Views.Pages.BookmarkListView"
+             x:DataType="vm:BookmarkListViewModel">
+
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Top" Spacing="10" Margin="0,0,0,14">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                <TextBox Grid.Column="0"
+                         x:Name="SearchBox"
+                         Text="{Binding SearchText}"
+                         PlaceholderText="Search title, URL, summary, or tag"
+                         KeyDown="OnSearchKeyDown" />
+                <Button Grid.Column="1" Content="Search" Command="{Binding SearchCommand}" />
+                <Button Grid.Column="2" Content="Refresh" Command="{Binding RefreshCommand}" />
+                <Button Grid.Column="3" Content="Add Bookmark" Command="{Binding AddCommand}" />
+            </Grid>
+
+            <TextBlock Text="{Binding StatusText}" Opacity="0.65" />
+            <TextBlock Text="{Binding ErrorText}" IsVisible="{Binding ErrorText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" TextWrapping="Wrap" Foreground="#e0705f" />
+        </StackPanel>
+
+        <ScrollViewer>
+            <ItemsControl ItemsSource="{Binding Bookmarks}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="vm:BookmarkRowViewModel">
+                        <Border Background="#16241f" CornerRadius="10" Padding="14" Margin="0,0,0,10">
+                            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Title}" FontWeight="Bold" FontSize="15" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="{Binding Url}" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding TagsText}" Opacity="0.75" FontSize="12" TextWrapping="Wrap" />
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="{Binding UpdatedText}" Opacity="0.55" FontSize="12" />
+
+                                <StackPanel Grid.Row="0" Grid.RowSpan="4" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Button Content="Edit" Command="{Binding $parent[ItemsControl].((vm:BookmarkListViewModel)DataContext).EditCommand}" CommandParameter="{Binding}" />
+                                    <Button Content="{Binding DeleteButtonText}" Command="{Binding $parent[ItemsControl].((vm:BookmarkListViewModel)DataContext).DeleteCommand}" CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

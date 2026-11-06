@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using ArcDrop.Application.Bookmarks;
 using ArcDrop.Maui.Services;
 using ArcDrop.Maui.ViewModels;
@@ -27,13 +27,21 @@ public static class MauiProgram
         var configuredApiBaseUrl = Environment.GetEnvironmentVariable("ARCDROP_Api__BaseUrl");
         var apiBaseUri = Uri.TryCreate(configuredApiBaseUrl, UriKind.Absolute, out var parsedApiBaseUri)
             ? parsedApiBaseUri
-            : new Uri("http://localhost:5000/", UriKind.Absolute);
+            : new Uri("http://localhost:5237/", UriKind.Absolute);
 
         builder.Services.AddSingleton(apiBaseUri);
-        builder.Services.AddSingleton(sp => new HttpClient
+        builder.Services.AddSingleton<IApiAuthSession, ApiAuthSession>();
+        builder.Services.AddSingleton<AuthorizedHttpMessageHandler>();
+        builder.Services.AddSingleton(sp =>
         {
-            BaseAddress = sp.GetRequiredService<Uri>()
+            var handler = sp.GetRequiredService<AuthorizedHttpMessageHandler>();
+            handler.InnerHandler = new HttpClientHandler();
+            return new HttpClient(handler)
+            {
+                BaseAddress = sp.GetRequiredService<Uri>()
+            };
         });
+        builder.Services.AddSingleton<IApiAuthService, ApiAuthService>();
 
         builder.Services.AddSingleton<SeedBookmarkQueryService>();
         builder.Services.AddSingleton<ApiBookmarkQueryService>();
@@ -44,11 +52,13 @@ public static class MauiProgram
         builder.Services.AddTransient<BookmarkListViewModel>();
         builder.Services.AddTransient<BookmarkDetailViewModel>();
         builder.Services.AddTransient<CreateBookmarkViewModel>();
+        builder.Services.AddTransient<LoginViewModel>();
         builder.Services.AddTransient<SettingsViewModel>();
         builder.Services.AddTransient<DashboardPage>();
         builder.Services.AddTransient<BookmarkListPage>();
         builder.Services.AddTransient<BookmarkDetailPage>();
         builder.Services.AddTransient<CreateBookmarkPage>();
+        builder.Services.AddTransient<LoginPage>();
         builder.Services.AddTransient<SettingsPage>();
 
 #if DEBUG

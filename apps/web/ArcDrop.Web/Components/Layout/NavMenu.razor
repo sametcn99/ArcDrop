@@ -1,4 +1,6 @@
-﻿@inject IArcDropApiClient ApiClient
+@using ArcDrop.Web.Components.UI
+
+@inject IArcDropApiClient ApiClient
 @inject ISharedStateService SharedStateService
 @inject NavigationManager NavigationManager
 @implements IDisposable
@@ -14,10 +16,23 @@
     </div>
 </div>
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" aria-label="Toggle navigation menu" />
 
 <div class="nav-scrollable">
-    <nav class="nav-shell">
+    <nav class="nav-shell" aria-label="Application sections">
+        <div class="nav-section px-3">
+            <p class="nav-section-label">Menu</p>
+            <ul class="nav-section-links">
+                <li><a href="/home" class="nav-section-link">Home</a></li>
+                <li><a href="/bookmarks" class="nav-section-link">Bookmarks</a></li>
+                <li><a href="/ai/organize" class="nav-section-link">AI Organize</a></li>
+                <li><a href="/ai/providers" class="nav-section-link">AI Providers</a></li>
+                <li><a href="/ai/operations" class="nav-section-link">AI History</a></li>
+                <li><a href="/settings" class="nav-section-link">Settings</a></li>
+                <li><a href="/auth/profile" class="nav-section-link">Profile</a></li>
+            </ul>
+        </div>
+
         <div class="bookmark-header px-3">
             <p class="nav-section-label">Collections</p>
             <button class="bookmark-refresh" type="button" @onclick="LoadCollectionsSidebarAsync" disabled="@IsBusy">Refresh</button>
@@ -31,44 +46,81 @@
         {
             <div class="px-3 bookmark-state bookmark-state--error">@ErrorText</div>
         }
-        else if (CollectionTree.Count == 0 && UnassignedBookmarkCount == 0)
+        else if (CollectionTree.Count == 0 && Stats.UnassignedCount == 0)
         {
             <div class="px-3 bookmark-state">No collections yet.</div>
         }
         else
         {
-            <div class="bookmark-list collection-section__list px-2">
-                @foreach (var node in GetSidebarCollectionNodes())
-                {
-                    <CollectionTreeNode @key="node.Id"
-                                        Node="node"
-                                        Depth="0"
-                                        ActiveCollectionId="ActiveCollectionId"
-                                        HrefOverride="@(IsOtherCollectionNode(node) ? GetOtherCollectionHref() : null)"
-                                        ForceActive="@(IsOtherCollectionNode(node) && IsOtherCollectionActive)" />
-                }
-            </div>
+            <CascadingValue Value="NodeActions" IsFixed="false">
+                <div class="bookmark-list collection-section__list px-2">
+                    @if (Stats.UnassignedCount > 0)
+                    {
+                        <CollectionTreeNode @key="OtherVirtualCollectionId"
+                                            Node="BuildOtherCollectionNode()"
+                                            Depth="0"
+                                            ActiveCollectionId="ActiveCollectionId"
+                                            HrefOverride="@GetOtherCollectionHref()"
+                                            ForceActive="@IsOtherCollectionActive"
+                                            IsVirtualNode="true" />
+                    }
+
+                    @foreach (var node in CollectionTree)
+                    {
+                        <CollectionTreeNode @key="node.Id"
+                                            Node="node"
+                                            Depth="0"
+                                            ActiveCollectionId="ActiveCollectionId" />
+                    }
+                </div>
+            </CascadingValue>
         }
     </nav>
 </div>
+
+<CollectionEditDialog IsOpen="IsEditCollectionOpen"
+                      Collection="_editCollectionCandidate"
+                      AvailableCollections="FlatCollections"
+                      OnCloseRequested="CloseEditCollectionDialog"
+                      OnUpdated="HandleCollectionUpdatedAsync" />
+
+<ConfirmDialog IsOpen="IsDeleteCollectionConfirmOpen"
+               Title="Delete collection"
+               Description="Collections must be empty of child collections before deletion."
+               Message="@(_deleteCollectionCandidate is null ? null : $"Delete collection \"{_deleteCollectionCandidate.Name}\"? Bookmarks stay intact and become unassigned.")"
+               ConfirmLabel="Delete"
+               IsBusy="IsDeletingCollection"
+               ErrorText="DeleteCollectionErrorText"
+               OnConfirm="ConfirmDeleteCollectionAsync"
+               OnCancel="CancelDeleteCollection" />
 
 @code {
     private const string OtherVirtualCollectionKey = "other";
     private static readonly Guid OtherVirtualCollectionId = Guid.Empty;
 
     private readonly List<CollectionTreeNodeDto> CollectionTree = [];
+    private readonly List<CollectionDto> FlatCollections = [];
+    private BookmarkStatsDto Stats { get; set; } = new(0, 0);
     private bool IsBusy { get; set; }
     private string? ErrorText { get; set; }
     private Guid? ActiveCollectionId { get; set; }
     private bool IsOtherCollectionActive { get; set; }
-    private int UnassignedBookmarkCount { get; set; }
-    private readonly List<BookmarkDto> UnassignedBookmarks = [];
+    private CollectionNodeActions? NodeActions { get; set; }
+
+    private bool IsEditCollectionOpen { get; set; }
+    private CollectionDto? _editCollectionCandidate;
+
+    private bool IsDeleteCollectionConfirmOpen { get; set; }
+    private bool IsDeletingCollection { get; set; }
+    private string? DeleteCollectionErrorText { get; set; }
+    private CollectionTreeNodeDto? _deleteCollectionCandidate;
 
     protected override async Task OnInitializedAsync()
     {
         SharedStateService.OnBookmarksUpdated += HandleBookmarksUpdated;
         SharedStateService.OnCollectionsUpdated += HandleCollectionsUpdated;
         NavigationManager.LocationChanged += HandleLocationChanged;
+        NodeActions = new CollectionNodeActions(RequestEditCollection, RequestDeleteCollection);
         ActiveCollectionId = ParseActiveCollectionId();
         IsOtherCollectionActive = ParseOtherCollectionIsActive();
         await LoadCollectionsSidebarAsync();
@@ -114,19 +166,22 @@
 
         try
         {
-            // The sidebar merges persisted collections with the virtual Other collection from uncategorized bookmarks.
-            var bookmarks = await ApiClient.GetBookmarksAsync(CancellationToken.None);
-            var collections = await ApiClient.GetCollectionsTreeAsync(CancellationToken.None);
+            // Stats provide total/unassigned counts while the tree provides per-collection structure.
+            var treeTask = ApiClient.GetCollectionsTreeAsync(CancellationToken.None);
+            var flatTask = ApiClient.GetCollectionsAsync(CancellationToken.None);
+            var statsTask = ApiClient.GetBookmarkStatsAsync(CancellationToken.None);
 
-            UnassignedBookmarkCount = bookmarks.Count(bookmark => bookmark.CollectionIds.Count == 0);
-            UnassignedBookmarks.Clear();
-            UnassignedBookmarks.AddRange(bookmarks
-                .Where(bookmark => bookmark.CollectionIds.Count == 0)
-                .OrderByDescending(bookmark => bookmark.UpdatedAtUtc)
-                .Take(40));
+            await Task.WhenAll(treeTask, flatTask, statsTask);
 
             CollectionTree.Clear();
-            CollectionTree.AddRange(collections);
+            CollectionTree.AddRange(treeTask.Result);
+            FlatCollections.Clear();
+            FlatCollections.AddRange(flatTask.Result);
+            Stats = statsTask.Result;
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
         }
         catch (ApiClientException exception)
         {
@@ -142,19 +197,6 @@
         }
     }
 
-    private IEnumerable<CollectionTreeNodeDto> GetSidebarCollectionNodes()
-    {
-        if (UnassignedBookmarks.Count > 0)
-        {
-            yield return BuildOtherCollectionNode();
-        }
-
-        foreach (var node in CollectionTree)
-        {
-            yield return node;
-        }
-    }
-
     private CollectionTreeNodeDto BuildOtherCollectionNode()
     {
         // Represent uncategorized bookmarks as a virtual collection so the sidebar uses one rendering path.
@@ -165,15 +207,8 @@
             null,
             DateTimeOffset.MinValue,
             DateTimeOffset.MinValue,
-            UnassignedBookmarks
-                .Select(bookmark => new CollectionBookmarkItemDto(bookmark.Id, bookmark.Title, bookmark.Url, bookmark.UpdatedAtUtc))
-                .ToArray(),
+            [],
             []);
-    }
-
-    private static bool IsOtherCollectionNode(CollectionTreeNodeDto node)
-    {
-        return node.Id == OtherVirtualCollectionId;
     }
 
     private static string GetOtherCollectionHref()
@@ -181,14 +216,84 @@
         return "/bookmarks?virtualCollection=other";
     }
 
-    private static string DomainFromUrl(string url)
+    private void RequestEditCollection(CollectionTreeNodeDto node)
     {
-        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        _editCollectionCandidate = FlatCollections.FirstOrDefault(collection => collection.Id == node.Id);
+        if (_editCollectionCandidate is not null)
         {
-            return uri.Host;
+            IsEditCollectionOpen = true;
+        }
+    }
+
+    private Task CloseEditCollectionDialog()
+    {
+        IsEditCollectionOpen = false;
+        _editCollectionCandidate = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleCollectionUpdatedAsync()
+    {
+        await LoadCollectionsSidebarAsync();
+        StateHasChanged();
+    }
+
+    private void RequestDeleteCollection(CollectionTreeNodeDto node)
+    {
+        _deleteCollectionCandidate = node;
+        DeleteCollectionErrorText = null;
+        IsDeleteCollectionConfirmOpen = true;
+    }
+
+    private void CancelDeleteCollection()
+    {
+        if (IsDeletingCollection)
+        {
+            return;
         }
 
-        return "unknown-source";
+        IsDeleteCollectionConfirmOpen = false;
+        _deleteCollectionCandidate = null;
+        DeleteCollectionErrorText = null;
+    }
+
+    private async Task ConfirmDeleteCollectionAsync()
+    {
+        if (_deleteCollectionCandidate is null)
+        {
+            IsDeleteCollectionConfirmOpen = false;
+            return;
+        }
+
+        IsDeletingCollection = true;
+        DeleteCollectionErrorText = null;
+
+        try
+        {
+            await ApiClient.DeleteCollectionAsync(_deleteCollectionCandidate.Id, CancellationToken.None);
+            IsDeleteCollectionConfirmOpen = false;
+            _deleteCollectionCandidate = null;
+            SharedStateService.NotifyCollectionsUpdated();
+            SharedStateService.NotifyBookmarksUpdated();
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            IsDeletingCollection = false;
+            IsDeleteCollectionConfirmOpen = false;
+            SessionRedirect.RedirectToLogin(NavigationManager);
+        }
+        catch (ApiClientException exception)
+        {
+            DeleteCollectionErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            DeleteCollectionErrorText = "Collection deletion failed.";
+        }
+        finally
+        {
+            IsDeletingCollection = false;
+        }
     }
 
     private Guid? ParseActiveCollectionId()
@@ -211,4 +316,3 @@
             && string.Equals(rawVirtualCollection.ToString(), OtherVirtualCollectionKey, StringComparison.OrdinalIgnoreCase);
     }
 }
-

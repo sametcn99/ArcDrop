@@ -1,4 +1,4 @@
-﻿namespace ArcDrop.Maui;
+namespace ArcDrop.Maui;
 
 public partial class AppShell : Shell
 {
@@ -12,5 +12,6 @@ public partial class AppShell : Shell
         Routing.RegisterRoute(nameof(Views.BookmarkListPage), typeof(Views.BookmarkListPage));
         Routing.RegisterRoute(nameof(Views.BookmarkDetailPage), typeof(Views.BookmarkDetailPage));
         Routing.RegisterRoute(nameof(Views.CreateBookmarkPage), typeof(Views.CreateBookmarkPage));
+        Routing.RegisterRoute(nameof(Views.LoginPage), typeof(Views.LoginPage));
     }
 }

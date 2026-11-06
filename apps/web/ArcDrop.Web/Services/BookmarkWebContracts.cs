@@ -12,7 +12,8 @@ public sealed record BookmarkDto(
     string? Summary,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    IReadOnlyList<Guid> CollectionIds);
+    IReadOnlyList<Guid> CollectionIds,
+    IReadOnlyList<string>? Tags = null);
 
 /// <summary>
 /// Represents a collection node used by list and tree views in the web client.
@@ -56,6 +57,8 @@ public sealed class CreateBookmarkRequest
     public string Title { get; set; } = string.Empty;
 
     public string? Summary { get; set; }
+
+    public IReadOnlyList<string>? Tags { get; set; }
 }
 
 /// <summary>
@@ -71,6 +74,8 @@ public sealed class UpdateBookmarkRequest
     public string Title { get; set; } = string.Empty;
 
     public string? Summary { get; set; }
+
+    public IReadOnlyList<string>? Tags { get; set; }
 }
 
 /// <summary>
@@ -259,3 +264,72 @@ public sealed record ImportBookmarksResponse(
     int BookmarksUpdated,
     int BookmarksSkipped,
     IReadOnlyList<string> Warnings);
+
+/// <summary>
+/// Represents a server-side bookmark list query submitted from web views.
+/// </summary>
+public sealed class BookmarkListRequest
+{
+    public string? Search { get; set; }
+
+    public Guid? CollectionId { get; set; }
+
+    public bool? UnassignedOnly { get; set; }
+
+    public string? Tag { get; set; }
+
+    public string? Sort { get; set; }
+
+    public int Page { get; set; } = 1;
+
+    public int PageSize { get; set; } = 50;
+}
+
+/// <summary>
+/// Represents one page of bookmark results with paging metadata.
+/// </summary>
+public sealed record BookmarkListResultDto(
+    IReadOnlyList<BookmarkDto> Items,
+    int TotalCount,
+    int Page,
+    int PageSize);
+
+/// <summary>
+/// Represents lightweight bookmark counters used by navigation surfaces.
+/// </summary>
+public sealed record BookmarkStatsDto(int TotalCount, int UnassignedCount);
+
+/// <summary>
+/// Represents one bookmark-to-tags synchronization request.
+/// </summary>
+public sealed class SyncBookmarkTagsRequest
+{
+    public IReadOnlyList<string> Tags { get; set; } = [];
+}
+
+/// <summary>
+/// Represents one tag with its usage count.
+/// </summary>
+public sealed record TagDto(Guid Id, string Name, int BookmarkCount);
+
+/// <summary>
+/// Represents one AI operation audit row without result payloads.
+/// </summary>
+public sealed record AiOperationSummaryDto(
+    Guid OperationId,
+    string ProviderName,
+    string OperationType,
+    string OutcomeStatus,
+    string BookmarkTitle,
+    string BookmarkUrl,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset CompletedAtUtc);
+
+/// <summary>
+/// Represents one page of AI operation audit history with paging metadata.
+/// </summary>
+public sealed record AiOperationListResultDto(
+    IReadOnlyList<AiOperationSummaryDto> Items,
+    int TotalCount,
+    int Page,
+    int PageSize);

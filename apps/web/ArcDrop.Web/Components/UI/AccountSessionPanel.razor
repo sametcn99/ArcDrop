@@ -1,0 +1,102 @@
+@inject IArcDropApiClient ApiClient
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+
+<div class="card-shell">
+    <div class="section-header">
+        <h2>Session</h2>
+        <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="LoadAsync" disabled="@IsBusy">
+            @if (IsBusy) { <span class="spinner-inline"></span> }
+            Refresh
+        </button>
+    </div>
+
+    @if (IsBusy)
+    {
+        <p class="status-hint"><span class="spinner-inline"></span> Loading session...</p>
+    }
+    else if (!IsAuthenticated)
+    {
+        <p class="status-hint">Session is not authenticated. <a href="/auth/login">Sign in</a> to continue.</p>
+    }
+    else
+    {
+        <dl class="session-facts">
+            <dt>Signed in as</dt>
+            <dd>@(CurrentUsername ?? "admin")</dd>
+            <dt>Session expires</dt>
+            <dd>@TokenExpiresText</dd>
+            <dt>Status</dt>
+            <dd><span class="arc-badge arc-badge--success">Authenticated</span></dd>
+        </dl>
+
+        <form method="post" action="/auth/session/logout" class="mt-3">
+            <AntiforgeryToken />
+            <button type="submit" class="btn btn-outline-danger">Sign Out</button>
+        </form>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(ErrorText))
+    {
+        <div class="alert alert-danger mt-3" role="alert">@ErrorText</div>
+    }
+</div>
+
+@code {
+    private string? CurrentUsername { get; set; }
+    private bool IsAuthenticated { get; set; }
+    private string TokenExpiresText { get; set; } = "N/A";
+    private bool IsBusy { get; set; }
+    private string? ErrorText { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+
+        try
+        {
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            IsAuthenticated = authState.User.Identity?.IsAuthenticated is true;
+
+            if (!IsAuthenticated)
+            {
+                CurrentUsername = null;
+                TokenExpiresText = "N/A";
+                return;
+            }
+
+            CurrentUsername = authState.User.Identity?.Name;
+
+            // Explicit /me lookup verifies token validity for account-sensitive surfaces.
+            var profile = await ApiClient.GetCurrentAdminAsync(CancellationToken.None);
+            CurrentUsername = profile?.Username ?? CurrentUsername;
+
+            var expiresAtClaim = authState.User.FindFirst("arcdrop:expires_at_unix")?.Value;
+            TokenExpiresText = long.TryParse(expiresAtClaim, out var expiresAtUnix)
+                ? DateTimeOffset.FromUnixTimeSeconds(expiresAtUnix).ToLocalTime().ToString("g")
+                : "N/A";
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load session data.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

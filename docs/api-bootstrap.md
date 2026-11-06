@@ -2,6 +2,7 @@
 
 Implements `TASK-002`, `TASK-003`, `TASK-004`, `TASK-009`, and first `TASK-010` backend slice.
 The latest update extends this bootstrap with hierarchical collections, bookmark-to-collection synchronization, and automated OpenAPI documentation surfaced through Scalar.
+Follow-up slices add server-side search with paging, bookmark tags, bookmark stats, AI operation history listing, data portability endpoints, and admin authorization across all data endpoints.
 
 ## Covered Requirements
 
@@ -13,6 +14,7 @@ The latest update extends this bootstrap with hierarchical collections, bookmark
 - `FR-004`: Collection hierarchy and bookmark-to-collection membership management.
 - `NFR-006`: AI operation logs persisted with timestamp, operation type, and success/failure outcome.
 - `FR-002`: Self-host operators can inspect the API contract through generated OpenAPI and interactive reference docs.
+- `NFR-003`: Bookmark list queries run server-side with paging and filtering so large libraries stay within response-time targets.
 
 ## Configuration
 
@@ -36,6 +38,8 @@ Important settings:
 
 ## Endpoints
 
+All `/api/bookmarks`, `/api/collections`, `/api/ai/*`, and `/api/data/*` endpoints require an admin bearer token issued by `POST /api/auth/login`.
+
 - `GET /health`: service health and admin configuration detection.
 - `GET /openapi/v1.json`: generated OpenAPI document for tooling, integration, and documentation flows.
 - `GET /docs`: Scalar interactive API reference backed by the generated OpenAPI document.
@@ -48,18 +52,24 @@ Important settings:
 - `PUT /api/ai/providers/{providerName}`: update endpoint/model and optionally rotate API key.
 - `DELETE /api/ai/providers/{providerName}`: remove AI provider configuration profile.
 - `POST /api/ai/organize`: run bookmark organization action and persist operation audit records.
+- `GET /api/ai/operations`: paged AI operation audit history with optional providerName and operationType filters.
 - `GET /api/ai/operations/{operationId}`: read operation outcome and generated structured results.
-- `GET /api/bookmarks`
+- `GET /api/bookmarks`: paged bookmark list with server-side `search` (title, URL, summary, and tag names), `collectionId`, `unassignedOnly`, `tag`, `sort` (updated/created/title), `page`, and `pageSize` (max 200) parameters; returns `{ items, totalCount, page, pageSize }`.
+- `GET /api/bookmarks/stats`: total and unassigned bookmark counters for navigation surfaces.
+- `GET /api/bookmarks/tags`: all tags with bookmark usage counts.
 - `GET /api/bookmarks/{id}`
-- `POST /api/bookmarks`
-- `PUT /api/bookmarks/{id}`
+- `POST /api/bookmarks`: create a bookmark with an optional exact tag set.
+- `PUT /api/bookmarks/{id}`: update URL, title, and summary; supplying tags replaces the tag set.
 - `PUT /api/bookmarks/{id}/collections`: synchronize one bookmark across multiple collection IDs.
+- `PUT /api/bookmarks/{id}/tags`: replace the exact tag set assigned to a bookmark; missing tags are created on demand.
 - `DELETE /api/bookmarks/{id}`
 - `GET /api/collections`: list all collections as flat rows.
 - `GET /api/collections/tree`: list collections as a nested tree with bookmarked items under each node.
 - `POST /api/collections`: create a root or child collection.
 - `PUT /api/collections/{id}`: update collection metadata and parent assignment with cycle protection.
 - `DELETE /api/collections/{id}`: delete a collection when no child collections remain.
+- `POST /api/data/export`: export bookmarks as JSON, CSV, or HTML, optionally scoped to selected collections (implements `FR-004` / `AC-004` portability).
+- `POST /api/data/import`: import bookmarks from a JSON, CSV, or HTML multipart upload and return created/updated/skipped summaries.
 
 ## API Documentation
 

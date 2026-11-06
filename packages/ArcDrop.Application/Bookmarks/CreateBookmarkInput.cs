@@ -6,4 +6,5 @@ namespace ArcDrop.Application.Bookmarks;
 public sealed record CreateBookmarkInput(
     string Url,
     string Title,
-    string? Summary);
+    string? Summary,
+    IReadOnlyList<string>? Tags = null);

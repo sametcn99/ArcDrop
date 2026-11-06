@@ -10,6 +10,8 @@ namespace ArcDrop.Maui.Services;
 /// </summary>
 public sealed class ApiBookmarkQueryService
 {
+    private const int ListPageSize = 200;
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<ApiBookmarkQueryService> _logger;
 
@@ -20,42 +22,31 @@ public sealed class ApiBookmarkQueryService
     }
 
     /// <summary>
-    /// Retrieves bookmarks from API and applies client-side search filtering.
-    /// Server-side filtering will be adopted when API query parameters are introduced.
+    /// Retrieves one bookmark page from the API using server-side search filtering.
     /// </summary>
     public async Task<IReadOnlyList<BookmarkListItem>> GetBookmarksAsync(string? searchTerm, CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync("api/bookmarks", cancellationToken);
+        var requestUri = string.IsNullOrWhiteSpace(searchTerm)
+            ? $"api/bookmarks?page=1&pageSize={ListPageSize}"
+            : $"api/bookmarks?search={Uri.EscapeDataString(searchTerm.Trim())}&page=1&pageSize={ListPageSize}";
+
+        using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
         response.EnsureSuccessStatusCode();
 
-        var payload = await response.Content.ReadFromJsonAsync<List<ApiBookmarkResponse>>(cancellationToken: cancellationToken)
-            ?? [];
+        var payload = await response.Content.ReadFromJsonAsync<ApiBookmarkListResponse>(cancellationToken: cancellationToken)
+            ?? new ApiBookmarkListResponse([], 0, 1, ListPageSize);
 
-        var projected = payload
+        var projected = payload.Items
             .Select(item => new BookmarkListItem(item.Id, item.Url, item.Title, item.Summary, item.UpdatedAtUtc))
             .ToList();
 
-        if (string.IsNullOrWhiteSpace(searchTerm))
-        {
-            return projected;
-        }
-
-        var normalized = searchTerm.Trim();
-
-        var filtered = projected
-            .Where(item =>
-                item.Title.Contains(normalized, StringComparison.OrdinalIgnoreCase) ||
-                item.Url.Contains(normalized, StringComparison.OrdinalIgnoreCase) ||
-                (item.Summary?.Contains(normalized, StringComparison.OrdinalIgnoreCase) ?? false))
-            .ToList();
-
         _logger.LogInformation(
-            "Bookmark API query returned {TotalCount} item(s), filtered to {FilteredCount} item(s) for search '{SearchTerm}'.",
-            projected.Count,
-            filtered.Count,
-            normalized);
+            "Bookmark API query returned {TotalCount} item(s) for search '{SearchTerm}' (page items: {PageItemCount}).",
+            payload.TotalCount,
+            searchTerm ?? string.Empty,
+            projected.Count);
 
-        return filtered;
+        return projected;
     }
 
     /// <summary>
@@ -87,6 +78,12 @@ public sealed class ApiBookmarkQueryService
             payload.CreatedAtUtc,
             payload.UpdatedAtUtc);
     }
+
+    private sealed record ApiBookmarkListResponse(
+        IReadOnlyList<ApiBookmarkResponse> Items,
+        int TotalCount,
+        int Page,
+        int PageSize);
 
     private sealed record ApiBookmarkResponse(
         Guid Id,

@@ -14,4 +14,9 @@ public interface IAiOrganizationService
     /// Returns one previously executed organization operation by identifier.
     /// </summary>
     Task<AiOrganizationOperationItem?> GetOperationAsync(Guid operationId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns one page of persisted operation audit records ordered newest first.
+    /// </summary>
+    Task<AiOperationListResult> ListOperationsAsync(AiOperationListQuery query, CancellationToken cancellationToken);
 }

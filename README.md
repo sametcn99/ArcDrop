@@ -15,19 +15,25 @@ Self-host-first bookmarking platform with cross-platform desktop clients and AI-
 - Adds MAUI MVVM shell and route navigation foundation (`FR-005`, `TASK-005` slice).
 - Adds MAUI bookmark add/list/detail/edit workflow slices using API-backed query and command services with resilient list fallback (`FR-004`, `TASK-006` slice).
 - Adds Blazor web host pages for auth session management, bookmark CRUD, AI provider configuration, and AI organization operation lookup against backend APIs (`FR-002`, `FR-004`, `FR-007`, `FR-008`, `TASK-010` slice).
-- Adds Blazor web host inside MAUI folder with bookmark add/list/edit flows against the same API contracts (`FR-004`, `TASK-006` web slice).
 - Secures web auth flow with server-issued HttpOnly session cookie, protected route redirects, and persistent refresh-safe sign-in behavior (`FR-002`).
+- Requires admin authorization on all bookmark, collection, and data portability endpoints; the web and MAUI clients attach bearer tokens to every API call (`FR-002`).
+- Adds server-side bookmark search, tag filtering, sorting, and paging with a paged list envelope plus bookmark stats counters (`FR-004`, `NFR-003`).
+- Adds bookmark tags end to end: tag-aware contracts, exact-set tag sync endpoint, tag listing with usage counts, and one-click persistence of AI tag suggestions (`FR-004`, `FR-008`).
+- Adds paged AI operation history endpoint and web history screen with type filtering (`NFR-006`).
+- Completes web workspace UX: bookmark deletion and collection edit/delete with confirmations, tags UI, server-driven board paging, sidebar section navigation, layout-level sign-out, Settings hash deep links, self-hosted Bootstrap/Inter assets, dark mode, and accessibility improvements.
+- Adds MAUI fixed-admin sign-in, bearer-attached API access, paged list handling, and session sign-out on the settings page.
+- Adds the Avalonia Linux desktop client (`apps/desktop/arcdrop-avalonia`) reusing the shared application DTOs, with fixed-admin sign-in, session persistence, server-side bookmark search, create/edit with tags and collections, two-step deletes, and settings sign-out (`FR-002`, `FR-004`, Linux path boundary).
 
 ## Quick Navigation
 
 - Monorepo rules: `docs/monorepo-structure.md`
 - API bootstrap and migration guide: `docs/api-bootstrap.md`
 - MAUI foundation guide: `docs/desktop-maui-foundation.md`
+- Avalonia Linux client guide: `docs/desktop-avalonia-foundation.md`
 - Blazor web app: `apps/web/ArcDrop.Web`
-- MAUI-related web host: `apps/web/ArcDrop.Web`
 - API tests project: `tests/ArcDrop.Api.Tests`
 - Self-host quickstart: `docs/self-host-quickstart.md`
 - Dev container setup: `docs/devcontainer-setup.md`
 - Contributor guide: `CONTRIBUTING.md`
 - Engineering guardrails: `.github/copilot-instructions.md`
-- Implementation plans: `.github/plan/`
+- Implementation plans: `.github/plan/` (active: `web-gap-closure.md`)

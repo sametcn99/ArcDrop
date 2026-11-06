@@ -4,23 +4,64 @@ using ArcDrop.Application.Bookmarks;
 namespace ArcDrop.Api.Endpoints;
 
 /// <summary>
-/// Registers bookmark CRUD and collection membership synchronization endpoints.
+/// Registers bookmark CRUD, tag, paged query, and collection membership synchronization endpoints.
 /// </summary>
 internal static class BookmarkEndpoints
 {
     public static void MapBookmarks(WebApplication app)
     {
-        var bookmarksGroup = app.MapGroup("/api/bookmarks").WithTags("Bookmarks");
+        var bookmarksGroup = app.MapGroup("/api/bookmarks")
+            .WithTags("Bookmarks")
+            .RequireAuthorization();
 
-        bookmarksGroup.MapGet("/", async (IBookmarkManagementService bookmarkService, CancellationToken cancellationToken) =>
+        bookmarksGroup.MapGet("/", async (
+            string? search,
+            Guid? collectionId,
+            bool? unassignedOnly,
+            string? tag,
+            string? sort,
+            int? page,
+            int? pageSize,
+            IBookmarkManagementService bookmarkService,
+            CancellationToken cancellationToken) =>
         {
-            var bookmarks = await bookmarkService.GetBookmarksAsync(cancellationToken);
-            return Results.Ok(bookmarks.Select(MapListResponse).ToList());
+            var result = await bookmarkService.GetBookmarksAsync(
+                new BookmarkListQuery(search, collectionId, unassignedOnly, tag, sort, page ?? 1, pageSize ?? 50),
+                cancellationToken);
+
+            return Results.Ok(new BookmarkListResponse(
+                result.Items.Select(MapListResponse).ToList(),
+                result.TotalCount,
+                result.Page,
+                result.PageSize));
         })
         .WithName("ListBookmarks")
-        .WithSummary("Lists bookmarks.")
-        .WithDescription("Returns the latest bookmark rows ordered for operator-facing list views, including collection membership identifiers.")
-        .Produces<List<BookmarkResponse>>(StatusCodes.Status200OK);
+        .WithSummary("Lists bookmarks with server-side search, filtering, sorting, and paging.")
+        .WithDescription("Returns one page of bookmarks. Supported query parameters: search (matches title, URL, summary, and tag names), collectionId, unassignedOnly, tag (exact case-insensitive tag match), sort (updated, created, title), page, and pageSize (max 200). Implements FR-004 list flows and NFR-003 scale targets.")
+        .Produces<BookmarkListResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized);
+
+        bookmarksGroup.MapGet("/stats", async (IBookmarkManagementService bookmarkService, CancellationToken cancellationToken) =>
+        {
+            var stats = await bookmarkService.GetBookmarkStatsAsync(cancellationToken);
+            return Results.Ok(new BookmarkStatsResponse(stats.TotalCount, stats.UnassignedCount));
+        })
+        .WithName("GetBookmarkStats")
+        .WithSummary("Returns bookmark counters.")
+        .WithDescription("Returns total and unassigned bookmark counts used by navigation and dashboard surfaces.")
+        .Produces<BookmarkStatsResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized);
+
+        bookmarksGroup.MapGet("/tags", async (IBookmarkManagementService bookmarkService, CancellationToken cancellationToken) =>
+        {
+            var tags = await bookmarkService.GetTagsAsync(cancellationToken);
+            return Results.Ok(tags.Select(tag => new TagResponse(tag.Id, tag.Name, tag.BookmarkCount)).ToList());
+        })
+        .WithName("ListTags")
+        .WithSummary("Lists tags with usage counts.")
+        .WithDescription("Returns every tag ordered by name together with the number of bookmarks carrying it.")
+        .Produces<List<TagResponse>>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         bookmarksGroup.MapGet("/{id:guid}", async (Guid id, IBookmarkManagementService bookmarkService, CancellationToken cancellationToken) =>
         {
@@ -35,8 +76,9 @@ internal static class BookmarkEndpoints
         })
         .WithName("GetBookmarkById")
         .WithSummary("Returns one bookmark.")
-        .WithDescription("Looks up one bookmark by identifier and returns detail data with collection assignments.")
+        .WithDescription("Looks up one bookmark by identifier and returns detail data with collection assignments and tags.")
         .Produces<BookmarkResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         bookmarksGroup.MapPost("/", async (CreateBookmarkRequest request, IBookmarkManagementService bookmarkService, CancellationToken cancellationToken) =>
@@ -58,17 +100,18 @@ internal static class BookmarkEndpoints
             }
 
             var bookmark = await bookmarkService.CreateBookmarkAsync(
-                new CreateBookmarkInput(request.Url, request.Title, request.Summary),
+                new CreateBookmarkInput(request.Url, request.Title, request.Summary, request.Tags ?? []),
                 cancellationToken);
 
             return Results.Created($"/api/bookmarks/{bookmark.Id}", MapDetailResponse(bookmark));
         })
         .WithName("CreateBookmark")
         .WithSummary("Creates a bookmark.")
-        .WithDescription("Validates the incoming bookmark payload and stores a new bookmark for FR-004 bookmark management flows.")
+        .WithDescription("Validates the incoming bookmark payload, stores a new bookmark, and assigns the supplied tag set for FR-004 bookmark management flows.")
         .Accepts<CreateBookmarkRequest>("application/json")
         .Produces<BookmarkResponse>(StatusCodes.Status201Created)
-        .ProducesValidationProblem(StatusCodes.Status400BadRequest);
+        .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized);
 
         bookmarksGroup.MapPut("/{id:guid}", async (Guid id, UpdateBookmarkRequest request, IBookmarkManagementService bookmarkService, CancellationToken cancellationToken) =>
         {
@@ -89,7 +132,7 @@ internal static class BookmarkEndpoints
             }
 
             var bookmark = await bookmarkService.UpdateBookmarkAsync(
-                new UpdateBookmarkInput(id, request.Url, request.Title, request.Summary),
+                new UpdateBookmarkInput(id, request.Url, request.Title, request.Summary, request.Tags),
                 cancellationToken);
             if (bookmark is null)
             {
@@ -100,10 +143,11 @@ internal static class BookmarkEndpoints
         })
         .WithName("UpdateBookmark")
         .WithSummary("Updates a bookmark.")
-        .WithDescription("Replaces the bookmark URL, title, and summary for an existing bookmark identified by its ID.")
+        .WithDescription("Replaces the bookmark URL, title, and summary for an existing bookmark identified by its ID. Supplying tags replaces the tag set; omitting tags keeps existing assignments.")
         .Accepts<UpdateBookmarkRequest>("application/json")
         .Produces<BookmarkResponse>(StatusCodes.Status200OK)
         .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         bookmarksGroup.MapPut("/{id:guid}/collections", async (
@@ -135,6 +179,30 @@ internal static class BookmarkEndpoints
         .Accepts<SyncBookmarkCollectionsRequest>("application/json")
         .Produces<BookmarkResponse>(StatusCodes.Status200OK)
         .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status404NotFound);
+
+        bookmarksGroup.MapPut("/{id:guid}/tags", async (
+            Guid id,
+            SyncBookmarkTagsRequest request,
+            IBookmarkManagementService bookmarkService,
+            CancellationToken cancellationToken) =>
+        {
+            var bookmark = await bookmarkService.SyncTagsAsync(id, request.Tags ?? [], cancellationToken);
+
+            if (bookmark is null)
+            {
+                return Results.NotFound();
+            }
+
+            return Results.Ok(MapDetailResponse(bookmark));
+        })
+        .WithName("SyncBookmarkTags")
+        .WithSummary("Synchronizes bookmark tag assignments.")
+        .WithDescription("Adds and removes tag links so the bookmark matches the supplied tag name set exactly. Missing tags are created on demand.")
+        .Accepts<SyncBookmarkTagsRequest>("application/json")
+        .Produces<BookmarkResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
 
         bookmarksGroup.MapDelete("/{id:guid}", async (Guid id, IBookmarkManagementService bookmarkService, CancellationToken cancellationToken) =>
@@ -151,6 +219,7 @@ internal static class BookmarkEndpoints
         .WithSummary("Deletes a bookmark.")
         .WithDescription("Removes one bookmark by identifier and returns no content when the deletion succeeds.")
         .Produces(StatusCodes.Status204NoContent)
+        .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status404NotFound);
     }
 
@@ -163,7 +232,8 @@ internal static class BookmarkEndpoints
             bookmark.Summary,
             bookmark.CreatedAtUtc,
             bookmark.UpdatedAtUtc,
-            bookmark.CollectionIds ?? []);
+            bookmark.CollectionIds ?? [],
+            bookmark.Tags ?? []);
     }
 
     private static BookmarkResponse MapListResponse(BookmarkListItem bookmark)
@@ -175,6 +245,7 @@ internal static class BookmarkEndpoints
             bookmark.Summary,
             bookmark.CreatedAtUtc ?? DateTimeOffset.MinValue,
             bookmark.UpdatedAtUtc,
-            bookmark.CollectionIds ?? []);
+            bookmark.CollectionIds ?? [],
+            bookmark.Tags ?? []);
     }
 }

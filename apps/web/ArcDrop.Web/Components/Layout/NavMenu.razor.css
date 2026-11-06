@@ -182,3 +182,33 @@
         border-radius: 4px;
     }
 }
+
+/* ---- App section navigation ---- */
+
+.nav-section {
+    margin-top: 0.4rem;
+}
+
+.nav-section-links {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.12rem;
+}
+
+.nav-section-link {
+    display: block;
+    color: rgba(220, 232, 228, 0.88);
+    font-size: 0.82rem;
+    font-weight: 560;
+    padding: 0.34rem 0.5rem;
+    border-radius: 8px;
+    transition: background-color 160ms ease, color 160ms ease;
+}
+
+.nav-section-link:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}

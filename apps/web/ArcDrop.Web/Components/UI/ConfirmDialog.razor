@@ -1,0 +1,124 @@
+@if (IsOpen)
+{
+    <div class="arc-modal-backdrop"></div>
+    <section class="arc-modal arc-modal--narrow"
+             role="alertdialog"
+             aria-modal="true"
+             aria-labelledby="@TitleId"
+             aria-describedby="@DescriptionId"
+             tabindex="-1"
+             @ref="_focusTarget"
+             @onkeydown="HandleKeyDownAsync">
+        <header class="arc-modal__header">
+            <div>
+                <h2 id="@TitleId">@Title</h2>
+                @if (!string.IsNullOrWhiteSpace(Description))
+                {
+                    <p class="page-subtitle" id="@DescriptionId">@Description</p>
+                }
+            </div>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(Message))
+        {
+            <p class="confirm-dialog-message">@Message</p>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(ErrorText))
+        {
+            <div class="alert alert-danger" role="alert">@ErrorText</div>
+        }
+
+        <footer class="arc-modal__footer">
+            <button class="btn btn-outline-secondary" type="button" @onclick="CancelAsync" disabled="@IsBusy">Cancel</button>
+            <button class="btn btn-danger" type="button" @onclick="ConfirmAsync" disabled="@IsBusy">
+                @if (IsBusy) { <span class="spinner-inline"></span> }
+                @ConfirmLabel
+            </button>
+        </footer>
+    </section>
+}
+
+@code {
+    private const string EscapeKeyName = "Escape";
+
+    private ElementReference _focusTarget;
+
+    [Parameter]
+    public bool IsOpen { get; set; }
+
+    [Parameter]
+    public string Title { get; set; } = "Are you sure?";
+
+    [Parameter]
+    public string? Description { get; set; }
+
+    [Parameter]
+    public string? Message { get; set; }
+
+    [Parameter]
+    public string ConfirmLabel { get; set; } = "Confirm";
+
+    [Parameter]
+    public string CancelLabel { get; set; } = "Cancel";
+
+    [Parameter]
+    public bool IsBusy { get; set; }
+
+    [Parameter]
+    public string? ErrorText { get; set; }
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private string TitleId => $"confirm-title-{GetHashCode()}";
+
+    private string DescriptionId => $"confirm-description-{GetHashCode()}";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Focus moves into the dialog when it opens so keyboard and Esc handling work immediately.
+        if (IsOpen)
+        {
+            try
+            {
+                await _focusTarget.FocusAsync();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The dialog can close before focus completes during rapid interactions.
+            }
+        }
+    }
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (string.Equals(args.Key, EscapeKeyName, StringComparison.Ordinal))
+        {
+            await CancelAsync();
+        }
+    }
+
+    private Task CancelAsync()
+    {
+        if (IsBusy)
+        {
+            return Task.CompletedTask;
+        }
+
+        return OnCancel.InvokeAsync();
+    }
+
+    private Task ConfirmAsync()
+    {
+        if (IsBusy)
+        {
+            return Task.CompletedTask;
+        }
+
+        return OnConfirm.InvokeAsync();
+    }
+}

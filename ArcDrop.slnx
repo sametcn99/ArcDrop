@@ -4,6 +4,9 @@
   <Folder Name="/apps/desktop/ArcDrop.Maui/">
     <Project Path="apps/desktop/ArcDrop.Maui/ArcDrop.Maui.csproj" />
   </Folder>
+  <Folder Name="/apps/desktop/arcdrop-avalonia/">
+    <Project Path="apps/desktop/arcdrop-avalonia/ArcDrop.Avalonia/ArcDrop.Avalonia.csproj" />
+  </Folder>
   <Folder Name="/apps/web/" />
   <Folder Name="/apps/web/ArcDrop.Web/">
     <Project Path="apps/web/ArcDrop.Web/ArcDrop.Web.csproj" />

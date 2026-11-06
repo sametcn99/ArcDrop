@@ -125,6 +125,46 @@ public sealed class EfCoreAiOrganizationOperationStore(ArcDropDbContext dbContex
         return operation is null ? null : MapOperation(operation);
     }
 
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<AiOperationSummaryItem> Items, int TotalCount)> ListOperationsAsync(
+        AiOperationListQuery query,
+        CancellationToken cancellationToken)
+    {
+        var normalized = query.Normalized();
+        var operations = dbContext.AiOperationLogs.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(normalized.ProviderName))
+        {
+            var providerName = normalized.ProviderName.Trim();
+            operations = operations.Where(operation => operation.ProviderName == providerName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalized.OperationType))
+        {
+            var operationType = normalized.OperationType.Trim();
+            operations = operations.Where(operation => operation.OperationType == operationType);
+        }
+
+        var totalCount = await operations.CountAsync(cancellationToken);
+
+        var items = await operations
+            .OrderByDescending(operation => operation.StartedAtUtc)
+            .Skip((normalized.Page - 1) * normalized.PageSize)
+            .Take(normalized.PageSize)
+            .Select(operation => new AiOperationSummaryItem(
+                operation.Id,
+                operation.ProviderName,
+                operation.OperationType,
+                operation.OutcomeStatus,
+                operation.BookmarkTitle,
+                operation.BookmarkUrl,
+                operation.StartedAtUtc,
+                operation.CompletedAtUtc))
+            .ToListAsync(cancellationToken);
+
+        return (items, totalCount);
+    }
+
     private static AiOrganizationOperationItem MapOperation(AiOperationLog operation)
     {
         return new AiOrganizationOperationItem(

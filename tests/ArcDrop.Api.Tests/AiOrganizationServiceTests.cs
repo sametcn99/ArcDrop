@@ -127,6 +127,13 @@ public sealed class AiOrganizationServiceTests
 
         public Guid FailedOperationId { get; private set; }
 
+        public Task<(IReadOnlyList<AiOperationSummaryItem> Items, int TotalCount)> ListOperationsAsync(
+            AiOperationListQuery query,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult((Array.Empty<AiOperationSummaryItem>() as IReadOnlyList<AiOperationSummaryItem>, 0));
+        }
+
         public Task<bool> ProviderExistsAsync(string providerName, CancellationToken cancellationToken)
         {
             return Task.FromResult(providerExists);

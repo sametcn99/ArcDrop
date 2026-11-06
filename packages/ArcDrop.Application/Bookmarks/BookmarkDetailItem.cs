@@ -10,4 +10,5 @@ public sealed record BookmarkDetailItem(
     string? Summary,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    IReadOnlyList<Guid>? CollectionIds = null);
+    IReadOnlyList<Guid>? CollectionIds = null,
+    IReadOnlyList<string>? Tags = null);

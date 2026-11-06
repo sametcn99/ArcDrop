@@ -1,0 +1,284 @@
+@inject IArcDropApiClient ApiClient
+@inject NavigationManager NavigationManager
+
+<div class="card-shell" style="max-width: 640px;">
+    <EditForm Model="Model" OnValidSubmit="RunAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label" for="organize-provider">Provider</label>
+            @if (_providerNames.Count > 0)
+            {
+                <select id="organize-provider"
+                        class="form-select"
+                        value="@Model.ProviderName"
+                        @onchange="HandleProviderChanged">
+                    @foreach (var providerName in _providerNames)
+                    {
+                        <option value="@providerName" selected="@(string.Equals(Model.ProviderName, providerName, StringComparison.Ordinal))">@providerName</option>
+                    }
+                </select>
+                <div class="form-text">Providers come from your configured profiles. Manage them under AI Providers.</div>
+            }
+            else
+            {
+                <InputText id="organize-provider" class="form-control" @bind-Value="Model.ProviderName" />
+                <div class="form-text">No configured providers were found. Enter a provider name or configure one under AI Providers.</div>
+            }
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="organize-type">Operation Type</label>
+            <InputSelect id="organize-type" class="form-select" @bind-Value="Model.OperationType">
+                <option value="tag-suggestions">tag-suggestions</option>
+                <option value="collection-suggestions">collection-suggestions</option>
+                <option value="title-cleanup">title-cleanup</option>
+                <option value="summary-cleanup">summary-cleanup</option>
+            </InputSelect>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="organize-url">Bookmark URL</label>
+            <InputText id="organize-url" class="form-control" @bind-Value="Model.BookmarkUrl" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="organize-title">Bookmark Title</label>
+            <InputText id="organize-title" class="form-control" @bind-Value="Model.BookmarkTitle" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="organize-summary">Bookmark Summary</label>
+            <InputTextArea id="organize-summary" class="form-control" @bind-Value="Model.BookmarkSummary" />
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit" disabled="@IsBusy">
+                @if (IsBusy) { <span class="spinner-inline"></span> }
+                Run Operation
+            </button>
+        </div>
+    </EditForm>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorText))
+{
+    <div class="alert alert-danger mt-3" role="alert">@ErrorText</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(StatusText) && string.IsNullOrWhiteSpace(ErrorText))
+{
+    <p class="status-hint mt-3">@StatusText</p>
+}
+
+@if (LastResult is not null)
+{
+    <div class="card-shell mt-4">
+        <h2>Operation Result</h2>
+        <p><strong>Operation ID:</strong> @LastResult.OperationId</p>
+        <p><strong>Status:</strong> @LastResult.OutcomeStatus</p>
+        <p><strong>Provider:</strong> @LastResult.ProviderName</p>
+        <p><strong>Type:</strong> @LastResult.OperationType</p>
+
+        @if (LastResult.Results.Count == 0)
+        {
+            <p><em>No result rows were returned.</em></p>
+        }
+        else
+        {
+            <table class="table table-hover align-middle app-table">
+                <caption class="visually-hidden">AI operation suggestions</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Result Type</th>
+                        <th scope="col">Value</th>
+                        <th scope="col">Confidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in LastResult.Results)
+                    {
+                        <tr>
+                            <td>@item.ResultType</td>
+                            <td>@item.Value</td>
+                            <td>@(item.Confidence?.ToString("0.##") ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            @if (SuggestedTags.Count > 0)
+            {
+                <div class="tag-filter-bar">
+                    <span class="form-label">Suggested tags:</span>
+                    <div class="tag-chip-list" role="list" aria-label="Suggested tags">
+                        @foreach (var tag in SuggestedTags)
+                        {
+                            <span class="tag-chip" role="listitem">@tag</span>
+                        }
+                    </div>
+                    <button class="btn btn-sm btn-primary" type="button" disabled="@IsApplyingTags" @onclick="ApplySuggestedTagsAsync">
+                        @if (IsApplyingTags) { <span class="spinner-inline"></span> }
+                        Apply tags to this bookmark
+                    </button>
+                    @if (!string.IsNullOrWhiteSpace(ApplyTagsStatusText))
+                    {
+                        <span class="form-text">@ApplyTagsStatusText</span>
+                    }
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    private readonly List<string> _providerNames = [];
+
+    private OrganizeBookmarkRequest Model { get; set; } = new()
+    {
+        OperationType = "tag-suggestions",
+        BookmarkUrl = "https://example.com",
+        BookmarkTitle = "Example Bookmark"
+    };
+
+    private bool IsBusy { get; set; }
+    private string StatusText { get; set; } = "Submit a command to generate organization suggestions.";
+    private string? ErrorText { get; set; }
+    private OrganizeBookmarkResponse? LastResult { get; set; }
+
+    private bool IsApplyingTags { get; set; }
+    private string? ApplyTagsStatusText { get; set; }
+
+    private IReadOnlyList<string> SuggestedTags
+    {
+        get
+        {
+            // Tag suggestions persist value only when the operation type matches, mirroring AI output semantics.
+            return LastResult?.OperationType == "tag-suggestions"
+                ? LastResult.Results
+                    .Where(result => string.Equals(result.ResultType, "tag", StringComparison.OrdinalIgnoreCase))
+                    .Select(result => result.Value.Trim())
+                    .Where(value => value.Length > 0)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList()
+                : [];
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // The provider dropdown reflects configured profiles instead of free-text guesses.
+            var providers = await ApiClient.GetAiProvidersAsync(CancellationToken.None);
+            _providerNames.AddRange(providers.Select(provider => provider.ProviderName).OrderBy(name => name));
+
+            if (_providerNames.Count > 0 && string.IsNullOrWhiteSpace(Model.ProviderName))
+            {
+                Model.ProviderName = _providerNames[0];
+            }
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
+        }
+        catch (ApiClientException)
+        {
+            // Free-text fallback keeps the form usable when the provider list cannot be loaded.
+        }
+    }
+
+    private void HandleProviderChanged(ChangeEventArgs args)
+    {
+        Model.ProviderName = args.Value?.ToString() ?? string.Empty;
+    }
+
+    private async Task RunAsync()
+    {
+        IsBusy = true;
+        ErrorText = null;
+        ApplyTagsStatusText = null;
+        StatusText = "Running organization operation...";
+
+        try
+        {
+            // Persist the last response in-memory so users can compare outputs before running new commands.
+            LastResult = await ApiClient.OrganizeBookmarkAsync(Model, CancellationToken.None);
+            StatusText = $"Operation completed with status '{LastResult.OutcomeStatus}'.";
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+            StatusText = "Operation did not complete.";
+            LastResult = null;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Organization command failed. Verify auth state and provider profile.";
+            StatusText = "Operation did not complete.";
+            LastResult = null;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task ApplySuggestedTagsAsync()
+    {
+        if (LastResult is null || SuggestedTags.Count == 0)
+        {
+            return;
+        }
+
+        IsApplyingTags = true;
+        ApplyTagsStatusText = null;
+
+        try
+        {
+            // Locate the bookmark by its URL so AI tag suggestions become persisted metadata.
+            var search = await ApiClient.GetBookmarksAsync(
+                new BookmarkListRequest { Search = Model.BookmarkUrl, Page = 1, PageSize = 10 },
+                CancellationToken.None);
+
+            var target = search.Items.FirstOrDefault(bookmark =>
+                string.Equals(bookmark.Url.Trim(), Model.BookmarkUrl.Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (target is null)
+            {
+                ApplyTagsStatusText = "No saved bookmark matched this URL. Save the bookmark first, then apply tags.";
+                return;
+            }
+
+            var mergedTags = (target.Tags ?? [])
+                .Concat(SuggestedTags)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            await ApiClient.SyncBookmarkTagsAsync(target.Id, mergedTags, CancellationToken.None);
+            ApplyTagsStatusText = $"Applied {SuggestedTags.Count} tag(s) to \"{target.Title}\".";
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
+        }
+        catch (ApiClientException exception)
+        {
+            ApplyTagsStatusText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            ApplyTagsStatusText = "Could not apply tags. Try again.";
+        }
+        finally
+        {
+            IsApplyingTags = false;
+        }
+    }
+}

@@ -105,6 +105,41 @@ internal static class AiOrganizationEndpoints
         .Produces(StatusCodes.Status401Unauthorized)
         .Produces(StatusCodes.Status403Forbidden)
         .Produces(StatusCodes.Status404NotFound);
+
+        aiGroup.MapGet("/operations", async (
+            int? page,
+            int? pageSize,
+            string? providerName,
+            string? operationType,
+            IAiOrganizationService organizationService,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await organizationService.ListOperationsAsync(
+                new AiOperationListQuery(page ?? 1, pageSize ?? 20, providerName, operationType),
+                cancellationToken);
+
+            return Results.Ok(new AiOperationListResponse(
+                result.Items
+                    .Select(operation => new AiOperationSummaryResponse(
+                        operation.OperationId,
+                        operation.ProviderName,
+                        operation.OperationType,
+                        operation.OutcomeStatus,
+                        operation.BookmarkTitle,
+                        operation.BookmarkUrl,
+                        operation.StartedAtUtc,
+                        operation.CompletedAtUtc))
+                    .ToList(),
+                result.TotalCount,
+                result.Page,
+                result.PageSize));
+        })
+        .WithName("ListAiOperations")
+        .WithSummary("Lists AI operation audit history.")
+        .WithDescription("Returns one page of persisted AI organization operations ordered newest first. Supports providerName and operationType filters with page and pageSize (max 100). Implements NFR-006 audit visibility.")
+        .Produces<AiOperationListResponse>(StatusCodes.Status200OK)
+        .Produces(StatusCodes.Status401Unauthorized)
+        .Produces(StatusCodes.Status403Forbidden);
     }
 
     private static OrganizeBookmarkResponse MapResponse(AiOrganizationOperationItem operation)

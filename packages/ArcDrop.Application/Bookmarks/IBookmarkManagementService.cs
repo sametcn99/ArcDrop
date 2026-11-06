@@ -1,14 +1,19 @@
 namespace ArcDrop.Application.Bookmarks;
 
 /// <summary>
-/// Provides bookmark CRUD and collection membership use cases for API endpoints.
+/// Provides bookmark CRUD, tag, membership, and paged query use cases for API endpoints.
 /// </summary>
 public interface IBookmarkManagementService
 {
     /// <summary>
-    /// Returns the latest bookmark list ordered for operator-facing API views.
+    /// Returns one page of bookmarks matching the supplied search, filter, sort, and paging criteria.
     /// </summary>
-    Task<IReadOnlyList<BookmarkListItem>> GetBookmarksAsync(CancellationToken cancellationToken);
+    Task<BookmarkListResult> GetBookmarksAsync(BookmarkListQuery query, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns lightweight counters for navigation and dashboard surfaces.
+    /// </summary>
+    Task<BookmarkStats> GetBookmarkStatsAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Returns one bookmark detail item by identifier, or null when the bookmark cannot be found.
@@ -29,6 +34,17 @@ public interface IBookmarkManagementService
     /// Synchronizes bookmark membership across collections.
     /// </summary>
     Task<BookmarkCollectionSyncResult> SyncCollectionsAsync(Guid bookmarkId, IReadOnlyList<Guid> collectionIds, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Synchronizes the exact tag set assigned to a bookmark and returns the updated projection,
+    /// or null when the bookmark cannot be found.
+    /// </summary>
+    Task<BookmarkDetailItem?> SyncTagsAsync(Guid bookmarkId, IReadOnlyList<string> tagNames, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Returns all tags with usage counts ordered by name.
+    /// </summary>
+    Task<IReadOnlyList<TagItem>> GetTagsAsync(CancellationToken cancellationToken);
 
     /// <summary>
     /// Deletes a bookmark and returns whether a record was removed.

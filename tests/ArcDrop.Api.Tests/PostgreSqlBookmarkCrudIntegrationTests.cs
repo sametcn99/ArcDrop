@@ -123,6 +123,8 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
         // Capture a non-null client reference once to keep nullability and intent explicit.
         var client = _httpClient!;
 
+        await AuthenticateAsync(client);
+
         var createResponse = await client.PostAsJsonAsync("/api/bookmarks", new CreateBookmarkRequest(
             "https://example.com",
             "Example",
@@ -167,6 +169,8 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
         await ApplyLatestMigrationAsync();
 
         var client = _httpClient!;
+        await AuthenticateAsync(client);
+
         var rootCreateResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
             "Engineering",
             "Top level folder",
@@ -209,6 +213,8 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
         await ApplyLatestMigrationAsync();
 
         var client = _httpClient!;
+
+        await AuthenticateAsync(client);
 
         var firstCollectionResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
             "Read Later",
@@ -429,6 +435,8 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
         await ApplyLatestMigrationAsync();
 
         var client = _httpClient!;
+        await AuthenticateAsync(client);
+
         var collectionResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
             "Exports",
             "Data portability folder",
@@ -483,6 +491,236 @@ public sealed class PostgreSqlBookmarkCrudIntegrationTests : IAsyncLifetime
         Assert.Equal(0, importSummary.BookmarksCreated);
         Assert.Equal(0, importSummary.BookmarksUpdated);
         Assert.Equal(1, importSummary.BookmarksSkipped);
+    }
+
+    /// <summary>
+    /// Verifies that bookmark, collection, and data portability endpoints reject anonymous callers.
+    /// This protects the fixed-admin authorization boundary for all persisted data.
+    /// </summary>
+    [Fact]
+    public async Task ProtectedDataEndpoints_RejectAnonymousRequests()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+
+        var client = _httpClient!;
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/bookmarks")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/bookmarks/tags")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/bookmarks/stats")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/collections")).StatusCode);
+
+        using var exportContent = new StringContent(
+            "{\"format\":\"Json\",\"collectionIds\":null}",
+            Encoding.UTF8,
+            "application/json");
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            (await client.PostAsync("/api/data/export", exportContent)).StatusCode);
+    }
+
+    /// <summary>
+    /// Verifies server-side search, sorting, and paging through the paged list envelope.
+    /// This covers NFR-003-aligned list behavior without requiring full client hydration.
+    /// </summary>
+    [Fact]
+    public async Task BookmarkList_SearchSortAndPaging_FiltersServerSide()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+        var client = _httpClient!;
+        await AuthenticateAsync(client);
+
+        for (var index = 1; index <= 3; index++)
+        {
+            var response = await client.PostAsJsonAsync("/api/bookmarks", new CreateBookmarkRequest(
+                $"https://search-{index}.example.com",
+                $"Search Target {index}",
+                "searchable summary"));
+            Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        }
+
+        var noiseResponse = await client.PostAsJsonAsync("/api/bookmarks", new CreateBookmarkRequest(
+            "https://unrelated.example.org",
+            "Unrelated Entry",
+            null));
+        Assert.Equal(HttpStatusCode.Created, noiseResponse.StatusCode);
+
+        var searchResponse = await client.GetAsync("/api/bookmarks?search=Search%20Target");
+        Assert.Equal(HttpStatusCode.OK, searchResponse.StatusCode);
+        var searchPayload = await searchResponse.Content.ReadFromJsonAsync<BookmarkListResponse>();
+        Assert.NotNull(searchPayload);
+        Assert.Equal(3, searchPayload!.TotalCount);
+        Assert.Equal(3, searchPayload.Items.Count);
+        Assert.All(searchPayload.Items, item => Assert.StartsWith("Search Target", item.Title));
+
+        var pagedResponse = await client.GetAsync("/api/bookmarks?search=Search%20Target&sort=title&page=1&pageSize=2");
+        var pagedPayload = await pagedResponse.Content.ReadFromJsonAsync<BookmarkListResponse>();
+        Assert.NotNull(pagedPayload);
+        Assert.Equal(3, pagedPayload!.TotalCount);
+        Assert.Equal(2, pagedPayload.Items.Count);
+        Assert.Equal("Search Target 1", pagedPayload.Items[0].Title);
+        Assert.Equal("Search Target 2", pagedPayload.Items[1].Title);
+
+        var secondPageResponse = await client.GetAsync("/api/bookmarks?search=Search%20Target&sort=title&page=2&pageSize=2");
+        var secondPagePayload = await secondPageResponse.Content.ReadFromJsonAsync<BookmarkListResponse>();
+        Assert.NotNull(secondPagePayload);
+        Assert.Single(secondPagePayload!.Items);
+        Assert.Equal("Search Target 3", secondPagePayload.Items[0].Title);
+    }
+
+    /// <summary>
+    /// Verifies tag assignment, exact-set synchronization, and tag listing with usage counts.
+    /// This closes the loop between AI tag suggestions and persisted bookmark metadata.
+    /// </summary>
+    [Fact]
+    public async Task BookmarkTags_CanBeAssignedSyncedAndListed()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+        var client = _httpClient!;
+        await AuthenticateAsync(client);
+
+        var createResponse = await client.PostAsJsonAsync("/api/bookmarks", new CreateBookmarkRequest(
+            "https://tagged.example.com",
+            "Tagged Bookmark",
+            null,
+            ["dotnet", "docs"]));
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        var created = await createResponse.Content.ReadFromJsonAsync<BookmarkResponse>();
+        Assert.NotNull(created);
+        Assert.Equal(["docs", "dotnet"], created!.Tags);
+
+        var syncResponse = await client.PutAsJsonAsync($"/api/bookmarks/{created.Id}/tags", new SyncBookmarkTagsRequest(
+            ["docs", "reference"]));
+        Assert.Equal(HttpStatusCode.OK, syncResponse.StatusCode);
+        var synced = await syncResponse.Content.ReadFromJsonAsync<BookmarkResponse>();
+        Assert.NotNull(synced);
+        Assert.Equal(["docs", "reference"], synced!.Tags);
+
+        var tagsResponse = await client.GetAsync("/api/bookmarks/tags");
+        Assert.Equal(HttpStatusCode.OK, tagsResponse.StatusCode);
+        var tags = await tagsResponse.Content.ReadFromJsonAsync<List<TagResponse>>();
+        Assert.NotNull(tags);
+        Assert.Contains(tags!, tag => tag.Name == "dotnet" && tag.BookmarkCount == 0);
+        Assert.Contains(tags!, tag => tag.Name == "reference" && tag.BookmarkCount == 1);
+    }
+
+    /// <summary>
+    /// Verifies bookmark stats counters used by navigation surfaces.
+    /// </summary>
+    [Fact]
+    public async Task BookmarkStats_ReturnsTotalsAndUnassignedCount()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+        var client = _httpClient!;
+        await AuthenticateAsync(client);
+
+        var collectionResponse = await client.PostAsJsonAsync("/api/collections", new CreateCollectionRequest(
+            "Stats Collection",
+            null,
+            ParentId: null));
+        var collection = await collectionResponse.Content.ReadFromJsonAsync<CollectionResponse>();
+        Assert.NotNull(collection);
+
+        var assignedResponse = await client.PostAsJsonAsync("/api/bookmarks", new CreateBookmarkRequest(
+            "https://assigned.example.com",
+            "Assigned",
+            null));
+        var assigned = await assignedResponse.Content.ReadFromJsonAsync<BookmarkResponse>();
+        Assert.NotNull(assigned);
+
+        var syncResponse = await client.PutAsJsonAsync(
+            $"/api/bookmarks/{assigned!.Id}/collections",
+            new SyncBookmarkCollectionsRequest([collection!.Id]));
+        Assert.Equal(HttpStatusCode.OK, syncResponse.StatusCode);
+
+        await client.PostAsJsonAsync("/api/bookmarks", new CreateBookmarkRequest(
+            "https://loose.example.com",
+            "Loose",
+            null));
+
+        var statsResponse = await client.GetAsync("/api/bookmarks/stats");
+        Assert.Equal(HttpStatusCode.OK, statsResponse.StatusCode);
+        var stats = await statsResponse.Content.ReadFromJsonAsync<BookmarkStatsResponse>();
+        Assert.NotNull(stats);
+        Assert.True(stats!.TotalCount >= 2);
+        Assert.True(stats.UnassignedCount >= 1);
+    }
+
+    /// <summary>
+    /// Verifies the paged AI operation history listing with operation type filtering.
+    /// This makes NFR-006 audit records discoverable without knowing identifiers up front.
+    /// </summary>
+    [Fact]
+    public async Task AiOperationHistory_ListsPagedAndFiltersByType()
+    {
+        if (!EnsureDockerIsAvailable())
+        {
+            return;
+        }
+
+        await ApplyLatestMigrationAsync();
+        var client = _httpClient!;
+        await AuthenticateAsync(client);
+
+        var providerResponse = await client.PostAsJsonAsync("/api/ai/providers", new UpsertAiProviderConfigRequest(
+            "OpenAI",
+            "https://api.openai.com/v1",
+            "gpt-4.1",
+            "test-secret-key-12345"));
+        Assert.Equal(HttpStatusCode.Created, providerResponse.StatusCode);
+
+        var organizeResponse = await client.PostAsJsonAsync("/api/ai/organize", new OrganizeBookmarkRequest(
+            "OpenAI",
+            "tag-suggestions",
+            "https://learn.microsoft.com/dotnet",
+            "DotNet API Guide",
+            "Reference material"));
+        var organizePayload = await organizeResponse.Content.ReadFromJsonAsync<OrganizeBookmarkResponse>();
+        Assert.NotNull(organizePayload);
+
+        var listResponse = await client.GetAsync("/api/ai/operations?page=1&pageSize=10&operationType=tag-suggestions");
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+        var listPayload = await listResponse.Content.ReadFromJsonAsync<AiOperationListResponse>();
+        Assert.NotNull(listPayload);
+        Assert.True(listPayload!.TotalCount >= 1);
+        Assert.Contains(listPayload.Items, item => item.OperationId == organizePayload!.OperationId);
+        Assert.All(listPayload.Items, item => Assert.Equal("tag-suggestions", item.OperationType));
+    }
+
+    /// <summary>
+    /// Authenticates the supplied client against the fixed admin credential test fixture.
+    /// </summary>
+    private async Task AuthenticateAsync(HttpClient client)
+    {
+        var loginResponse = await client.PostAsJsonAsync("/api/auth/login", new LoginRequest(
+            "admin-test",
+            "integration-test-password"));
+        Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+
+        var loginPayload = await loginResponse.Content.ReadFromJsonAsync<LoginResponse>();
+        Assert.NotNull(loginPayload);
+
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", loginPayload!.AccessToken);
     }
 
     /// <summary>

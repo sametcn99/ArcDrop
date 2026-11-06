@@ -16,6 +16,30 @@
             <Label Text="{Binding Description}"
                    FontSize="15"
                    LineBreakMode="WordWrap" />
+
+            <Frame Padding="14"
+                   CornerRadius="12"
+                   Margin="0,8,0,0">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Admin Session"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           SemanticProperties.HeadingLevel="Level2" />
+
+                    <Label Text="{Binding SessionStatusText}"
+                           FontSize="14"
+                           LineBreakMode="WordWrap" />
+
+                    <HorizontalStackLayout Spacing="10">
+                        <Button Text="Refresh Session"
+                                Command="{Binding RefreshSessionCommand}"
+                                SemanticProperties.Hint="Reload session status" />
+                        <Button Text="Sign Out"
+                                Command="{Binding SignOutCommand}"
+                                SemanticProperties.Hint="Sign out of ArcDrop" />
+                    </HorizontalStackLayout>
+                </VerticalStackLayout>
+            </Frame>
         </VerticalStackLayout>
     </Grid>
 </ContentPage>

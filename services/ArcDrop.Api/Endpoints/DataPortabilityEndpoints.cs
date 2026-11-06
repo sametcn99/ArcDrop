@@ -12,7 +12,9 @@ internal static class DataPortabilityEndpoints
 {
     public static void MapDataPortability(WebApplication app)
     {
-        var dataGroup = app.MapGroup("/api/data").WithTags("Data Portability");
+        var dataGroup = app.MapGroup("/api/data")
+            .WithTags("Data Portability")
+            .RequireAuthorization();
 
         dataGroup.MapPost("/export", async (
             ExportBookmarksRequest request,

@@ -1,0 +1,294 @@
+@inject IArcDropApiClient ApiClient
+@inject NavigationManager NavigationManager
+
+<div class="card-shell mb-4">
+    <div class="section-header">
+        <h2>Operation History</h2>
+        <div class="d-flex gap-2 align-items-center">
+            <label class="form-label mb-0" for="history-type-filter">Type</label>
+            <select id="history-type-filter"
+                    class="form-select form-select-sm"
+                    style="width: auto;"
+                    value="@_operationTypeFilter"
+                    @onchange="HandleTypeFilterChangedAsync">
+                <option value="">All types</option>
+                <option value="tag-suggestions">tag-suggestions</option>
+                <option value="collection-suggestions">collection-suggestions</option>
+                <option value="title-cleanup">title-cleanup</option>
+                <option value="summary-cleanup">summary-cleanup</option>
+            </select>
+            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="(() => LoadHistoryAsync())" disabled="@IsLoading">Refresh</button>
+        </div>
+    </div>
+
+    @if (IsLoading)
+    {
+        <p class="status-hint"><span class="spinner-inline"></span> Loading operation history...</p>
+    }
+    else if (!string.IsNullOrWhiteSpace(ErrorText))
+    {
+        <div class="alert alert-danger" role="alert">@ErrorText</div>
+    }
+    else if (Operations.Count == 0)
+    {
+        <div class="empty-state">
+            <p class="empty-state__title">No operations recorded</p>
+            <p class="empty-state__text">Run an AI organize command and its audit entry appears here.</p>
+        </div>
+    }
+    else
+    {
+        <table class="table table-hover align-middle app-table">
+            <caption class="visually-hidden">AI operation audit history</caption>
+            <thead>
+                <tr>
+                    <th scope="col">Started</th>
+                    <th scope="col">Provider</th>
+                    <th scope="col">Type</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Bookmark</th>
+                    <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var operation in Operations)
+                {
+                    <tr>
+                        <td>@operation.StartedAtUtc.ToLocalTime().ToString("g")</td>
+                        <td>@operation.ProviderName</td>
+                        <td>@operation.OperationType</td>
+                        <td>
+                            <span class="arc-badge @(string.Equals(operation.OutcomeStatus, "success", StringComparison.OrdinalIgnoreCase) ? "arc-badge--success" : "arc-badge--danger")">@operation.OutcomeStatus</span>
+                        </td>
+                        <td title="@operation.BookmarkUrl">@operation.BookmarkTitle</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="(() => LoadOperationDetailAsync(operation.OperationId))">Details</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @if (TotalPages > 1)
+        {
+            <nav class="pagination-bar" aria-label="Operation history pages">
+                <button class="btn btn-outline-secondary btn-sm" type="button" disabled="@(_page <= 1 || IsLoading)" @onclick="(() => GoToPageAsync(_page - 1))">Previous</button>
+                <span aria-live="polite">Page @_page of @TotalPages (@_totalCount total)</span>
+                <button class="btn btn-outline-secondary btn-sm" type="button" disabled="@(_page >= TotalPages || IsLoading)" @onclick="(() => GoToPageAsync(_page + 1))">Next</button>
+            </nav>
+        }
+        else
+        {
+            <p class="form-text">@_totalCount operation(s) recorded.</p>
+        }
+    }
+</div>
+
+<div class="card-shell mb-4" style="max-width: 640px;">
+    <div class="section-header">
+        <h2>Look Up by ID</h2>
+    </div>
+
+    <EditForm Model="QueryModel" OnValidSubmit="LookupAsync">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="mb-3">
+            <label class="form-label" for="operation-id-input">Operation ID</label>
+            <InputText id="operation-id-input" class="form-control" @bind-Value="QueryModel.OperationId" />
+        </div>
+
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit" disabled="@IsLookupBusy">
+                @if (IsLookupBusy) { <span class="spinner-inline"></span> }
+                Lookup
+            </button>
+        </div>
+    </EditForm>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(LookupErrorText))
+{
+    <div class="alert alert-danger" role="alert">@LookupErrorText</div>
+}
+
+@if (!string.IsNullOrWhiteSpace(LookupStatusText) && string.IsNullOrWhiteSpace(LookupErrorText))
+{
+    <p class="status-hint">@LookupStatusText</p>
+}
+
+@if (Detail is not null)
+{
+    <div class="card-shell">
+        <h2>Operation Details</h2>
+        <p><strong>Operation ID:</strong> @Detail.OperationId</p>
+        <p><strong>Provider:</strong> @Detail.ProviderName</p>
+        <p><strong>Type:</strong> @Detail.OperationType</p>
+        <p><strong>Status:</strong> @Detail.OutcomeStatus</p>
+        <p><strong>Started:</strong> @Detail.StartedAtUtc.ToLocalTime().ToString("g")</p>
+        <p><strong>Completed:</strong> @Detail.CompletedAtUtc.ToLocalTime().ToString("g")</p>
+
+        @if (Detail.Results.Count == 0)
+        {
+            <p><em>No result rows were persisted for this operation.</em></p>
+        }
+        else
+        {
+            <table class="table table-hover align-middle app-table">
+                <caption class="visually-hidden">Operation result rows</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Result Type</th>
+                        <th scope="col">Value</th>
+                        <th scope="col">Confidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in Detail.Results)
+                    {
+                        <tr>
+                            <td>@item.ResultType</td>
+                            <td>@item.Value</td>
+                            <td>@(item.Confidence?.ToString("0.##") ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    private const int PageSize = 15;
+
+    private readonly List<AiOperationSummaryDto> Operations = [];
+    private bool IsLoading { get; set; }
+    private string? ErrorText { get; set; }
+
+    private int _page = 1;
+    private int _totalCount;
+    private string? _operationTypeFilter;
+
+    private OperationLookupFormModel QueryModel { get; set; } = new();
+    private OrganizeBookmarkResponse? Detail { get; set; }
+    private bool IsLookupBusy { get; set; }
+    private string? LookupStatusText { get; set; }
+    private string? LookupErrorText { get; set; }
+
+    private int TotalPages => _totalCount == 0 ? 1 : (int)Math.Ceiling(_totalCount / (double)PageSize);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadHistoryAsync();
+    }
+
+    private async Task HandleTypeFilterChangedAsync(ChangeEventArgs args)
+    {
+        _operationTypeFilter = args.Value?.ToString();
+        _page = 1;
+        await LoadHistoryAsync();
+    }
+
+    private Task GoToPageAsync(int page)
+    {
+        _page = Math.Clamp(page, 1, TotalPages);
+        return LoadHistoryAsync();
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        IsLoading = true;
+        ErrorText = null;
+
+        try
+        {
+            var result = await ApiClient.ListAiOperationsAsync(
+                _page,
+                PageSize,
+                providerName: null,
+                operationType: string.IsNullOrWhiteSpace(_operationTypeFilter) ? null : _operationTypeFilter,
+                CancellationToken.None);
+
+            Operations.Clear();
+            Operations.AddRange(result.Items);
+            _totalCount = result.TotalCount;
+            _page = result.Page;
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
+        }
+        catch (ApiClientException exception)
+        {
+            ErrorText = exception.UserMessage;
+        }
+        catch (Exception)
+        {
+            ErrorText = "Could not load operation history.";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task LoadOperationDetailAsync(Guid operationId)
+    {
+        QueryModel = new OperationLookupFormModel { OperationId = operationId.ToString() };
+        await LookupAsync();
+    }
+
+    private async Task LookupAsync()
+    {
+        IsLookupBusy = true;
+        LookupErrorText = null;
+        LookupStatusText = "Loading operation data...";
+
+        try
+        {
+            if (!Guid.TryParse(QueryModel.OperationId, out var operationId))
+            {
+                LookupErrorText = "Operation ID must be a valid GUID value.";
+                LookupStatusText = "Lookup input validation failed.";
+                Detail = null;
+                return;
+            }
+
+            // NotFound is represented by null to keep the page behavior explicit and predictable.
+            Detail = await ApiClient.GetOperationByIdAsync(operationId, CancellationToken.None);
+            if (Detail is null)
+            {
+                LookupStatusText = "Operation was not found.";
+                return;
+            }
+
+            LookupStatusText = "Operation loaded successfully.";
+        }
+        catch (ApiClientException exception) when (SessionRedirect.ShouldRedirect(exception))
+        {
+            SessionRedirect.RedirectToLogin(NavigationManager);
+        }
+        catch (ApiClientException exception)
+        {
+            LookupErrorText = exception.UserMessage;
+            LookupStatusText = "Lookup request failed.";
+            Detail = null;
+        }
+        catch (Exception)
+        {
+            LookupErrorText = "Could not load operation details.";
+            LookupStatusText = "Lookup request failed.";
+            Detail = null;
+        }
+        finally
+        {
+            IsLookupBusy = false;
+        }
+    }
+
+    private sealed class OperationLookupFormModel
+    {
+        [Required]
+        public string OperationId { get; set; } = string.Empty;
+    }
+}
