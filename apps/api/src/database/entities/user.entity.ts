@@ -37,6 +37,16 @@ export class User {
   @Column({ type: 'enum', enum: ['active', 'disabled'], enumName: 'user_status' })
   status!: UserStatus;
 
+  /**
+   * Per-user monotonic change-log cursor (plan D4). Incremented atomically
+   * (`UPDATE ... RETURNING`) by `ChangeLogService` once per recorded change —
+   * the row lock serializes concurrent writers, so a user's seqs are gapless.
+   * `bigint` → TypeORM surfaces it as a string; it never participates in
+   * arithmetic here.
+   */
+  @Column({ type: 'bigint', name: 'sync_seq', default: 0 })
+  syncSeq!: string;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

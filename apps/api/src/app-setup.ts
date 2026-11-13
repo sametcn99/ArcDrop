@@ -50,6 +50,8 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addTag('Auth', 'Bootstrap, login, refresh rotation, sessions, invite/reset claim')
     .addTag('Users', 'Admin user management (invite/reset tokens via API, plan D15)')
     .addTag('Settings', 'Admin instance settings (plan D16)')
+    .addTag('Bookmarks', 'Bookmark CRUD, trash/restore, search + paging, stats, per-bookmark tags')
+    .addTag('Tags', 'Tag rename/merge and delete-detach (plan M3)')
     // Bearer auth (plan D2): `Authorization: Bearer <access JWT>`.
     .addBearerAuth()
     .build();
