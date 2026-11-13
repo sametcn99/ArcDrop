@@ -1,3 +1,0 @@
-# ArcDrop is a self-hosted workspace; keep crawlers away from private content.
-User-agent: *
-Disallow: /
