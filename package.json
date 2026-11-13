@@ -1,10 +1,14 @@
 {
   "name": "arcdrop",
-  "private": true,
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "eslint": "^9.20.0",
+    "eslint-config-prettier": "^10.0.0",
+    "prettier": "^3.5.0",
+    "typescript-eslint": "^8.24.0"
+  },
   "description": "ArcDrop — self-hosted, multi-user bookmark platform (monorepo)",
-  "workspaces": [
-    "apps/*"
-  ],
+  "private": true,
   "scripts": {
     "dev": "bun --cwd=apps/api run dev",
     "build": "bun --cwd=apps/api run build",
@@ -17,11 +21,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
-  "devDependencies": {
-    "@eslint/js": "^9.20.0",
-    "eslint": "^9.20.0",
-    "eslint-config-prettier": "^10.0.0",
-    "prettier": "^3.5.0",
-    "typescript-eslint": "^8.24.0"
-  }
+  "workspaces": [
+    "apps/*"
+  ]
 }

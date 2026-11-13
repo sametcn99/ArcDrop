@@ -2,9 +2,10 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M1 — API foundation (validated config, TypeORM + PostgreSQL + migrations,
-health probes, OpenAPI + Scalar, problem+json errors, structured logging, Docker/compose
-bundle passing the Bun production gate). Next: M2 — auth & users.
+**Status:** M2 — auth & users (M1 foundation + first-run admin bootstrap, bearer JWT
+auth with rotating refresh tokens and reuse detection, sessions, admin user
+management with single-use invite/reset tokens, DB-backed instance settings,
+route throttling). Next: M3 — bookmarks core.
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, AI, portability, hardening & ops.
@@ -56,7 +57,17 @@ bun run dev            # or: bun --cwd=apps/api run dev from the repo root
 
 Tests: `bun test src` (unit) needs no services; `bun test e2e` boots the real app against
 `ARCDROP__DATABASE__URL` (CI provisions a Postgres service container and sets exactly
-that variable).
+that variable). Locally, a throwaway container on a non-default port keeps your dev
+database untouched — the e2e suite wipes the auth tables it owns, but run it against a
+scratch DB anyway:
+
+```sh
+docker run -d --name arcdrop-e2e-pg -e POSTGRES_USER=arcdrop -e POSTGRES_PASSWORD=arcdrop \
+  -e POSTGRES_DB=arcdrop_test -p 55432:5432 postgres:16-alpine
+$env:ARCDROP__DATABASE__URL = 'postgres://arcdrop:arcdrop@localhost:55432/arcdrop_test'  # PowerShell
+bun test e2e
+docker rm -f arcdrop-e2e-pg   # throw it away afterwards
+```
 
 ## HTTP contract
 
@@ -88,15 +99,18 @@ PostgreSQL only, TypeORM, `synchronize: false` always — schema changes go thro
 generated migrations.
 
 - `src/database/entities/` — explicit entity list (NO globs; globs break `bun build`).
-  Empty until M2 ships the first entity.
+  `User`, `RefreshToken`, `OneTimeToken` (M2 auth), `Setting` (D16 runtime settings).
 - `src/database/migrations/` — explicit migration list + the no-op
-  `InitialSetup1763000000000` pipeline proof.
+  `InitialSetup1763000000000` pipeline proof and `M2AuthUsers1794606603617`
+  (users/refresh_tokens/one_time_tokens/settings + the three enum types).
 
 ### Migration workflow
 
 ```sh
 # after editing/adding entities:
-bun run migration:generate src/database/migrations CreateUser        # generates <ts>-create-user.ts
+bun run migration:generate src/database/migrations/NewEntityName
+#   → generates <unixMs>-NewEntityName.ts  (ONE positional: the path INCLUDING
+#     the class-style name — this TypeORM version takes no separate name arg)
 # then: add the generated class to src/database/migrations/index.ts (explicit list!)
 bun run migration:run
 bun run migration:revert     # undo the last one
@@ -104,12 +118,19 @@ bun run migration:revert     # undo the last one
 
 - The CLI datasource is `src/database/data-source.cli.ts`, bundled to
   `dist/database/data-source.cli.js` (TypeORM's CLI cannot load TS on its own; the
-  bundle is what the container entrypoint uses too — dev/prod parity).
+  bundle is what the container entrypoint uses too — dev/prod parity). It validates
+  the WHOLE env — migration commands need `ARCDROP__DATABASE__URL` **and**
+  `ARCDROP__JWT__SECRET` set.
+- `uuidExtension: 'pgcrypto'` is set on the datasource: generated UUID PKs use
+  PG13+ core `gen_random_uuid()` — no uuid-ossp extension in migrations.
 - Naming convention for hand-written migrations: file `<unixMs>-<PascalName>.ts`,
   class `<PascalName><unixMs>`. Prefer `migration:generate` so timestamps are
   authoritative.
 - `bun run build` produces TWO entry points: `dist/main.js` (server) and
-  `dist/database/data-source.cli.js` (CLI datasource).
+  `dist/database/data-source.cli.js` (CLI datasource). Native modules
+  (`@node-rs/argon2`) are emitted as `.node` ASSETS next to the bundles and
+  `__require`d from `dist/` — the Dockerfile copies the whole `dist/` folder, which
+  is why that matters.
 
 ## Docker & compose (D8 — Bun production gate)
 
@@ -133,7 +154,43 @@ bun run migration:revert     # undo the last one
 docker compose up --build        # from the repo root
 ```
 
-## Module map (as of M1)
+## Auth & sessions (M2 — D2, D3, D15, D16)
+
+- **Token model (D2):** bearer-only. 15-minute HS256 access JWTs signed with
+  `ARCDROP__JWT__SECRET` (claims: `sub`, `fam`, `iss=arcdrop`, `exp` — the algorithm
+  is pinned on verify) + opaque 256-bit refresh tokens stored as sha256 hashes.
+- **Rotation & reuse detection:** every refresh/claim/login mints a new refresh token
+  inside a `familyId`; presenting an already-revoked token revokes the WHOLE family
+  (device logged out everywhere). The revocation is committed BEFORE the 401 —
+  throwing inside the rotation transaction would roll it back (bug we hit and fixed;
+  `AuthService.refresh` uses an outcome pattern for exactly this reason).
+- **A session IS a refresh family:** `GET /auth/sessions` groups `refresh_tokens` by
+  `familyId` (deviceLabel, createdAt, lastUsedAt, `current` flag from the access
+  token's `fam` claim, `revokedAt` for dead families).
+- **Immediate revocation:** the global `JwtAuthGuard` loads the user from the DB on
+  every request — a disabled user's unexpired tokens die on the next call. Disabling
+  via the admin API additionally revokes all their refresh tokens.
+- **Bootstrap (D3):** `POST /auth/bootstrap` creates the first admin and then refuses
+  with 409 forever. `POST /auth/register` exists but 403s while the `registrationOpen`
+  setting is off; `PUT /admin/settings` flips it live.
+- **Invite/reset tokens (D15):** admin-created users get a single-use invite token
+  (~24h); `POST /admin/users/{id}/reset-password` mints a reset token (~1h). Both are
+  returned ONLY in the admin API response body (stored hashed; no SMTP). Newer tokens
+  of the same type supersede unused older ones. `POST /auth/claim` consumes the token,
+  sets the password, revokes the user's existing sessions and starts a new one.
+- **Password change:** `POST /auth/password` revokes all OTHER families (the caller's
+  survives via its `fam` claim).
+- **Throttling:** `@nestjs/throttler` — global default 100 req/min per IP; every
+  `/auth/*` route is capped at 10 req/min (the e2e suite proves a 429 problem+json on
+  the 11th login in an isolated boot).
+- **Guards (order matters):** `ThrottlerGuard` → `JwtAuthGuard` (global; `@Public()`
+  opts out — health probes and the public auth routes use it) → `RolesGuard`
+  (`@Roles('admin')` on `/admin/*`).
+- **Instance settings (D16):** `settings` table, typed via `SettingsService` —
+  `registrationOpen` (default false), `trashRetentionDays` (30), `changeLogRetentionDays`
+  (90). Secrets/infra stay env-only.
+
+## Module map (as of M2)
 
 ```
 src/
@@ -146,13 +203,48 @@ src/
   database/                TypeORM DataSource, entities/, migrations/, CLI datasource
   health/                  GET /api/v1/healthz (process), GET /api/v1/readyz (DB + data dir)
   metrics/                 prom-client registry; /metrics route only when enabled
+  auth/                    /auth/* controller+service; crypto (JWT/argon2/opaque tokens);
+                           global guards (throttler, JWT, roles) + @Public/@Roles/@CurrentUser
+  users/                   /admin/users controller+service (invite/reset tokens via API)
+  settings/                SettingsService (typed DB settings) + /admin/settings
 test/
   helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset)
   api-foundation.e2e.test.ts   full contract suite (two boots: default + metrics/CORS on)
+  auth-users.e2e.test.ts       M2 lifecycle suite (main boot + isolated throttle boot)
 ```
 
 Both `main.ts` and the e2e boots go through `app-setup.ts` — keep runtime behavior and
 tests in lockstep by wiring new app-level concerns THERE.
+
+## Decisions recorded (M2)
+
+- **Password hashing: `@node-rs/argon2` (napi prebuilds, argon2id).** Verified on Bun
+  1.4.2 (Windows dev + alpine musl in the compose image) before building on it; the
+  bun bundler emits the `.node` binary as a dist asset, so production needs no
+  compiler toolchain. OWASP-recommended parameters (m=19456, t=2, p=1) are pinned
+  explicitly in `PasswordService`.
+- **Access JWTs are hand-rolled on `node:crypto`** (`auth/crypto/jwt.service.ts`) —
+  no JWT dependency; HS256 pinned on sign AND verify (an `alg: none`/HS512 header is
+  rejected), `timingSafeEqual` signature checks, `iss`/`exp` enforced. Unit-tested
+  including tamper/al/expiry cases.
+- **`OneTimeToken` is a fourth entity** (the ticket lists three): single-use +
+  expiring + type-discriminated (invite|reset) storage for D15 was cleaner than
+  columns on `users` and keeps User minimal. Same hashed-at-rest discipline as
+  refresh tokens.
+- **Reuse-revocation must not throw inside its transaction** — the outcome pattern in
+  `AuthService.refresh` commits the family revocation, then the handler throws the 401. (Throw-first version rolled the revocation back.)
+- **Login failure timing is equalized:** unknown email runs one argon2 verify against
+  a lazily-generated dummy hash, so "no such user" and "wrong password" cost the same.
+  Both return the same generic 401; disabled accounts are indistinguishable too.
+- **Last-admin guardrail:** the admin API refuses to demote/disable the last active
+  admin (409) — an instance you can't unlock is worse than a strict rule.
+- **`express-serve-static-core` augmentation:** `request.user` typing needs the
+  module to be resolvable under Bun's isolated linker, so
+  `@types/express-serve-static-core` is an explicit devDependency (already a
+  transitive dep of `@types/express`).
+- **Throttle budgets:** global 100/min; `/auth/*` 10/min per IP. Generous enough that
+  a single client refreshing hourly never trips it, strict enough to matter for
+  credential stuffing; the numbers are asserted in e2e.
 
 ## Decisions recorded (M1)
 
@@ -179,3 +271,5 @@ tests in lockstep by wiring new app-level concerns THERE.
 - OpenAPI/Scalar docs: `/docs` (Scalar UI), `/openapi.json` (document).
 - CI (`.github/workflows/ci.yml`) provisions a PostgreSQL **16** service container
   for the e2e job — same image as the compose bundle.
+- M2 added `@nestjs/throttler@6` and `@node-rs/argon2@2` as runtime deps and
+  `@types/express-serve-static-core` as a dev dep.

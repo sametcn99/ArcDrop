@@ -23,6 +23,9 @@ export function buildDataSourceOptions(config: AppConfig): DataSourceOptions {
     synchronize: false,
     logging: ['error', 'warn', 'migration'],
     logger: new NestTypeOrmLogger(),
+    // PG13+ ships gen_random_uuid() in core — prefer it over the
+    // uuid-ossp-extension default so migrations need no extension.
+    uuidExtension: 'pgcrypto',
   };
 }
 

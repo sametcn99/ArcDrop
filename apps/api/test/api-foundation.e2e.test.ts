@@ -9,6 +9,7 @@ import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { buildOpenApiDocument, registerInfrastructureRoutes, setupApp } from '../src/app-setup';
+import { Public } from '../src/auth/decorators/public.decorator';
 import { createDataSource } from '../src/database/data-source';
 import { loadConfig } from '../src/config/load-config';
 import { installTestEnv } from './helpers';
@@ -17,6 +18,7 @@ import { installTestEnv } from './helpers';
  * Probe routes registered ONLY in this test module — they exist so the e2e
  * suite can exercise thrown errors and validation failures through the real
  * HTTP stack without shipping test-only routes in the application.
+ * They are `@Public()` — the M2 global JWT guard would otherwise 401 them.
  */
 class ProbeDto {
   @ApiProperty({ example: 'arc' })
@@ -29,6 +31,7 @@ class ProbeDto {
 }
 
 @ApiTags('Probe')
+@Public()
 @Controller()
 class ProbeController {
   @Get('boom')

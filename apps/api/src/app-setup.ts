@@ -47,6 +47,11 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .setVersion(pkg.version)
     .setLicense('MIT', 'https://github.com/sametcn99/ArcDrop/blob/main/LICENSE')
     .addTag('System', 'Health, readiness and service metadata')
+    .addTag('Auth', 'Bootstrap, login, refresh rotation, sessions, invite/reset claim')
+    .addTag('Users', 'Admin user management (invite/reset tokens via API, plan D15)')
+    .addTag('Settings', 'Admin instance settings (plan D16)')
+    // Bearer auth (plan D2): `Authorization: Bearer <access JWT>`.
+    .addBearerAuth()
     .build();
   return SwaggerModule.createDocument(app, openApiConfig);
 }
