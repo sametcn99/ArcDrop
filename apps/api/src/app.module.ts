@@ -12,6 +12,7 @@ import { UsersModule } from './users/users.module';
 import { SettingsModule } from './settings/settings.module';
 import { ChangeLogModule } from './change-log/change-log.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
+import { CollectionsModule } from './collections/collections.module';
 import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
 
 /**
@@ -40,6 +41,7 @@ import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
     SettingsModule,
     ChangeLogModule,
     BookmarksModule,
+    CollectionsModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: ProblemJsonFilter }],
 })

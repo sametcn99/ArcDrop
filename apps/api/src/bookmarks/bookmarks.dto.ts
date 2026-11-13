@@ -95,8 +95,8 @@ export class ListBookmarksQueryDto {
   @MaxLength(200)
   search?: string;
 
-  /** Reserved — accepted and validated but only honored from M4 (collections). */
-  @ApiPropertyOptional({ format: 'uuid', description: 'Reserved — honored from M4' })
+  /** Membership filter (D5) — accepted, validated, and active since M4. */
+  @ApiPropertyOptional({ format: 'uuid', description: 'Only bookmarks in this collection (D5)' })
   @IsOptional()
   @IsUUID()
   collectionId?: string;

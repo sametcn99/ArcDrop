@@ -20,6 +20,11 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '@api/auth/decorators/current-user.decorator';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
+import { CollectionsService } from '@api/collections/collections.service';
+import {
+  BookmarkCollectionsDto,
+  ReplaceBookmarkCollectionsDto,
+} from '@api/collections/collections.dto';
 import {
   BookmarkDto,
   BookmarkIdParamDto,
@@ -47,6 +52,7 @@ export class BookmarksController {
   constructor(
     private readonly bookmarks: BookmarksService,
     private readonly tags: TagsService,
+    private readonly collections: CollectionsService,
   ) {}
 
   @Post()
@@ -68,9 +74,10 @@ export class BookmarksController {
     summary: 'Search / filter / page the caller’s bookmarks',
     description:
       'Case-insensitive ILIKE search across title, url, excerpt and tag names. ' +
-      '`collectionId` is reserved and honored from M4. `pageSize` above 200 is ' +
-      'clamped to 200. Sorted by `updatedAt` desc (default), `createdAt` desc or ' +
-      '`title` asc.',
+      '`collectionId` matches bookmarks with a membership in that collection ' +
+      '(the collection itself may be trashed — membership is membership). ' +
+      '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc ' +
+      '(default), `createdAt` desc or `title` asc.',
   })
   @ApiOkResponse({ type: BookmarkListDto })
   list(
@@ -171,5 +178,26 @@ export class BookmarksController {
     @Body() dto: ReplaceBookmarkTagsDto,
   ): Promise<BookmarkDto> {
     return this.bookmarks.replaceTags(user, params.id, dto.tags);
+  }
+
+  @Put(':id/collections')
+  @ApiOperation({
+    operationId: 'replaceBookmarkCollections',
+    summary: 'Replace the bookmark’s exact collection set (plan D5)',
+    description:
+      'The bookmark ends up in exactly the listed collections — memberships ' +
+      'are ensured for listed ids, removed for absent ones. A bookmark may ' +
+      'live in several collections. Every collection whose set actually ' +
+      'changed records a `collection:update` on top of the bookmark’s own ' +
+      '`bookmark:update`. Refuses trashed bookmarks and unknown/inactive ' +
+      'collections (404). Returns the resulting membership set.',
+  })
+  @ApiOkResponse({ type: BookmarkCollectionsDto })
+  replaceCollections(
+    @CurrentUser() user: RequestUser,
+    @Param() params: BookmarkIdParamDto,
+    @Body() dto: ReplaceBookmarkCollectionsDto,
+  ): Promise<BookmarkCollectionsDto> {
+    return this.collections.syncBookmarkCollections(user, params.id, dto.collectionIds);
   }
 }

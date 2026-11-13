@@ -2,12 +2,14 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M3 — bookmarks core (M1 foundation + first-run admin bootstrap, bearer JWT
+**Status:** M4 — collections (M1 foundation + first-run admin bootstrap, bearer JWT
 auth with rotating refresh tokens and reuse detection, sessions, admin user
 management with single-use invite/reset tokens, DB-backed instance settings,
-route throttling; M3 adds bookmark CRUD with URL decomposition, tags,
+route throttling; M3 bookmark CRUD with URL decomposition, tags,
 server-side search/paging/stats, trash with auto-purge, and the per-user
-change log). Next: M4 — collections.
+change log; M4 hierarchical collections with the nested tree, membership
+sync, cycle protection, ordering — all change-logged). Next: M5 — sync
+integration (`/sync/state`, `/sync/changes`, ws gateway).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, AI, portability, hardening & ops.
@@ -102,14 +104,16 @@ generated migrations.
 
 - `src/database/entities/` — explicit entity list (NO globs; globs break `bun build`).
   `User`, `RefreshToken`, `OneTimeToken` (M2 auth), `Setting` (D16 runtime settings),
-  `Bookmark`, `Tag`, `BookmarkTag`, `BookmarkCollection`, `ChangeEvent` (M3).
+  `Bookmark`, `Tag`, `BookmarkTag`, `BookmarkCollection`, `Collection`, `ChangeEvent`
+  (M3/M4).
 - `src/database/migrations/` — explicit migration list + the no-op
   `InitialSetup1763000000000` pipeline proof, `M2AuthUsers1794606603617`
-  (users/refresh_tokens/one_time_tokens/settings + the three enum types) and
+  (users/refresh_tokens/one_time_tokens/settings + the three enum types),
   `M3BookmarksCore1794608754948` (bookmarks/tags/memberships/change_events +
-  `users.sync_seq`). NOTE for M4: `bookmark_collections.collection_id` has NO
-  foreign key yet (the collections table arrives in M4) — M4's migration must
-  add it `ON DELETE CASCADE`.
+  `users.sync_seq`) and `M4Collections1794611852359` (collections + the
+  `bookmark_collections.collection_id` FK ON DELETE CASCADE + the `collection`
+  value on the `change_entity` enum). M5 needs NO schema pending work —
+  `users.sync_seq` and the bus are live and already see all three entity types.
 
 ### Migration workflow
 
@@ -189,8 +193,8 @@ docker compose up --build        # from the repo root
   case-insensitive), `unassignedOnly`, `trashed`, `sort`
   (updated-desc default | created-desc | title-asc), `page` (≥1),
   `pageSize` (≥1, CLAMPED to 200 — a bigger value never 400s), `updatedSince`
-  (ISO-8601, `updatedAt >`), and `collectionId` (accepted + uuid-validated but
-  RESERVED — ignored until M4). Response: `{ items, totalCount, page,
+  (ISO-8601, `updatedAt >`), and `collectionId` (uuid; membership filter,
+  ACTIVE since M4 — see the collections section). Response: `{ items, totalCount, page,
 pageSize }`; `totalCount` is pre-paging. Ordering is always
   `(sort, id ASC)` for stable paging. Tag names are attached to every item.
 - **Tag invariants:** per-user case-insensitive unique names via a stored
@@ -220,7 +224,7 @@ RETURNING` (the row lock serializes concurrent writers → seqs are GAPLESS)
   and publishes them on `ChangeEventBus` once the transaction resolves, so
   listeners (M5's ws gateway) never see rolled-back work. This is the same
   transaction-throw discipline as `AuthService.refresh` (outcome pattern).
-- **Event vocabulary:** `entity ∈ {bookmark, tag}`, `action ∈
+- **Event vocabulary:** `entity ∈ {bookmark, tag, collection}`, `action ∈
 {create, update, delete}`. A mutation records one event per AFFECTED entity:
   bookmark CRUD/trash/restore → `bookmark:*`; `PUT …/tags` → `bookmark:update`
   plus `tag:create` for each on-demand tag and `tag:delete` for each pruned
@@ -236,6 +240,98 @@ RETURNING` (the row lock serializes concurrent writers → seqs are GAPLESS)
   for SELECT/INSERT..RETURNING but `[rows, rowCount]` TUPLES for
   UPDATE/DELETE..RETURNING. `manager.query` does not normalize this;
   `queryRows` does. Do not destructure `manager.query` results directly.
+
+## Collections (M4 — D4, D5)
+
+- **Shape:** `Collection(userId, parentId self-FK CASCADE, title, icon,
+color, order, timestamps, deletedAt-as-plain-column)`. All rows are
+  user-scoped; a foreign row is a 404, never a 403. Reads state their trash
+  scope explicitly (same plain-`deleted_at` discipline as bookmarks — NOT
+  `@DeleteDateColumn`).
+- **Hierarchy:** `POST /collections` creates a root (no `parentId`) or a
+  child; the parent must be ACTIVE and owned (else 404). New rows APPEND to
+  their sibling group: `order = MAX(order) + 1` over ACTIVE siblings. The
+  create path records its ChangeEvent FIRST inside the transaction — the
+  per-user seq lock serializes concurrent creates, so two parallel creates
+  of the same parent can never compute the same `MAX(order)` slot.
+- **Reads:** `GET /collections` (flat rows, grouped per parent — roots
+  first — siblings ordered), `GET /collections/tree` (nested), and
+  `GET /collections/{id}` (active only; trashed rows are 404 everywhere on
+  the read path). One shared sibling comparator EVERYWHERE:
+  `(order ASC, createdAt ASC, id ASC)` — `createdAt` because millisecond
+  ties are real, `id` because determinism is a contract.
+- **Tree contract:** ACTIVE rows only. `bookmarkCount` is DIRECT — active
+  bookmarks with a membership in THAT node (a parent never adds its
+  subtree's counts on; trashed bookmarks never count). A child whose parent
+  is trashed (or missing) is PROMOTED to the root level so restored subtrees
+  never disappear; the raw `parentId` is preserved on the node. The flat
+  list keeps raw `parentId` values too. (A parent_id data cycle — impossible
+  through the API — would be dropped from the tree, not looped over.)
+- **Cycle protection:** `PUT /collections/{id}` with a new `parentId` walks
+  UP the raw parent chain from the proposed parent; hitting the moved
+  collection (or itself, for self-parent) is a `409` problem+json
+  (`code: CONFLICT`). Moving under a TRASHED parent is a 404 (parent not
+  found among active). `parentId: null` moves a collection to the root
+  level; `parentId` equal to the current one is a no-op. PUT semantics:
+  provided fields replace, `icon`/`color` accept explicit `null` to clear,
+  `title` trims and refuses whitespace-only. PUT always records
+  `collection:update` (even for a pure no-op) — same as bookmark PUT.
+- **Delete is TWO-PHASE (do not "fix" this — orchestrator-ratified):**
+  1. First call on an ACTIVE row = trash (soft delete,
+     `collection:update`). Blocked `409` while ACTIVE child collections
+     exist; `?cascade=trash` trashes the whole ACTIVE subtree — the row
+     itself included, so a cascade on a leaf trashes its direct bookmarks
+     too — plus every ACTIVE bookmark carried by that subtree (each trash
+     records `bookmark:update`).
+  2. Second call on the TRASHED row = HARD delete (`collection:delete`
+     tombstone). Refuses while ANY direct child rows exist unless
+     `?cascade=trash`, which sweeps the trashed descendant rows too — but
+     ACTIVE descendants are ALWAYS refused, even with cascade (a restored
+     child under a trashed parent blocks the sweep). Hard delete NEVER
+     deletes bookmark rows: only their membership rows die, and every
+     bookmark that lost one records `bookmark:update`. The FK CASCADE on
+     `bookmark_collections.collection_id` would otherwise eat memberships
+     silently — that's why affected bookmarks are collected BEFORE the rows
+     go and recorded explicitly.
+- **Restore:** `POST /collections/{id}/restore` restores EXACTLY ONE row.
+  Cascade-trashed descendants and bookmarks stay in the trash until
+  individually restored (`POST /bookmarks/{id}/restore` for bookmarks) or
+  purged — predictable beats magic. Until the parent is restored too, the
+  restored collection appears at the tree's root level (promotion).
+  Restore refuses active rows (404) and records `collection:update`.
+- **Ordering:** `PATCH /collections/order` with
+  `{ items: [{ id, order }] }` — EXPLICIT positions (≥ 0), not a sequence:
+  partial reorders are the real-world case and unspecified siblings keep
+  their positions. All ids must be active + owned (404 otherwise); rows
+  whose value does not change record no event. Duplicate ids in one payload
+  → 400.
+- **Membership (D5):** `PUT /bookmarks/{id}/collections` with
+  `{ collectionIds: [] }` is an EXACT-SET sync — memberships are ensured for
+  listed ids and removed for absent ones; a bookmark may live in several
+  collections. Every listed id must be ACTIVE and owned (404 otherwise,
+  dedupe first); trashed bookmarks are refused (the trash is read-only
+  except for restore — note `replaceTags` in M3 predates that rule and does
+  NOT refuse; left as-is). The response is the resulting membership set
+  (`{ collections: [{ id, title }] }` — BookmarkDto deliberately stayed
+  frozen from M3). Events: the bookmark's own `bookmark:update` (always,
+  even for a no-op set) plus `collection:update` for each collection whose
+  membership set actually changed.
+- **`collectionId` filter (activated in M4):** pure membership — a bookmark
+  lists iff a `bookmark_collections` row exists, REGARDLESS of the
+  collection's own trash state (a trashed collection's memberships still
+  resolve; trashed bookmarks are excluded by the normal trash scoping).
+  `unassignedOnly` composes with it (`collectionId + unassignedOnly` =
+  "in this collection AND unassigned" — practically always empty, but
+  well-defined). Bookmark listing by a HARD-DELETED collection id returns
+  whatever rows still point at it — none, since memberships die with the
+  rows.
+- **Events from M4:** `collection:create` (create), `collection:update`
+  (rename, metadata, moves, trash, restore, reorder, membership-set change),
+  `collection:delete` (hard delete ONLY — never for trash). The M4
+  migration extended the `change_entity` PG enum with `collection`
+  (`ALTER TYPE ... ADD VALUE IF NOT EXISTS`; the down() swaps the enum type
+  back because PG cannot drop enum values — it deletes `collection` rows
+  from `change_events` first, so revert is dev-only).
 
 ## Auth & sessions (M2 — D2, D3, D15, D16)
 
@@ -273,7 +369,7 @@ RETURNING` (the row lock serializes concurrent writers → seqs are GAPLESS)
   `registrationOpen` (default false), `trashRetentionDays` (30), `changeLogRetentionDays`
   (90). Secrets/infra stay env-only.
 
-## Module map (as of M3)
+## Module map (as of M4)
 
 ```
 src/
@@ -296,16 +392,67 @@ src/
                            (in-process fan-out for M5's ws push)
   bookmarks/               /bookmarks CRUD + trash/restore + list/search/stats;
                            /bookmarks/{id}/tags; /tags/{name} rename/merge/delete;
+                           /bookmarks/{id}/collections (delegates to CollectionsService);
                            UrlDecompositionService (D12); TrashPurgeService + cron job
+  collections/             /collections flat list + tree + CRUD + restore + order;
+                           cycle protection, two-phase delete, membership sync;
+                           tree-builder.ts (pure, unit-tested)
 test/
   helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset)
   api-foundation.e2e.test.ts   full contract suite (two boots: default + metrics/CORS on)
   auth-users.e2e.test.ts       M2 lifecycle suite (main boot + isolated throttle boot)
   bookmarks.e2e.test.ts        M3 suite (lifecycle boot + isolated search/paging boot)
+  collections.e2e.test.ts      M4 suite (lifecycle boot + isolated validation boot)
 ```
 
 Both `main.ts` and the e2e boots go through `app-setup.ts` — keep runtime behavior and
 tests in lockstep by wiring new app-level concerns THERE.
+
+## Decisions recorded (M4)
+
+- **Delete is two-phase: soft (trash) on the first call, HARD on the second
+  call** of the same id, with `collection:delete` tombstones reserved for
+  the hard path (trash/restore are `update`s, exactly like bookmarks).
+  Hard delete never sweeps ACTIVE descendants — even with `?cascade=trash`
+  — and never deletes bookmark rows; memberships die and their owners
+  record `bookmark:update`. Ratified with the orchestrator; implemented in
+  `CollectionsService.delete` with explicit descendant collection (BFS via
+  `queryRows`) instead of relying on the FK CASCADE, so events and rows
+  always match.
+- **`PATCH /collections/order` takes explicit `{ items: [{ id, order }] }`
+  positions**, not an id sequence: partial reorders are the real case,
+  unspecified siblings keep theirs, and changed rows are the only ones that
+  record events.
+- **`POST /collections/{id}/restore` restores exactly one row** — no
+  cascade, documented on the route and here. Children of a trashed parent
+  are root-promoted in the tree until the parent comes back, so restore is
+  order-independent.
+- **Tree counts are DIRECT and active-only.** A node's `bookmarkCount` is
+  the number of ACTIVE bookmarks carrying a membership in that node — no
+  subtree rollup. Clients can sum recursively if they want totals; the
+  reverse is impossible. One grouped `COUNT(*)` query feeds list/tree/get.
+- **One sibling comparator everywhere** — `(order, createdAt, id)` — in the
+  tree builder (`src/collections/tree-builder.ts`, pure and unit-tested)
+  and the flat list's per-parent grouping. Create appends via
+  `MAX(order) + 1` over ACTIVE siblings, computed INSIDE the transaction
+  AFTER the `record()` call: the seq UPDATE's row lock serializes per-user
+  writers, which is what makes concurrent sibling creates race-free.
+- **Membership sync refuses trashed bookmarks** (404 among active) — the
+  trash is read-only except for restore. M3's `replaceTags` predates this
+  rule and still accepts them; left untouched to avoid a behavior change
+  outside this milestone's scope (M5 may want to align it).
+- **`GET /bookmarks?collectionId=` is a PURE membership filter** since M4:
+  collection trash state is irrelevant, trashed bookmarks are excluded by
+  the normal trash scoping, and it composes with `unassignedOnly` (AND).
+- **The `change_entity` enum grew `collection`** via
+  `ALTER TYPE ... ADD VALUE IF NOT EXISTS` inside the migration transaction
+  (PG 12+ allows it when the value is not used in the same transaction —
+  the migration is schema-only). `down()` cannot drop the value (PG
+  limitation) and instead swaps the enum type, deleting `collection`-typed
+  change_events first — revert is a dev-only operation.
+- **`PUT /collections/{id}` always records `collection:update`**, even for
+  no-op payloads — PUT symmetry with bookmarks; clients derive "something
+  may have changed" from the event alone.
 
 ## Decisions recorded (M3)
 

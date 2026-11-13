@@ -12,8 +12,8 @@ import { User } from './user.entity';
 /** What happened to the entity. `delete` is only ever a HARD delete (trash is an `update`). */
 export type ChangeAction = 'create' | 'update' | 'delete';
 
-/** Entity types recorded in the change log (plan D4). */
-export type ChangeEntity = 'bookmark' | 'tag';
+/** Entity types recorded in the change log (plan D4; `collection` from M4). */
+export type ChangeEntity = 'bookmark' | 'tag' | 'collection';
 
 /** Payload pushed on the in-process bus after commit (M5's ws fan-out consumes it). */
 export interface ChangeEventNotification {
@@ -49,7 +49,11 @@ export class ChangeEvent {
   @Column({ type: 'bigint' })
   seq!: string;
 
-  @Column({ type: 'enum', enum: ['bookmark', 'tag'], enumName: 'change_entity' })
+  @Column({
+    type: 'enum',
+    enum: ['bookmark', 'tag', 'collection'],
+    enumName: 'change_entity',
+  })
   entity!: ChangeEntity;
 
   @Column({ type: 'uuid', name: 'entity_id' })

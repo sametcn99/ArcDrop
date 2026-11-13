@@ -901,15 +901,15 @@ describe('Bookmarks core (e2e)', () => {
       expect(res.body.totalCount).toBe(15);
     });
 
-    it('collectionId is accepted and reserved (honored from M4)', async () => {
+    it('collectionId filters by membership (active since M4 — unknown ids match nothing)', async () => {
       const res = await call<BookmarkListView>(
         baseUrl,
         'GET',
         `/bookmarks?collectionId=${crypto.randomUUID()}`,
         { bearer: admin.accessToken },
       );
-      expect(res.status).toBe(200); // ignored, not filtered — documented reservation
-      expect(res.body.totalCount).toBe(15);
+      expect(res.status).toBe(200); // valid uuid, no memberships → empty
+      expect(res.body.totalCount).toBe(0);
 
       const bad = await call(baseUrl, 'GET', '/bookmarks?collectionId=not-a-uuid', {
         bearer: admin.accessToken,

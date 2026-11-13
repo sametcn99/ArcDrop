@@ -109,9 +109,18 @@ export class BookmarksService {
       qb.andWhere('b.updatedAt > :since', { since: new Date(query.updatedSince) });
     }
 
-    // `collectionId` is reserved (ticket M3): accepted + validated, honored
-    // from M4 once collections exist.
-    void query.collectionId;
+    if (query.collectionId !== undefined) {
+      // Active from M4 (D5): membership is membership — the bookmark lists
+      // if it has a row in bookmark_collections, regardless of the
+      // collection's own trash state (documented in the README).
+      qb.andWhere(
+        `EXISTS (
+          SELECT 1 FROM bookmark_collections bc
+           WHERE bc.bookmark_id = b.id AND bc.collection_id = :collectionId
+        )`,
+        { collectionId: query.collectionId },
+      );
+    }
 
     const totalCount = await qb.getCount();
 

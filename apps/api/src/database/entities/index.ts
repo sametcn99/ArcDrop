@@ -3,6 +3,7 @@ import { Bookmark } from './bookmark.entity';
 import { BookmarkCollection } from './bookmark-collection.entity';
 import { BookmarkTag } from './bookmark-tag.entity';
 import { ChangeEvent } from './change-event.entity';
+import { Collection } from './collection.entity';
 import { OneTimeToken } from './one-time-token.entity';
 import { RefreshToken } from './refresh-token.entity';
 import { Setting } from './setting.entity';
@@ -27,5 +28,6 @@ export const entities: Array<EntityCtor | EntitySchema> = [
   Tag,
   BookmarkTag,
   BookmarkCollection,
+  Collection,
   ChangeEvent,
 ];
