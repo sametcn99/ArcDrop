@@ -1,0 +1,28 @@
+{
+  "name": "@arcdrop/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ArcDrop API — NestJS REST API running on Bun",
+  "scripts": {
+    "dev": "bun --watch src/main.ts",
+    "build": "bun build ./src/main.ts --outdir dist --target bun --external '@nestjs/*' --external reflect-metadata --external rxjs --external express",
+    "start": "bun dist/main.js",
+    "lint": "eslint --config ../../eslint.config.mjs src test",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "@nestjs/platform-express": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^11.0.0",
+    "@types/bun": "^1.2.0",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3"
+  }
+}
