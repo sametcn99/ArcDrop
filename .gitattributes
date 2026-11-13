@@ -1,0 +1,6 @@
+# Normalize line endings across machines. Shell scripts must stay LF or the
+# container entrypoint breaks with CRLF artifacts on Windows checkouts.
+* text=auto
+*.sh text eol=lf
+Dockerfile text eol=lf
+compose.yaml text eol=lf

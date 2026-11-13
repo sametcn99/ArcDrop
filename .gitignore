@@ -13,6 +13,9 @@ build/
 coverage/
 *.lcov
 
+# Local API data directory (ARCDROP__DATA_DIR in dev)
+.data/
+
 # Environment and secrets
 # Keep template env files tracked, ignore real environment files.
 .env

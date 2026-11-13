@@ -1,0 +1,18 @@
+# Keep the Docker build context minimal (root context — see apps/api/Dockerfile).
+.git
+.github
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+apps/web
+apps/desktop
+apps/mobile
+apps/extension
+.env
+.env.*
+!.env.example
+*.log
+.data

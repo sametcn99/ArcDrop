@@ -10,7 +10,7 @@ jobs:
     name: Lint, typecheck & unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -52,7 +52,7 @@ jobs:
       # Consumed by the API from M1 onward; wired now so the job never changes shape.
       ARCDROP__DATABASE__URL: postgres://arcdrop:arcdrop@localhost:5432/arcdrop_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
         with:

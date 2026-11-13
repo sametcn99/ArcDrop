@@ -1,0 +1,64 @@
+name: arcdrop
+
+# ArcDrop API + PostgreSQL 16 bundle (plan D1/D8/D11).
+#   docker compose up --build
+# The API service migrates on boot (TypeORM CLI) and reports readiness at
+# /api/v1/readyz; compose healthchecks gate on it. Override the variables
+# below via your shell or a .env file next to this compose file (see
+# .env.example).
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ARCDROP__DATABASE__URL: postgres://${POSTGRES_USER:-arcdrop}:${POSTGRES_PASSWORD:-arcdrop}@db:5432/${POSTGRES_DB:-arcdrop}
+      # DEV-ONLY fallback — set a real 32+ char secret in production
+      # (shell env or .env file; see .env.example).
+      ARCDROP__JWT__SECRET: ${ARCDROP__JWT__SECRET:-dev-only-jwt-secret-change-me-0123456789}
+      ARCDROP__PORT: '3000'
+      ARCDROP__DATA_DIR: /data
+      ARCDROP__CORS__ORIGINS: ${ARCDROP__CORS__ORIGINS:-}
+      ARCDROP__METRICS__ENABLED: ${ARCDROP__METRICS__ENABLED:-false}
+      ARCDROP__LOG__LEVEL: ${ARCDROP__LOG__LEVEL:-info}
+    ports:
+      - '3000:3000'
+    volumes:
+      - arcdrop-data:/data
+    healthcheck:
+      # bun is already in the image — no extra tooling needed for probing.
+      test:
+        [
+          'CMD',
+          'bun',
+          '-e',
+          "fetch('http://127.0.0.1:3000/api/v1/readyz').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arcdrop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arcdrop}
+      POSTGRES_DB: ${POSTGRES_DB:-arcdrop}
+    volumes:
+      - arcdrop-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-arcdrop} -d ${POSTGRES_DB:-arcdrop}']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  arcdrop-data:
+  arcdrop-pgdata:
