@@ -46,7 +46,8 @@ export class HealthService {
         `Data directory "${dir}" is not writable: ${(error as Error).message}`,
       );
     } finally {
-      await rm(probe, { force: true });
+      // Best-effort cleanup — never mask (or escape) the readiness verdict.
+      await rm(probe, { force: true, recursive: true }).catch(() => undefined);
     }
   }
 
