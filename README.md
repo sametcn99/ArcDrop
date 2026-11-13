@@ -45,6 +45,8 @@ clients from a single API.
 | `docker compose up`    | API + PostgreSQL 16 bundle (migrate-on-boot, healthchecked) |
 
 The compose bundle reads `.env` next to `compose.yaml` — see `.env.example`.
+`ARCDROP__JWT__SECRET` is required (compose refuses to boot without it):
+`openssl rand -hex 32`.
 
 ## Status
 

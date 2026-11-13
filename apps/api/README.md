@@ -121,6 +121,10 @@ bun run migration:revert     # undo the last one
   `migration:run`, then `exec bun dist/main.js`. Escape hatch:
   `ARCDROP_SKIP_MIGRATIONS=1` (single underscore — shell-only, never validated by the
   app config).
+- **`ARCDROP__JWT__SECRET` is hard-required by compose** (`${VAR:?…}` — no default
+  signing secret, since a predictable secret means forgeable admin tokens). Set it in
+  your shell or a `.env` next to `compose.yaml` (`openssl rand -hex 32`); compose
+  fails fast with a clear message otherwise.
 - `compose.yaml` (repo root) — API + PostgreSQL 16, named volumes, healthchecks
   (the API probe is a `bun -e` fetch of `/api/v1/readyz`), `restart: unless-stopped`.
   Verified: clean `docker compose up` → healthy → migrations applied → `readyz` 200.
@@ -173,6 +177,5 @@ tests in lockstep by wiring new app-level concerns THERE.
 ## Notes
 
 - OpenAPI/Scalar docs: `/docs` (Scalar UI), `/openapi.json` (document).
-- CI (`.github/workflows/ci.yml`) provisions a PostgreSQL 17 service container for
-  the e2e job; compose ships PostgreSQL 16 (per plan) — same dialect, flagged for
-  alignment.
+- CI (`.github/workflows/ci.yml`) provisions a PostgreSQL **16** service container
+  for the e2e job — same image as the compose bundle.

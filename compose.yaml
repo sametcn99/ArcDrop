@@ -18,9 +18,10 @@ services:
         condition: service_healthy
     environment:
       ARCDROP__DATABASE__URL: postgres://${POSTGRES_USER:-arcdrop}:${POSTGRES_PASSWORD:-arcdrop}@db:5432/${POSTGRES_DB:-arcdrop}
-      # DEV-ONLY fallback — set a real 32+ char secret in production
-      # (shell env or .env file; see .env.example).
-      ARCDROP__JWT__SECRET: ${ARCDROP__JWT__SECRET:-dev-only-jwt-secret-change-me-0123456789}
+      # REQUIRED — compose refuses to start without it. No default signing
+      # secret on purpose: a predictable secret means forgeable admin tokens.
+      # Generate one with: openssl rand -hex 32  (shell env or .env file).
+      ARCDROP__JWT__SECRET: '${ARCDROP__JWT__SECRET:?ARCDROP__JWT__SECRET must be set (32+ chars) - generate one, e.g. openssl rand -hex 32}'
       ARCDROP__PORT: '3000'
       ARCDROP__DATA_DIR: /data
       ARCDROP__CORS__ORIGINS: ${ARCDROP__CORS__ORIGINS:-}
