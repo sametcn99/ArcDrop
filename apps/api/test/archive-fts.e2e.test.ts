@@ -141,10 +141,14 @@ function startStub(): {
   origin: string;
   setFlakyHealthy: (healthy: boolean) => void;
   setMutableVersion: (version: 'alpha' | 'omega') => void;
+  pauseArticle: () => void;
+  releaseArticle: () => void;
   stop: () => void;
 } {
   let flakyHealthy = false;
   let mutableVersion: 'alpha' | 'omega' = 'alpha';
+  let articleGate: Promise<void> | null = null;
+  let resolveArticleGate: (() => void) | null = null;
 
   const articleHtml = (title: string, bodyHtml: string, extraHead = '') =>
     new Response(
@@ -162,10 +166,11 @@ function startStub(): {
 
   const server = Bun.serve({
     port: 0,
-    fetch: (request) => {
+    fetch: async (request) => {
       const url = new URL(request.url);
       switch (url.pathname) {
         case '/article-systems':
+          if (articleGate) await articleGate;
           return articleHtml(
             'Database Architecture Notes',
             `<h1>Storage Architecture</h1>
@@ -266,7 +271,23 @@ function startStub(): {
     setMutableVersion: (version) => {
       mutableVersion = version;
     },
-    stop: () => server.stop(true),
+    pauseArticle: () => {
+      if (!articleGate) {
+        articleGate = new Promise<void>((resolve) => {
+          resolveArticleGate = resolve;
+        });
+      }
+    },
+    releaseArticle: () => {
+      const resolve = resolveArticleGate;
+      articleGate = null;
+      resolveArticleGate = null;
+      resolve?.();
+    },
+    stop: () => {
+      resolveArticleGate?.();
+      server.stop(true);
+    },
   };
 }
 
@@ -430,21 +451,27 @@ describe('Archive & full-text search (M17 e2e)', () => {
   it('AC: saves stub article non-blockingly, stores sanitized files on volume, serves archive, and finds body phrases + prefix via FTS & MCP', async () => {
     const ws = await connectSyncWs(baseUrl, alice.accessToken);
 
-    const created = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
-      bearer: alice.accessToken,
-      body: { url: `${stub.origin}/article-systems`, title: 'Short Label' },
-    });
-    expect(created.status).toBe(201);
-    expect(created.body.cacheStatus).toBe('pending');
-    expect(created.body.cacheCheckedAt).toBeNull();
+    let bmId = '';
+    stub.pauseArticle();
+    try {
+      const created = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
+        bearer: alice.accessToken,
+        body: { url: `${stub.origin}/article-systems`, title: 'Short Label' },
+      });
+      expect(created.status).toBe(201);
+      expect(created.body.cacheStatus).toBe('pending');
+      expect(created.body.cacheCheckedAt).toBeNull();
 
-    const bmId = created.body.id;
+      bmId = created.body.id;
 
-    // Archive is not ready yet while pending (404).
-    const pendingArchive = await call(baseUrl, 'GET', `/bookmarks/${bmId}/archive`, {
-      bearer: alice.accessToken,
-    });
-    expect([404]).toContain(pendingArchive.status);
+      // Archive is not ready yet while upstream fetch is in flight (404).
+      const pendingArchive = await call(baseUrl, 'GET', `/bookmarks/${bmId}/archive`, {
+        bearer: alice.accessToken,
+      });
+      expect(pendingArchive.status).toBe(404);
+    } finally {
+      stub.releaseArticle();
+    }
 
     const ready = await waitFor(10_000, async () => {
       const row = await readBookmark(baseUrl, alice.accessToken, bmId);
