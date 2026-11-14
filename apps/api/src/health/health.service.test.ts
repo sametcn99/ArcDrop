@@ -23,6 +23,7 @@ function makeConfig(dataDir: string): AppConfig {
     dataDir,
     metrics: { enabled: false },
     metadata: { enabled: false, allowPrivate: false },
+    mcp: { patRequestsPerMinute: 300 },
     log: { level: 'fatal' },
   };
 }

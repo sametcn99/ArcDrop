@@ -60,6 +60,8 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addTag('Sync', 'Change-log sync: state poll, cursor deltas, ws push + tickets (plan M5/D4)')
     .addTag('Metadata', 'SSRF-hardened metadata enrichment + reindex (plan M6)')
     .addTag('Icons', 'Public unguessable icon cache (plan M6/D18)')
+    .addTag('Tokens', 'Personal access tokens — agent auth (plan M7/D23)')
+    .addTag('MCP', 'Model Context Protocol endpoint: the app surface as agent tools (plan M7/D23)')
     // Bearer auth (plan D2): `Authorization: Bearer <access JWT>`.
     .addBearerAuth()
     .build();

@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M6 — metadata & icons (M1 foundation + first-run admin bootstrap,
+**Status:** M7 — MCP server (M1 foundation + first-run admin bootstrap,
 bearer JWT auth with rotating refresh tokens and reuse detection, sessions,
 admin user management with single-use invite/reset tokens, DB-backed instance
 settings, route throttling; M3 bookmark CRUD with URL decomposition, tags,
@@ -13,7 +13,10 @@ sync, cycle protection, ordering — all change-logged; M5 the sync backbone:
 one-time tickets, and the change-log retention job; M6 the SSRF-hardened
 metadata pipeline with the async enrichment on create/url-change, the
 public unguessable icon cache + serve route, per-bookmark reindex, the
-icon-eviction job and the backfill CLI). Next: M7 — MCP server.
+icon-eviction job and the backfill CLI; M7 personal access tokens for
+agents, the MCP server at `/api/v1/mcp` exposing the whole user surface as
+tools, per-PAT rate budget, and the audit log for tool calls). Next: M8 —
+portability.
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -44,17 +47,18 @@ Config is validated with zod at boot (fail-fast: invalid env → report with the
 (typo protection). Copy `.env.example` to `.env` for local dev — bun loads it
 automatically.
 
-| Variable                           | Required | Default | Meaning                                                                                                                  |
-| ---------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ARCDROP__DATABASE__URL`           | yes      | —       | PostgreSQL connection URL (`postgres://…`)                                                                               |
-| `ARCDROP__JWT__SECRET`             | yes      | —       | JWT signing secret, min 32 chars (used from M2)                                                                          |
-| `ARCDROP__PORT`                    | no       | `3000`  | HTTP port                                                                                                                |
-| `ARCDROP__CORS__ORIGINS`           | no       | empty   | Comma-separated browser origins; empty = CORS off                                                                        |
-| `ARCDROP__DATA_DIR`                | no       | `/data` | Data volume root (icons live in `…/icons` since M6); must be writable                                                    |
-| `ARCDROP__METRICS__ENABLED`        | no       | `false` | Serve Prometheus metrics at `/metrics`                                                                                   |
-| `ARCDROP__METADATA__ENABLED`       | no       | `true`  | M6 outbound metadata/icon fetch pipeline master switch                                                                   |
-| `ARCDROP__METADATA__ALLOW_PRIVATE` | no       | `false` | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
-| `ARCDROP__LOG__LEVEL`              | no       | `info`  | pino level: `fatal…trace`                                                                                                |
+| Variable                                | Required | Default | Meaning                                                                                                                  |
+| --------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `ARCDROP__DATABASE__URL`                | yes      | —       | PostgreSQL connection URL (`postgres://…`)                                                                               |
+| `ARCDROP__JWT__SECRET`                  | yes      | —       | JWT signing secret, min 32 chars (used from M2)                                                                          |
+| `ARCDROP__PORT`                         | no       | `3000`  | HTTP port                                                                                                                |
+| `ARCDROP__CORS__ORIGINS`                | no       | empty   | Comma-separated browser origins; empty = CORS off                                                                        |
+| `ARCDROP__DATA_DIR`                     | no       | `/data` | Data volume root (icons live in `…/icons` since M6); must be writable                                                    |
+| `ARCDROP__METRICS__ENABLED`             | no       | `false` | Serve Prometheus metrics at `/metrics`                                                                                   |
+| `ARCDROP__METADATA__ENABLED`            | no       | `true`  | M6 outbound metadata/icon fetch pipeline master switch                                                                   |
+| `ARCDROP__METADATA__ALLOW_PRIVATE`      | no       | `false` | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
+| `ARCDROP__MCP__PAT_REQUESTS_PER_MINUTE` | no       | `300`   | M7 per-PAT request budget per minute (REST + MCP combined)                                                               |
+| `ARCDROP__LOG__LEVEL`                   | no       | `info`  | pino level: `fatal…trace`                                                                                                |
 
 ## Local development
 
@@ -84,12 +88,15 @@ docker rm -f arcdrop-e2e-pg   # throw it away afterwards
 
 - **Versioning (D9):** URI versioning, `defaultVersion: '1'`, global prefix `api` →
   every Nest route lives under `/api/v1/...`.
-- **Errors (D9):** every error is RFC 7807 `application/problem+json`
+- **Errors (D9):** every REST error is RFC 7807 `application/problem+json`
   (`charset=utf-8`) with `type`, `title`, `status`, machine-readable `code`, human
   `detail`, plus `instance` and `requestId` extensions. Validation failures are `400`
   with `code: VALIDATION_FAILED` and per-field `errors: [{field, messages}]`.
   Stable code map lives in `src/common/problem-json/problem-codes.ts` — add new
-  statuses there, never inline codes in features.
+  statuses there, never inline codes in features. EXCEPTION: the MCP endpoint
+  (`/api/v1/mcp`) speaks JSON-RPC per the MCP transport spec — its HTTP-level
+  errors are JSON-RPC error objects (401 is still an HTTP status from the guard),
+  and tool-level failures are `CallToolResult { isError: true }`, not problem+json.
 - **Correlation:** request id = incoming `x-request-id` (or a minted UUID), echoed on
   every response and attached to request logs, error logs, and problem bodies.
 - **Docs:** OpenAPI 3 at `/openapi.json`, Scalar UI at `/docs` (the UI bundle comes
@@ -110,17 +117,19 @@ PostgreSQL only, TypeORM, `synchronize: false` always — schema changes go thro
 generated migrations.
 
 - `src/database/entities/` — explicit entity list (NO globs; globs break `bun build`).
-  `User`, `RefreshToken`, `OneTimeToken` (M2 auth), `Setting` (D16 runtime settings),
+  `User`, `RefreshToken`, `OneTimeToken`, `PersonalAccessToken` (M7 agent auth),
+  `Setting` (D16 runtime settings), `AuditLogEntry` (M7 tool-call audit),
   `Bookmark`, `Tag`, `BookmarkTag`, `BookmarkCollection`, `Collection`, `ChangeEvent`
   (M3/M4).
 - `src/database/migrations/` — explicit migration list + the no-op
   `InitialSetup1763000000000` pipeline proof, `M2AuthUsers1794606603617`
   (users/refresh_tokens/one_time_tokens/settings + the three enum types),
   `M3BookmarksCore1794608754948` (bookmarks/tags/memberships/change_events +
-  `users.sync_seq`) and `M4Collections1794611852359` (collections + the
+  `users.sync_seq`), `M4Collections1794611852359` (collections + the
   `bookmark_collections.collection_id` FK ON DELETE CASCADE + the `collection`
-  value on the `change_entity` enum). M5 needs NO schema pending work —
-  `users.sync_seq` and the bus are live and already see all three entity types.
+  value on the `change_entity` enum) and `M7TokensAudit1794619559850`
+  (personal_access_tokens + audit_log_entries). M5 needed NO schema work —
+  `users.sync_seq` and the bus were already live.
 
 ### Migration workflow
 
@@ -368,6 +377,179 @@ favicon — an attacker-chosen og:image URL is itself an SSRF vector):
   construction. Exit 1 with a clear message when env is invalid or the
   pipeline is disabled; per-row failures are silent and tallied.
 
+## MCP server & personal access tokens (M7 — D23)
+
+ArcDrop makes NO outbound AI calls (D23 — the AI-provider integration was
+removed from the plan): external agents BRING the models and connect to the
+API-hosted MCP server. An agent is just another client — every tool call runs
+through the SAME services as REST: identical DTO validation, identical user
+scoping, identical change-log writes, so M5 ws push converges devices AND
+agents. The SDK gate was run FIRST (like M1's Bun gate):
+`@modelcontextprotocol/sdk@1.32.2` verified on Bun 1.4.2 through the exact
+production path (Express + `StreamableHTTPServerTransport`, stateful
+`Mcp-Session-Id` sessions, SSE responses, DELETE teardown, plus the SDK's own
+client transport end-to-end) — result recorded here and regression-covered by
+the e2e suite.
+
+### Personal access tokens (PATs)
+
+- **What they are:** the auth path for clients that cannot run the refresh
+  flow (Claude/Cursor/ChatGPT connectors, CI jobs). Long-lived (no expiry —
+  revocation is the lifecycle), labeled, revocable, hashed at rest
+  (sha256; same discipline as refresh/one-time tokens). Format:
+  `arcdrop_pat_` + 43 base64url chars (256-bit CSPRNG) — the prefix makes a
+  bearer token unambiguously a PAT against access JWTs and leak-scannable.
+- **Routes:** `POST /me/tokens {name, readOnly?}` → `201` with the RAW token
+  shown EXACTLY ONCE (only the hash is stored — lose it, mint a new one);
+  `GET /me/tokens` (id, name, readOnly, createdAt, lastUsedAt, revokedAt —
+  never the token); `DELETE /me/tokens/{id}` → `204` (idempotent stamp of
+  `revokedAt`; a revoked token is a 401 on the very next request because the
+  guard resolves the principal per request). OperationIds:
+  `createPersonalAccessToken`, `listPersonalAccessTokens`,
+  `revokePersonalAccessToken`.
+- **`readOnly` scope:** at the REST level, read-only PATs may only use
+  HTTP-safe methods — every POST/PUT/PATCH/DELETE is a `403` problem+json at
+  the `PatScopeGuard` (mutation refusal never depends on route handlers). On
+  the MCP endpoint (where EVERY tool call is an HTTP POST) the guard defers
+  via `@PatScopeDeferred()` and the MCP layer refuses each mutation TOOL
+  individually with a spec-compliant `isError` tool result — read tools run
+  normally. The tool/REST classification can never disagree: both derive
+  from the mirrored operation's REST method.
+- **Surface rules for ALL PATs** (guard-level, even for an admin's own
+  token): `/auth/*` is unreachable (a PAT is a credential, not a session —
+  it must never rotate, claim, list, or change sessions) and `/admin/*` is
+  unreachable (admin tooling stays session-only). Both are `403`s keyed off
+  controller metadata, not path sniffing.
+- **Per-PAT rate budget:** `ARCDROP__MCP__PAT_REQUESTS_PER_MINUTE`
+  (default 300/min) counts REST + MCP requests per token. It is
+  deliberately ABOVE the global per-IP budget (100/min) so it only bites
+  when ONE token is used from MANY addresses — the stolen-token scenario
+  the per-IP limit cannot see. Excess is `429` TOO_MANY_REQUESTS;
+  in-memory fixed window (single-instance posture, same as the ws tickets).
+- **Principal tagging:** PAT requests carry `authKind: 'pat'`, `patId` and
+  `patReadOnly` on `request.user` (`fam` holds the patId — meaningless
+  there because auth routes are unreachable); request logs keep the
+  `authorization` header redacted.
+- **NOT mirrored as MCP tools on purpose:** `/me/tokens` itself (a PAT must
+  not mint credentials) — same rationale as the `/auth` + `/admin` refusals.
+
+### The MCP endpoint
+
+- **Transport:** `POST/GET/DELETE /api/v1/mcp` — Streamable HTTP per the
+  current MCP spec (JSON-RPC over POST with optional SSE responses; GET
+  opens the server-push stream; DELETE closes the session, `202`-family
+  answer). Official `@modelcontextprotocol/sdk` (`StreamableHTTPServerTransport`).
+  Sessions are stateful: `initialize` (no session id) → response carries
+  `Mcp-Session-Id` → every later request MUST carry it (else `400`
+  JSON-RPC error); unknown/foreign ids are `404` — a session is BOUND to
+  the credential that created it (same user AND same token), so a leaked
+  session id is useless without the bearer credential. Sessions live in
+  memory (single-instance posture; restart ⇒ clients re-initialize), capped
+  at 1000 (`503` above).
+- **The endpoint is NOT problem+json:** it speaks JSON-RPC (protocol errors
+  `-32602` invalid params / unknown tool, `-32000`/`-32001` session errors).
+  Domain failures (unknown bookmark, collection-conflict…) are NOT protocol
+  errors — they are `CallToolResult { isError: true }` with a human text
+  summary, which is what agents actually act on.
+- **Auth:** the normal global guard chain runs (Throttler → JWT-or-PAT →
+  PAT scope → roles). Anonymous `initialize` is a `401`. The per-PAT rate
+  budget applies to MCP traffic too.
+- **Implementation shape:** one low-level SDK `Server` per session with the
+  `tools` capability; the request principal rides `AsyncLocalStorage`, so
+  concurrent calls on one session can never cross credentials; `dist/`
+  keeps the SDK external (`--external '@modelcontextprotocol/*'` +
+  `class-validator-jsonschema`) — same discipline as `ws` in M5.
+
+### Tool catalog — the mirror convention
+
+**Every tool name IS a REST `operationId`; every input schema is GENERATED
+from the same class-validator DTOs the REST route validates
+(`validationMetadatasToSchemas`); every call dispatches into the same
+service method with DTO-instances built by the same `plainToInstance`
+transform and validated with the same class-validator options as the global
+pipe. Schemas cannot drift from validation because they ARE the validation
+metadata; a unit test re-derives the schemas and the e2e suite asserts
+`tools/list` byte-parity plus bidirectional operationId coverage against
+the live `/openapi.json`.** Unknown extra arguments are stripped exactly
+like extra REST JSON bodies (DTO whitelist), never errors.
+
+- **v1 catalog (24 tools):** bookmarks `listBookmarks`, `getBookmark`,
+  `createBookmark`, `updateBookmark`, `deleteBookmark` (trash),
+  `restoreBookmark`, `replaceBookmarkTags`, `replaceBookmarkCollections`
+  (membership sync), `reindexBookmark`, `getBookmarkStats`,
+  `listBookmarkTags`; collections `listCollections`, `getCollectionTree`,
+  `getCollection`, `createCollection`, `updateCollection`, `deleteCollection`
+  (two-phase like REST), `restoreCollection`, `reorderCollections`; tags
+  `renameTag` (renames or MERGES, like `PUT /tags/{name}`), `deleteTag`;
+  sync `getSyncState`, `listSyncChanges`, `createSyncTicket` (ws push — an
+  agent can watch the library the same way a device does). Tools return
+  `structuredContent` (the exact service result; void operations return a
+  bare `ok`) plus the same JSON as readable text content. Annotations carry
+  `readOnlyHint` (derived from the REST method) and `idempotentHint`.
+- **THE CONVENTION FOR FUTURE MILESTONES: new authenticated, non-admin REST
+  surface ⇒ add the matching tool(s) in `src/mcp/mcp-tool-catalog.ts` and
+  extend the e2e parity set. The e2e parity test FAILS the build when a
+  covered REST operation has no tool or a tool has no REST operation —
+  the catalog cannot silently rot.**
+- **Worked example — highlights:** the plan settles highlights as v1 scope
+  (D6), but the REST surface does not exist yet (no entity, no endpoints —
+  the orchestrator ratified omitting them from M7 and moving the REST
+  surface to wave-2 M10). When `GET/POST /bookmarks/{id}/highlights` +
+  `PUT/DELETE /highlights/{id}` land in M10, M10 adds `listHighlights`,
+  `createHighlight`, `updateHighlight`, `deleteHighlight` to the catalog —
+  names from their operationIds, schemas from their DTOs, handlers calling
+  the highlights service — and the parity test stops failing. Until then
+  the M7 catalog intentionally covers exactly the surface that exists.
+
+### Tool-call audit (M9 reads this)
+
+Every `tools/call` writes one `audit_log_entries` row — success AND failure
+(unknown tool, bad arguments, read-only refusal, service error): actor
+(`userId` + `actorType` + `patId`), `action` (v1 always `mcp.tools.call`),
+`subject` (tool name), `outcome`, `detail` (arguments + failure reason),
+`requestId`. Writes are fire-and-forget and can never fail a tool call.
+There are deliberately NO foreign keys on the audit table — an audit trail
+must outlive the actor rows it describes. The M9 admin surface is expected
+to build the read side on this exact shape.
+
+### Connecting real agents
+
+Pat auth: mint a token (`POST /me/tokens`), paste it where the client asks
+for an API key/header. Both clients below speak Streamable HTTP natively;
+ArcDrop's server answers `initialize` → `tools/list` → `tools/call` over
+`/api/v1/mcp`.
+
+Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "arcdrop": {
+      "url": "https://arcdrop.example.com/api/v1/mcp",
+      "headers": { "Authorization": "Bearer arcdrop_pat_…" }
+    }
+  }
+}
+```
+
+Cursor (`~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "arcdrop": {
+      "url": "https://arcdrop.example.com/api/v1/mcp",
+      "headers": { "Authorization": "Bearer arcdrop_pat_…" }
+    }
+  }
+}
+```
+
+Notes: use a read-only token for exploratory assistants and a read-write
+token only when the agent should actually organize the library; tokens are
+revocable from `DELETE /me/tokens/{id}` (or the web client once it ships
+the surface) without touching device sessions.
+
 ## Collections (M4 — D4, D5)
 
 - **Shape:** `Collection(userId, parentId self-FK CASCADE, title, icon,
@@ -594,8 +776,10 @@ exact continuity boundary); clients behind it get `resyncRequired`.
   `/auth/*` route is capped at 10 req/min (the e2e suite proves a 429 problem+json on
   the 11th login in an isolated boot).
 - **Guards (order matters):** `ThrottlerGuard` → `JwtAuthGuard` (global; `@Public()`
-  opts out — health probes and the public auth routes use it) → `RolesGuard`
-  (`@Roles('admin')` on `/admin/*`).
+  opts out — health probes and the public auth routes use it; accepts an
+  access JWT **or** a personal access token since M7) → `PatScopeGuard`
+  (M7: PAT-only surface rules — auth/admin refusal, read-only method rule,
+  per-PAT rate budget) → `RolesGuard` (`@Roles('admin')` on `/admin/*`).
 - **Instance settings (D16):** `settings` table, typed via `SettingsService` —
   `registrationOpen` (default false), `trashRetentionDays` (30), `changeLogRetentionDays`
   (90). Secrets/infra stay env-only.
@@ -616,7 +800,8 @@ src/
   health/                  GET /api/v1/healthz (process), GET /api/v1/readyz (DB + data dir)
   metrics/                 prom-client registry; /metrics route only when enabled
   auth/                    /auth/* controller+service; crypto (JWT/argon2/opaque tokens);
-                           global guards (throttler, JWT, roles) + @Public/@Roles/@CurrentUser
+                           global guards (throttler, JWT-or-PAT, PAT scope, roles) +
+                           @Public/@Roles/@CurrentUser
   users/                   /admin/users controller+service (invite/reset tokens via API)
   settings/                SettingsService (typed DB settings) + /admin/settings
   change-log/              ChangeLogService (transact + gapless seq) + ChangeEventBus
@@ -644,6 +829,16 @@ src/
                            (one-time 60s ws tickets, in-memory store); ws gateway
                            (raw `ws` adapter, per-user rooms, protocol heartbeat);
                            change-log retention service + daily 04:00 job
+  tokens/                  M7: /me/tokens (personal access tokens — hashed at rest,
+                           labeled, revocable, optional read-only scope; plaintext
+                           returned exactly once) + pat-token primitives
+  audit/                   M7: AuditService — one fire-and-forget audit row per MCP
+                           tool call (success and failure); M9 builds the read side
+  mcp/                     M7: /api/v1/mcp Streamable HTTP endpoint (official SDK,
+                           per-session Server + transport, sessions bound to the
+                           creating credential); tool catalog mirroring the REST
+                           surface (names = operationIds, schemas = DTO metadata);
+                           per-tool read-only enforcement + audit
 test/
   helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset;
                            metadata pipeline DISABLED by default — see the M6 section)
@@ -657,10 +852,81 @@ test/
                                strict boot: loopback refused at hop 0)
   sync.e2e.test.ts             M5 suite (ws convergence, offline catch-up,
                                resyncRequired, ticket paths, isolation, retention)
+  mcp.e2e.test.ts              M7 suite (PAT handshake → tools/list → tools/call,
+                               agent-first-class proof: REST-visible + change-logged +
+                               ws-pushed mutations, PAT lifecycle, read-only refusals
+                               per tool and per method, tools/list ↔ DTO ↔ OpenAPI
+                               parity, JSON-RPC errors, audit rows, per-PAT rate
+                               budget (isolated boot), no /ai/* routes)
 ```
 
 Both `main.ts` and the e2e boots go through `app-setup.ts` — keep runtime behavior and
 tests in lockstep by wiring new app-level concerns THERE.
+
+## Decisions recorded (M7)
+
+- **The SDK gate ran FIRST and passed.** `@modelcontextprotocol/sdk@1.32.2`
+  on Bun 1.4.2 through the exact production path: Express +
+  `StreamableHTTPServerTransport` (the Node wrapper), stateful sessions
+  with `Mcp-Session-Id` round-trip, SSE-formatted responses parsed by a raw
+  client, session DELETE teardown, and the SDK's own
+  `StreamableHTTPClientTransport` completing the full handshake. No Bun
+  incompatibilities surfaced; the gate script's assertions live on as the
+  MCP e2e suite.
+- **Tool schemas are generated from the DTO validation metadata, not
+  hand-written.** `class-validator-jsonschema` converts the same
+  class-validator decorators the REST ValidationPipe enforces — the
+  published input schema and the executed validation are literally the same
+  metadata, so the ticket's "can never drift" requirement holds by
+  construction, and the e2e parity test re-derives everything live. The
+  schema-conversion cache is per-DTO and retrying on miss: bun runs all
+  test files in one process, and DTO modules register their decorators as
+  they load, so a schema requested early must not freeze a partial
+  registry.
+- **Read-only enforcement is method-derived everywhere.** REST: the
+  `PatScopeGuard` refuses non-safe methods for read-only PATs (route
+  handlers never decide). MCP: every tool call is an HTTP POST, so the MCP
+  controller is the one `@PatScopeDeferred()` route and the dispatcher
+  refuses per-tool — but the mutation flag is DERIVED from the mirrored
+  operation's REST method, so tool-level and REST-level rules cannot
+  disagree (asserted by tests on both layers). `createSyncTicket` and
+  `reindexBookmark` are mutation-classified (POST at REST) — a read-only
+  agent polls `/sync/changes` instead of holding a ws push.
+- **Sessions are bound to the credential that created them.** A session id
+  presented with a DIFFERENT bearer (other user, or the same user via a
+  different token) is a `404`, identical to an unknown session — nothing is
+  revealed about whose session it is. In-memory registry capped at 1000
+  (`503` JSON-RPC error above), cleanup on transport close and shutdown;
+  single-instance posture documented.
+- **The audit table has no foreign keys on purpose.** `audit_log_entries`
+  rows must outlive the users and tokens they describe (no cascade
+  surprises when M15-era user deletion arrives); `userId`/`patId` are plain
+  indexed columns. The write is fire-and-forget — an audit failure is a
+  warning, never a failed tool call. Rows are final-shaped for M9's admin
+  read surface; no backfill needed.
+- **Per-PAT rate budget is env-tunable and in-memory.**
+  `ARCDROP__MCP__PAT_REQUESTS_PER_MINUTE` (default 300) counts REST + MCP
+  per token; fixed window in-process — same rationale as the ws ticket
+  store (v1 single instance; a restart costs nothing but a window reset).
+  It sits ABOVE the global per-IP budget on purpose so it only bites
+  multi-address abuse of a single token.
+- **The MCP endpoint is exempt from problem+json, nothing else.** The
+  endpoint speaks JSON-RPC per the transport spec (HTTP-level JSON-RPC
+  error objects for session problems; `isError` tool results for domain
+  failures — agents act on those, not on RFC 7807 documents). Auth,
+  throttling, and the PAT surface rules all still apply: anonymous
+  initialize is a 401 from the very same guard chain.
+- **New runtime dependencies: `@modelcontextprotocol/sdk` and
+  `class-validator-jsonschema`.** Both are `--external` in the build (like
+  `ws` in M5) and come from manifests in the Docker runtime stage; the
+  bundle shrank ~1.3 MB by not inlining them. The SDK's zod range
+  (`^3.25 || ^4.0`) is satisfied by the repo's zod v4.
+- **Highlights are NOT in the v1 catalog — ratified omission.** The plan
+  settles highlights (D6) but no milestone ever built the REST surface;
+  per the orchestrator's ruling, the highlights REST surface moves to
+  wave-2 M10 and its tools land there through the M7 catalog convention
+  (see the worked example above). Every wave-2 ticket that adds REST
+  surface now carries an explicit "add the matching MCP tools" scope line.
 
 ## Decisions recorded (M6)
 
@@ -907,6 +1173,9 @@ tests in lockstep by wiring new app-level concerns THERE.
 - M5 added `@nestjs/websockets@11`, `@nestjs/platform-ws@11` and `ws@8` as
   runtime deps (`ws` is `--external` in the build) and `@types/ws` as a dev
   dep.
+- M7 added `@modelcontextprotocol/sdk` (MCP server + client transports) and
+  `class-validator-jsonschema` (DTO → JSON Schema for tool inputs) as
+  runtime deps — both `--external` in the build. No new dev deps.
 - M6 added NO dependencies — the fetch guard, IP blocklist math, HTML
   parsing and icon ids are all stdlib (`node:dns`, `node:crypto`,
   `node:fs/promises`). The build gained a third entry point

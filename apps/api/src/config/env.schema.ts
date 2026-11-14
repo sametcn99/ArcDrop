@@ -62,6 +62,15 @@ export const envSchema = z.strictObject({
      */
     allowPrivate: booleanFlag(false),
   }),
+  mcp: z.strictObject({
+    /**
+     * Per-PAT request budget (M7): requests a single personal access token
+     * may make per minute, across REST and the MCP endpoint. Intentionally
+     * ABOVE the global per-IP budget (100/min) so it only bites when one
+     * token is used from many addresses — the stolen-token scenario.
+     */
+    patRequestsPerMinute: z.coerce.number().int().min(1).default(300),
+  }),
   log: z.strictObject({
     level: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   }),

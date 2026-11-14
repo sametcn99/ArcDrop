@@ -8,9 +8,23 @@ export interface RequestUser extends AccessTokenClaims {
   email: string;
   role: 'admin' | 'user';
   status: 'active' | 'disabled';
-  /** Refresh-token family this access token belongs to (the session). */
+  /**
+   * Refresh-token family this access token belongs to (the session).
+   * For PAT principals (M7) this carries the PAT row id instead — the
+   * `/auth/*` surface refuses PATs, so it is never compared there.
+   */
   fam: string;
   createdAt: Date;
+  /**
+   * How this request authenticated (M7): a 15-minute access JWT (`jwt`) or a
+   * long-lived personal access token (`pat`). JWT requests leave these PAT
+   * fields undefined.
+   */
+  authKind: 'jwt' | 'pat';
+  /** Present when `authKind === 'pat'` — the PAT row id. */
+  patId?: string;
+  /** Present when `authKind === 'pat'` — true for `scope: read-only` tokens. */
+  patReadOnly?: boolean;
 }
 
 declare module 'express-serve-static-core' {

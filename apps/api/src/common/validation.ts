@@ -13,15 +13,26 @@ function flattenErrors(errors: readonly ValidationError[], parentPath = ''): Fla
 }
 
 /**
+ * Nested-validation-error flattening shared by the global pipe (REST) and
+ * the MCP tool-call dispatcher (M7) — one error shape everywhere:
+ * `[{ field, messages }]`.
+ */
+export function flatValidationErrors(
+  errors: readonly ValidationError[],
+): Array<{ field: string; messages: string[] }> {
+  return flattenErrors(errors).map(({ path, error }) => ({
+    field: path,
+    messages: Object.values(error.constraints ?? {}),
+  }));
+}
+
+/**
  * Maps class-validator failures to a `BadRequestException` whose payload the
  * global problem+json filter renders as `400` with `code: VALIDATION_FAILED`
  * and per-field `errors` entries (plan D9).
  */
 export function validationExceptionFactory(errors: ValidationError[]): BadRequestException {
-  const details = flattenErrors(errors).map(({ path, error }) => ({
-    field: path,
-    messages: Object.values(error.constraints ?? {}),
-  }));
+  const details = flatValidationErrors(errors);
   return new BadRequestException({
     statusCode: 400,
     message: 'Validation failed',

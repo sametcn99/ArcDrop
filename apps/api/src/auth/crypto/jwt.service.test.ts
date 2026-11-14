@@ -11,6 +11,7 @@ function makeJwtService(secret: string): JwtService {
     dataDir: '/data',
     metrics: { enabled: false },
     metadata: { enabled: false, allowPrivate: false },
+    mcp: { patRequestsPerMinute: 300 },
     log: { level: 'fatal' },
   });
   return new JwtService(config);

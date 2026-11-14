@@ -11,22 +11,26 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { SettingsModule } from './settings/settings.module';
 import { ChangeLogModule } from './change-log/change-log.module';
+import { AuditModule } from './audit/audit.module';
+import { TokensModule } from './tokens/tokens.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
 import { CollectionsModule } from './collections/collections.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { SyncModule } from './sync/sync.module';
+import { McpModule } from './mcp/mcp.module';
 import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
 
 /**
  * ArcDrop API root module (plan M1 — API foundation, M2 — auth & users,
- * M3 — bookmarks core, M4 — collections, M5 — sync, M6 — metadata & icons).
+ * M3 — bookmarks core, M4 — collections, M5 — sync, M6 — metadata & icons,
+ * M7 — MCP server + personal access tokens + audit).
  *
  * Import order matters for DI resolution: config first, then logging (so the
  * pino-backed Nest logger exists before anything logs), then infrastructure
  * and features. `ThrottlerModule` is global; its guard is registered inside
- * `AuthModule` (as the first APP_GUARD, ahead of auth/roles). `ScheduleModule`
- * hosts the trash-purge cron (plan D17), the change-log retention cron
- * (plan D4) and the icon-eviction cron (plan M6).
+ * `AuthModule` (as the first APP_GUARD, ahead of auth/pat-scope/roles).
+ * `ScheduleModule` hosts the trash-purge cron (plan D17), the change-log
+ * retention cron (plan D4) and the icon-eviction cron (plan M6).
  */
 @Module({
   imports: [
@@ -44,9 +48,12 @@ import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
     SettingsModule,
     ChangeLogModule,
     MetadataModule,
+    AuditModule,
+    TokensModule,
     BookmarksModule,
     CollectionsModule,
     SyncModule,
+    McpModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: ProblemJsonFilter }],
 })

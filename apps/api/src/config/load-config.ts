@@ -49,7 +49,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // Fill absent object sections so their inner field issues surface precisely
   // (a missing `ARCDROP__DATABASE__URL` reports at `DATABASE__URL`, not as
   // "expected object" on the whole section).
-  for (const section of ['database', 'jwt', 'cors', 'metrics', 'metadata', 'log']) {
+  for (const section of ['database', 'jwt', 'cors', 'metrics', 'metadata', 'mcp', 'log']) {
     if (collected[section] === undefined) collected[section] = {};
   }
   const parsed = envSchema.safeParse(collected);

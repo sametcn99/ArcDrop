@@ -40,5 +40,6 @@ import { SyncTicketService } from './sync-ticket.service';
     ChangeLogRetentionService,
     ChangeLogRetentionJob,
   ],
+  exports: [SyncService, SyncTicketService],
 })
 export class SyncModule {}

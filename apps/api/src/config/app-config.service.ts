@@ -58,6 +58,11 @@ export class AppConfigService {
     return this.config.metrics.enabled;
   }
 
+  /** Per-PAT request budget per minute (M7) — see `env.schema.ts`. */
+  get patRequestsPerMinute(): number {
+    return this.config.mcp.patRequestsPerMinute;
+  }
+
   get logLevel(): string {
     return this.config.log.level;
   }
