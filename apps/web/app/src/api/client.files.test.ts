@@ -116,7 +116,7 @@ describe('API client multipart upload & authenticated blob download', () => {
           headers: {
             'Content-Type': 'application/pdf',
             'Content-Disposition':
-              "attachment; filename=\"fallback.pdf\"; filename*=UTF-8''My%20Spec.pdf",
+              'attachment; filename="fallback.pdf"; filename*=UTF-8\'\'My%20Spec.pdf',
           },
         });
       }),

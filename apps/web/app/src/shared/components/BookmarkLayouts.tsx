@@ -74,9 +74,7 @@ function resolveBookmarkTitle(bookmark: Bookmark): string {
 function resolveBookmarkSourceLabel(bookmark: Bookmark): string {
   if (bookmark.storageKind === 'file') {
     return (
-      formatBookmarkFileMeta(bookmark) ??
-      bookmark.fileName ??
-      SHARED_BOOKMARK_STRINGS.fileItemLabel
+      formatBookmarkFileMeta(bookmark) ?? bookmark.fileName ?? SHARED_BOOKMARK_STRINGS.fileItemLabel
     );
   }
   return bookmark.urlParts?.host ?? bookmark.url ?? '';

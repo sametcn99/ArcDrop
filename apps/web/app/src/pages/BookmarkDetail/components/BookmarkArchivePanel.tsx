@@ -104,12 +104,8 @@ export function BookmarkArchivePanel({
               if (next) onViewModeChange(next);
             }}
           >
-            <ToggleButton value="html">
-              {BOOKMARK_DETAIL_STRINGS.archiveViewHtmlLabel}
-            </ToggleButton>
-            <ToggleButton value="text">
-              {BOOKMARK_DETAIL_STRINGS.archiveViewTextLabel}
-            </ToggleButton>
+            <ToggleButton value="html">{BOOKMARK_DETAIL_STRINGS.archiveViewHtmlLabel}</ToggleButton>
+            <ToggleButton value="text">{BOOKMARK_DETAIL_STRINGS.archiveViewTextLabel}</ToggleButton>
           </ToggleButtonGroup>
 
           {archiveLoading && !archive ? (

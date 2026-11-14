@@ -63,9 +63,7 @@ export function AuthenticatedFilePreview({
     if (variant === 'banner') {
       return null;
     }
-    return (
-      <BookmarkIconBadge iconRef={null} contentType={contentType} alt={alt} size={size} />
-    );
+    return <BookmarkIconBadge iconRef={null} contentType={contentType} alt={alt} size={size} />;
   }
 
   if (!activeUrl) {

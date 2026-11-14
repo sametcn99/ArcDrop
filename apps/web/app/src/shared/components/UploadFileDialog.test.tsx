@@ -119,7 +119,7 @@ describe('UploadFileDialog & file round-trip', () => {
           headers: {
             'Content-Type': 'application/pdf',
             'Content-Disposition':
-              "attachment; filename=\"fallback.pdf\"; filename*=UTF-8''Server%20Named%20Spec.pdf",
+              'attachment; filename="fallback.pdf"; filename*=UTF-8\'\'Server%20Named%20Spec.pdf',
           },
         });
       }),

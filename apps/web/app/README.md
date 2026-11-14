@@ -30,6 +30,7 @@ Run from `apps/web/app` (or via `bun --cwd=apps/web/app run <script>` / `bun run
 3. Commit the updated `src/api/types.ts`.
 
 `scripts/generate-api.ts` normalizes two Swagger generation quirks in memory before invoking `openapi-typescript` (without modifying `apps/api`): it disambiguates duplicate `operationId`s emitted by NestJS `@All('mcp')` (`${operationId}_${method}`), and injects missing `TagSnapshotDto` / `CollectionSnapshotDto` component stubs referenced by `SyncChangeDto.snapshot`.
+
 ## Architecture & Folder Contract
 
 The codebase enforces strict page-colocation boundaries:

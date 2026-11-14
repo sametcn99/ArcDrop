@@ -39,12 +39,108 @@ async function readBlobBytes(blob: Blob): Promise<Uint8Array> {
   });
 }
 
+function indexOfSubarray(haystack: Uint8Array, needle: Uint8Array, fromIndex = 0): number {
+  const limit = haystack.length - needle.length;
+  outer: for (let i = Math.max(0, fromIndex); i <= limit; i += 1) {
+    for (let j = 0; j < needle.length; j += 1) {
+      if (haystack[i + j] !== needle[j]) {
+        continue outer;
+      }
+    }
+    return i;
+  }
+  return -1;
+}
+
+function parseMultipartToFormData(buffer: ArrayBuffer, contentType: string): FormData {
+  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(contentType);
+  const boundary = boundaryMatch?.[1] ?? boundaryMatch?.[2];
+  if (!boundary) {
+    throw new TypeError(`Missing multipart boundary in Content-Type: ${contentType}`);
+  }
+
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder('utf-8');
+  const bytes = new Uint8Array(buffer);
+  const delimiter = encoder.encode(`--${boundary}`);
+  const crlfDelimiter = encoder.encode(`\r\n--${boundary}`);
+  const headerSeparator = encoder.encode('\r\n\r\n');
+
+  const result = new FormData();
+  let cursor = indexOfSubarray(bytes, delimiter, 0);
+  if (cursor === -1) {
+    return result;
+  }
+
+  while (cursor !== -1) {
+    const afterDelimiter = cursor + delimiter.length;
+    if (bytes[afterDelimiter] === 0x2d && bytes[afterDelimiter + 1] === 0x2d) {
+      break;
+    }
+
+    const partHeaderStart =
+      bytes[afterDelimiter] === 0x0d && bytes[afterDelimiter + 1] === 0x0a
+        ? afterDelimiter + 2
+        : afterDelimiter;
+    const headerEnd = indexOfSubarray(bytes, headerSeparator, partHeaderStart);
+    if (headerEnd === -1) {
+      break;
+    }
+
+    const rawHeaders = decoder.decode(bytes.subarray(partHeaderStart, headerEnd));
+    const bodyStart = headerEnd + headerSeparator.length;
+    const nextDelimiter = indexOfSubarray(bytes, crlfDelimiter, bodyStart);
+    if (nextDelimiter === -1) {
+      break;
+    }
+
+    const partBytes = bytes.slice(bodyStart, nextDelimiter);
+
+    let fieldName: string | null = null;
+    let fileName: string | undefined;
+    let partContentType = 'application/octet-stream';
+
+    for (const line of rawHeaders.split(/\r\n/)) {
+      const colonIdx = line.indexOf(':');
+      if (colonIdx === -1) continue;
+      const headerKey = line.slice(0, colonIdx).trim().toLowerCase();
+      const headerVal = line.slice(colonIdx + 1).trim();
+
+      if (headerKey === 'content-disposition') {
+        const nameMatch = /\bname="([^"]*)"/i.exec(headerVal);
+        if (nameMatch?.[1] !== undefined) {
+          fieldName = nameMatch[1];
+        }
+        const fileMatch = /\bfilename="([^"]*)"/i.exec(headerVal);
+        if (fileMatch?.[1] !== undefined) {
+          fileName = fileMatch[1];
+        }
+      } else if (headerKey === 'content-type') {
+        partContentType = headerVal;
+      }
+    }
+
+    if (fieldName !== null) {
+      if (fileName !== undefined) {
+        result.append(fieldName, new File([partBytes], fileName, { type: partContentType }));
+      } else {
+        result.append(fieldName, decoder.decode(partBytes));
+      }
+    }
+
+    cursor = nextDelimiter + 2;
+  }
+
+  return result;
+}
+
 /**
  * Vitest's jsdom compat layer (`makeCompatFormData`) strips filenames from File
- * entries when bridging `window.FormData` into native `Request`. Encoding
- * `FormData` bodies into a standard `multipart/form-data` payload before MSW's
- * FetchInterceptor constructs `new Request(...)` preserves file names and MIME
- * types faithfully in tests without altering production code.
+ * entries when bridging `window.FormData` into native `Request`, and Node's
+ * undici `Request.prototype.formData()` asserts against `globalThis.File`
+ * (`webidl.is.File`) when Vitest replaces `globalThis.File` with jsdom's `File`.
+ * Handling both sides in test setup keeps `FormData` round-trips identical
+ * across Bun and Node without altering production code.
  */
 async function encodeMultipartFormData(formData: FormData): Promise<{
   body: Uint8Array;
@@ -94,7 +190,7 @@ async function encodeMultipartFormData(formData: FormData): Promise<{
   };
 }
 
-let restoreFormDataFetchPatch: (() => void) | null = null;
+let restoreFormDataTestPatches: (() => void) | null = null;
 
 beforeAll(() => {
   server.listen({ onUnhandledRequest: 'error' });
@@ -113,8 +209,20 @@ beforeAll(() => {
     }
     return mswPatchedFetch(input, init);
   };
-  restoreFormDataFetchPatch = () => {
+
+  const origRequestFormData = Request.prototype.formData;
+  Request.prototype.formData = async function patchedFormData(this: Request): Promise<FormData> {
+    const contentType = this.headers.get('content-type') ?? '';
+    if (/^multipart\/form-data/i.test(contentType)) {
+      const buffer = await this.arrayBuffer();
+      return parseMultipartToFormData(buffer, contentType);
+    }
+    return origRequestFormData.call(this);
+  };
+
+  restoreFormDataTestPatches = () => {
     globalThis.fetch = mswPatchedFetch;
+    Request.prototype.formData = origRequestFormData;
   };
 
   testFakeWsController = installFakeWebSocket(true);
@@ -145,8 +253,8 @@ afterAll(async () => {
   syncEngine.stop();
   await flushPendingTeardownWork();
   testFakeWsController.restore();
-  restoreFormDataFetchPatch?.();
-  restoreFormDataFetchPatch = null;
+  restoreFormDataTestPatches?.();
+  restoreFormDataTestPatches = null;
   server.close();
 });
 

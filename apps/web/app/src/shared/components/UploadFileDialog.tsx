@@ -236,7 +236,10 @@ function UploadFileDialogBody({
               </Stack>
             ) : (
               <Stack spacing={1.25} sx={{ alignItems: 'center' }}>
-                <CloudUploadOutlinedIcon color={isDragOver ? 'primary' : 'action'} fontSize="large" />
+                <CloudUploadOutlinedIcon
+                  color={isDragOver ? 'primary' : 'action'}
+                  fontSize="large"
+                />
                 <Typography variant="body2" sx={{ fontWeight: 500 }}>
                   {isDragOver
                     ? SHARED_UPLOAD_STRINGS.dropzoneActiveHeading

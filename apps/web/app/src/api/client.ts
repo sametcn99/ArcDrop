@@ -341,7 +341,8 @@ export function createApiClient(config: ApiClientConfig = {}) {
 
     const blob = await response.blob();
     const contentDisposition = response.headers.get('content-disposition');
-    const contentType = response.headers.get('content-type') ?? blob.type ?? 'application/octet-stream';
+    const contentType =
+      response.headers.get('content-type') ?? blob.type ?? 'application/octet-stream';
     const filename = parseContentDispositionFilename(contentDisposition);
 
     return {
