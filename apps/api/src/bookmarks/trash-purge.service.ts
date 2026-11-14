@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
 import { ChangeLogService } from '@api/change-log/change-log.service';
+import { IconEvictionService } from '@api/metadata/icon-eviction.service';
 import { SettingsService } from '@api/settings/settings.service';
 import { LessThan, type Repository } from 'typeorm';
 import { TagsService } from './tags.service';
@@ -31,6 +32,7 @@ export class TrashPurgeService {
     private readonly settings: SettingsService,
     private readonly tags: TagsService,
     private readonly changeLog: ChangeLogService,
+    private readonly iconEviction: IconEvictionService,
   ) {}
 
   async purgeExpired(now: Date = new Date()): Promise<PurgeSummary> {
@@ -43,7 +45,7 @@ export class TrashPurgeService {
     });
     if (expired.length === 0) return { purged: 0 };
 
-    return this.changeLog.transact(async (manager, record) => {
+    const summary = await this.changeLog.transact(async (manager, record) => {
       await manager.delete(
         Bookmark,
         expired.map((row) => row.id), // memberships CASCADE away with the rows
@@ -58,5 +60,13 @@ export class TrashPurgeService {
       }
       return { purged: expired.length };
     });
+
+    // M6 ride-along (ticket): the purge hard-deleted rows, so their icon
+    // files may now be orphaned — sweep them fire-and-forget. The daily
+    // IconEvictionJob is the safety net either way; never block the purge
+    // outcome on a filesystem sweep.
+    void this.iconEviction.evictOrphaned().catch(() => {});
+
+    return summary;
   }
 }

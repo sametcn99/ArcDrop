@@ -5,8 +5,9 @@
   "description": "ArcDrop API — NestJS REST API running on Bun",
   "scripts": {
     "dev": "bun --watch src/main.ts",
-    "build": "bun build ./src/main.ts ./src/database/data-source.cli.ts --outdir dist --target bun --external '@nestjs/*' --external reflect-metadata --external rxjs --external express --external typeorm --external pg --external ws",
+    "build": "bun build ./src/main.ts ./src/database/data-source.cli.ts ./src/scripts/backfill-metadata.ts --outdir dist --target bun --external '@nestjs/*' --external reflect-metadata --external rxjs --external express --external typeorm --external pg --external ws",
     "start": "bun dist/main.js",
+    "backfill:metadata": "bun run build && bun dist/scripts/backfill-metadata.js",
     "lint": "eslint --config ../../eslint.config.mjs src test",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

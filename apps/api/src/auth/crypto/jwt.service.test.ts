@@ -10,6 +10,7 @@ function makeJwtService(secret: string): JwtService {
     cors: { origins: [] },
     dataDir: '/data',
     metrics: { enabled: false },
+    metadata: { enabled: false, allowPrivate: false },
     log: { level: 'fatal' },
   });
   return new JwtService(config);

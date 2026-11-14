@@ -45,6 +45,15 @@ export class AppConfigService {
     return this.config.dataDir;
   }
 
+  get metadataEnabled(): boolean {
+    return this.config.metadata.enabled;
+  }
+
+  /** TEST/DEV affordance — see `env.schema.ts`. Never enable in production. */
+  get metadataAllowPrivate(): boolean {
+    return this.config.metadata.allowPrivate;
+  }
+
   get metricsEnabled(): boolean {
     return this.config.metrics.enabled;
   }

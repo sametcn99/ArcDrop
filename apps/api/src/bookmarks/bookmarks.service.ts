@@ -22,6 +22,7 @@ import {
 import { containsPattern } from './like-pattern';
 import { TagsService } from './tags.service';
 import { UrlDecompositionService } from './url-decomposition.service';
+import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 
 /**
  * Bookmark CRUD, trash/restore, server-side search + paging and stats
@@ -43,6 +44,7 @@ export class BookmarksService {
     private readonly urls: UrlDecompositionService,
     private readonly tags: TagsService,
     private readonly changeLog: ChangeLogService,
+    private readonly metadata: MetadataFetchService,
   ) {}
 
   // -- Reads -----------------------------------------------------------------
@@ -170,6 +172,9 @@ export class BookmarksService {
    * Creates a bookmark — ALWAYS inserts, duplicates included (D13).
    * The url is decomposed once here; the derived parts are never accepted
    * from the client (D12).
+   *
+   * After the commit, the M6 metadata pipeline is scheduled fire-and-forget:
+   * the response below never waits for the fetch, and failures are silent.
    */
   async create(user: RequestUser, dto: CreateBookmarkDto): Promise<BookmarkDto> {
     const parts = this.urls.decompose(dto.url);
@@ -194,6 +199,7 @@ export class BookmarksService {
       return entity;
     });
 
+    this.metadata.scheduleEnrichment(user.id, row.id, row.url, 'fill');
     return toBookmarkDto(row, []);
   }
 
@@ -201,9 +207,15 @@ export class BookmarksService {
    * PUT semantics: provided fields replace (explicit null clears), absent
    * fields stay. A url change re-runs the decomposition (D12). Refuses
    * trashed bookmarks (404 among the active set).
+   *
+   * A url change also schedules the M6 pipeline in `refresh` mode after the
+   * commit: coverRef/iconRef belong to the page THE URL pointed at, so they
+   * are re-fetched for the new one (server-owned refs only — title/excerpt
+   * stay fill-if-null; client data is never overwritten).
    */
   async update(user: RequestUser, id: string, dto: UpdateBookmarkDto): Promise<BookmarkDto> {
-    return this.changeLog.transact(async (manager, record) => {
+    let urlChangedTo: string | null = null;
+    const result = await this.changeLog.transact(async (manager, record) => {
       const row = await manager.findOne(Bookmark, { where: { id, userId: user.id } });
       if (!row) throw new NotFoundException('Bookmark not found');
       if (row.deletedAt) {
@@ -214,6 +226,7 @@ export class BookmarksService {
       const patch: Partial<Bookmark> = {};
       if (dto.url !== undefined) {
         Object.assign(patch, this.urls.decompose(dto.url), { url: dto.url });
+        if (dto.url !== row.url) urlChangedTo = dto.url;
       }
       if (dto.title !== undefined) patch.title = dto.title;
       if (dto.excerpt !== undefined) patch.excerpt = dto.excerpt;
@@ -228,6 +241,11 @@ export class BookmarksService {
       const tags = await this.tagsForBookmarks([row.id], manager);
       return toBookmarkDto(fresh, tags.get(row.id) ?? []);
     });
+
+    if (urlChangedTo !== null) {
+      this.metadata.scheduleEnrichment(user.id, id, urlChangedTo, 'refresh');
+    }
+    return result;
   }
 
   /** Soft-deletes to the trash (D17). Trashed/unknown ids are 404. */

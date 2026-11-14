@@ -6,6 +6,7 @@ import { BookmarkTag } from '@api/database/entities/bookmark-tag.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import { ChangeLogModule } from '@api/change-log/change-log.module';
 import { CollectionsModule } from '@api/collections/collections.module';
+import { MetadataModule } from '@api/metadata/metadata.module';
 import { SettingsModule } from '@api/settings/settings.module';
 import { BookmarksController } from './bookmarks.controller';
 import { BookmarksService } from './bookmarks.service';
@@ -20,15 +21,17 @@ import { UrlDecompositionService } from './url-decomposition.service';
  * the trash-purge job and the URL decomposition service. The change-log
  * wiring comes from `ChangeLogModule`; `SettingsModule` supplies the
  * retention knob for the purge; `CollectionsModule` (M4) serves
- * `PUT /bookmarks/{id}/collections`. Auth needs no import — the JWT/roles
- * guards are global (registered in AuthModule) and `@CurrentUser` is a
- * plain param decorator.
+ * `PUT /bookmarks/{id}/collections`; `MetadataModule` (M6) is the async
+ * enrichment pipeline scheduled on create/url-change plus the reindex
+ * endpoint. Auth needs no import — the JWT/roles guards are global
+ * (registered in AuthModule) and `@CurrentUser` is a plain param decorator.
  */
 @Module({
   imports: [
     TypeOrmModule.forFeature([Bookmark, BookmarkTag, BookmarkCollection, Tag]),
     ChangeLogModule,
     CollectionsModule,
+    MetadataModule,
     SettingsModule,
   ],
   controllers: [BookmarksController, TagsController],

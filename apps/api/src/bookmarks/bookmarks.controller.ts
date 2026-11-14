@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiAcceptedResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -38,6 +39,8 @@ import {
 } from './bookmarks.dto';
 import { BookmarksService } from './bookmarks.service';
 import { TagsService } from './tags.service';
+import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
+import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 
 /**
  * Bookmark surface (plan M3). All routes are bearer-authenticated (global
@@ -53,6 +56,7 @@ export class BookmarksController {
     private readonly bookmarks: BookmarksService,
     private readonly tags: TagsService,
     private readonly collections: CollectionsService,
+    private readonly metadata: MetadataFetchService,
   ) {}
 
   @Post()
@@ -199,5 +203,30 @@ export class BookmarksController {
     @Body() dto: ReplaceBookmarkCollectionsDto,
   ): Promise<BookmarkCollectionsDto> {
     return this.collections.syncBookmarkCollections(user, params.id, dto.collectionIds);
+  }
+
+  @Post(':id/reindex')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    operationId: 'reindexBookmark',
+    summary: 'Re-run the metadata/icon pipeline for one bookmark (plan M6)',
+    description:
+      'Schedules an SSRF-hardened re-scrape in `refresh` mode: coverRef/iconRef ' +
+      'are replaced from the page on success; title/excerpt are only filled while ' +
+      'still null (client data is never overwritten — clear a field with an ' +
+      'explicit null first to have it re-filled). The bookmark is updated ' +
+      'asynchronously; completion records a `bookmark:update` change event so ' +
+      'devices refetch. Refuses unknown and trashed bookmarks (404). The response ' +
+      'is immediate — it says "scheduled", not "done".',
+  })
+  @ApiAcceptedResponse({
+    type: ReindexBookmarkResponseDto,
+    description: 'Pipeline scheduled',
+  })
+  reindex(
+    @CurrentUser() user: RequestUser,
+    @Param() params: BookmarkIdParamDto,
+  ): Promise<ReindexBookmarkResponseDto> {
+    return this.metadata.reindex(user.id, params.id);
   }
 }

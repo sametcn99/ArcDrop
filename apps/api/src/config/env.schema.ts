@@ -14,13 +14,14 @@ const csvList = z
       .filter((item) => item.length > 0),
   );
 
-/** `'true'`/`'false'` (case-insensitive, whitespace-tolerant) → boolean, absent → `false`. */
-const booleanFlag = z.preprocess(
-  (value) => (typeof value === 'string' ? value.trim().toLowerCase() : value),
-  z
-    .union([z.literal('true').transform(() => true), z.literal('false').transform(() => false)])
-    .default(false),
-);
+/** `'true'`/`'false'` (case-insensitive, whitespace-tolerant) → boolean. */
+const booleanFlag = (defaultValue: boolean) =>
+  z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim().toLowerCase() : value),
+    z
+      .union([z.literal('true').transform(() => true), z.literal('false').transform(() => false)])
+      .default(defaultValue),
+  );
 
 /**
  * Environment schema (plan D8/M1). Variables use the `ARCDROP__` prefix with
@@ -50,7 +51,17 @@ export const envSchema = z.strictObject({
     .default(3000),
   cors: z.strictObject({ origins: csvList }),
   dataDir: z.string().min(1, 'must not be empty').default('/data'),
-  metrics: z.strictObject({ enabled: booleanFlag }),
+  metrics: z.strictObject({ enabled: booleanFlag(false) }),
+  metadata: z.strictObject({
+    /** Master switch for the outbound metadata/icon fetch pipeline (M6). */
+    enabled: booleanFlag(true),
+    /**
+     * TEST/DEV affordance only: allow the fetcher to target private/loopback
+     * addresses for its INITIAL url. Redirect hops are ALWAYS validated
+     * strictly. Never enable in production.
+     */
+    allowPrivate: booleanFlag(false),
+  }),
   log: z.strictObject({
     level: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   }),

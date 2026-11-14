@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M5 — sync integration (M1 foundation + first-run admin bootstrap,
+**Status:** M6 — metadata & icons (M1 foundation + first-run admin bootstrap,
 bearer JWT auth with rotating refresh tokens and reuse detection, sessions,
 admin user management with single-use invite/reset tokens, DB-backed instance
 settings, route throttling; M3 bookmark CRUD with URL decomposition, tags,
@@ -10,11 +10,13 @@ server-side search/paging/stats, trash with auto-purge, and the per-user
 change log; M4 hierarchical collections with the nested tree, membership
 sync, cycle protection, ordering — all change-logged; M5 the sync backbone:
 `/sync/state`, `/sync/changes` cursor deltas, the ws push gateway with
-one-time tickets, and the change-log retention job). Next: M6 — metadata &
-icons.
+one-time tickets, and the change-log retention job; M6 the SSRF-hardened
+metadata pipeline with the async enrichment on create/url-change, the
+public unguessable icon cache + serve route, per-bookmark reindex, the
+icon-eviction job and the backfill CLI). Next: M7 — MCP server.
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
-collections, sync, metadata & icons, AI, portability, hardening & ops.
+collections, sync, metadata & icons, MCP, portability, hardening & ops.
 
 ## Scripts
 
@@ -30,6 +32,7 @@ collections, sync, metadata & icons, AI, portability, hardening & ops.
 | `bun run migration:run`      | Build, then run pending migrations via the TypeORM CLI        |
 | `bun run migration:revert`   | Build, then revert the last migration                         |
 | `bun run migration:generate` | Build, then generate a migration (see Migration workflow)     |
+| `bun run backfill:metadata`  | Build, then backfill metadata/icons for pre-M6 bookmarks (see the M6 section) |
 
 Repo-root scripts (`bun run dev`, `bun run lint`, `bun test`, …) proxy into this app.
 
@@ -41,15 +44,17 @@ Config is validated with zod at boot (fail-fast: invalid env → report with the
 (typo protection). Copy `.env.example` to `.env` for local dev — bun loads it
 automatically.
 
-| Variable                    | Required | Default | Meaning                                                  |
-| --------------------------- | -------- | ------- | -------------------------------------------------------- |
-| `ARCDROP__DATABASE__URL`    | yes      | —       | PostgreSQL connection URL (`postgres://…`)               |
-| `ARCDROP__JWT__SECRET`      | yes      | —       | JWT signing secret, min 32 chars (used from M2)          |
-| `ARCDROP__PORT`             | no       | `3000`  | HTTP port                                                |
-| `ARCDROP__CORS__ORIGINS`    | no       | empty   | Comma-separated browser origins; empty = CORS off        |
-| `ARCDROP__DATA_DIR`         | no       | `/data` | Data volume root (icons/uploads later); must be writable |
-| `ARCDROP__METRICS__ENABLED` | no       | `false` | Serve Prometheus metrics at `/metrics`                   |
-| `ARCDROP__LOG__LEVEL`       | no       | `info`  | pino level: `fatal…trace`                                |
+| Variable                            | Required | Default | Meaning                                                  |
+| ----------------------------------- | -------- | ------- | -------------------------------------------------------- |
+| `ARCDROP__DATABASE__URL`            | yes      | —       | PostgreSQL connection URL (`postgres://…`)               |
+| `ARCDROP__JWT__SECRET`              | yes      | —       | JWT signing secret, min 32 chars (used from M2)          |
+| `ARCDROP__PORT`                     | no       | `3000`  | HTTP port                                                |
+| `ARCDROP__CORS__ORIGINS`            | no       | empty   | Comma-separated browser origins; empty = CORS off        |
+| `ARCDROP__DATA_DIR`                 | no       | `/data` | Data volume root (icons live in `…/icons` since M6); must be writable |
+| `ARCDROP__METRICS__ENABLED`         | no       | `false` | Serve Prometheus metrics at `/metrics`                   |
+| `ARCDROP__METADATA__ENABLED`        | no       | `true`  | M6 outbound metadata/icon fetch pipeline master switch   |
+| `ARCDROP__METADATA__ALLOW_PRIVATE`  | no       | `false` | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
+| `ARCDROP__LOG__LEVEL`               | no       | `info`  | pino level: `fatal…trace`                                |
 
 ## Local development
 
@@ -242,6 +247,126 @@ RETURNING` (the row lock serializes concurrent writers → seqs are GAPLESS)
   for SELECT/INSERT..RETURNING but `[rows, rowCount]` TUPLES for
   UPDATE/DELETE..RETURNING. `manager.query` does not normalize this;
   `queryRows` does. Do not destructure `manager.query` results directly.
+
+## Metadata & icons (M6 — D18)
+
+The enrichment pipeline turns a bare URL into title + description + cover +
+icon, with the SSRF guard as a hard requirement (the fetcher is the security
+boundary — treat it as such). Wave-2 M10 will extend it (content-type
+detection); the pieces are separate collaborators on purpose:
+`SsrfSafeFetchService` (transport) → `parsePageMetadata` (pure HTML parsing)
+→ `IconCacheService` (storage) → `MetadataFetchService` (orchestration +
+change-log write).
+
+### The fetch pipeline
+
+- **Triggers:** `POST /bookmarks` (mode `fill`) and a url-changing
+  `PUT /bookmarks/{id}` (mode `refresh`) schedule enrichment AFTER the
+  mutation's transaction commits — fire-and-forget, the HTTP response never
+  waits, and every failure is swallowed (debug log only). The completion
+  write goes through `ChangeLogService.transact` (its own transaction), so a
+  successful fill records ONE `bookmark:update` event and the M5 ws push
+  notifies every device. No-op fills record nothing; bookmarks that vanished
+  or entered the trash meanwhile are skipped.
+- **Fill semantics (the contract):** the pipeline fills ONLY fields that are
+  still `null`. Client-provided title/excerpt are NEVER overwritten — the
+  pipeline cannot distinguish its own earlier fill from client data, so
+  text is fill-if-null in BOTH modes. To have a field re-filled: clear it
+  with an explicit `null` (PUT), then `POST /bookmarks/{id}/reindex`.
+- **Mode `refresh`** (url change, reindex) additionally REPLACES
+  `coverRef`/`iconRef` on success — they are server-owned cache references
+  for THE URL's page; after a url change they would point at the old site's
+  images. The replaced files are orphaned and swept by the eviction job.
+  Clients cannot set coverRef/iconRef (not in any DTO), so this never
+  overwrites client data.
+- **Per-field independence:** a broken og:image never sinks the favicon and
+  vice versa; the title/description come from the same page fetch.
+- **When `ARCDROP__METADATA__ENABLED=false`:** nothing schedules, nothing
+  fetches; `reindex` still validates (404s) and answers `scheduled`, but the
+  job no-ops. All existing-suite e2e boots run with it disabled (see
+  `test/helpers.ts`) — a live pipeline would scrape real URLs mid-test and
+  inject `bookmark:update` events that break exact-seq sync assertions.
+- **Charset v1:** bodies decode as UTF-8 (`TextDecoder`); other charsets are
+  mojibake'd. Known acceptable limitation, documented for M10.
+
+### SSRF policy (hard requirement — do not weaken)
+
+`SsrfSafeFetchService` gates EVERY fetch the pipeline makes (page, og:image,
+favicon — an attacker-chosen og:image URL is itself an SSRF vector):
+
+- **Resolve DNS first, connect only if every resolved address is public.**
+  Blocked IPv4: `0.0.0.0/8`, `10/8`, `127/8`, `169.254/16` (incl.
+  `169.254.169.254`), `172.16/12`, `192.168/16`. Blocked IPv6: `::1`, `::`,
+  `fc00::/7`, `fe80::/10`, plus IPv4-mapped (`::ffff:0:0/96`) and the
+  deprecated `::/96` compatible form (embedded IPv4 re-checked). Pure math
+  in `src/metadata/private-ip.ts`, unit-tested as a matrix.
+- **Fail closed:** unresolvable hostnames, empty answers and addresses that
+  cannot be classified are refusals.
+- **Every redirect hop is re-validated** against the same rules — scheme
+  (http/https only), DNS resolution, private ranges. Redirects cap at 5;
+  relative `Location` resolves against the current hop.
+- **Caps:** one ~10 s deadline across the whole walk (DNS + hops + streamed
+  body read share it; the final hop's abort timer stays armed while the body
+  streams), ~2 MB body cap enforced on the `content-length` header AND the
+  streamed read.
+- **Content-type before bytes:** HTML allowlist (`text/html`,
+  `application/xhtml+xml`) for pages; `image/*` for icons. Refused bodies
+  are cancelled (an unread body pins a pooled socket and stalls the next
+  fetch).
+- Non-2xx responses are refused. The resolver and transport are injectable
+  (`withDeps`) — that is what makes the private-range and
+  redirect-to-private refusals unit-testable without a network; the e2e
+  suite re-proves them over real HTTP against loopback stubs.
+- **Known limitation (v1, accepted):** the OS resolves the hostname a second
+  time for the actual TCP connection, so a theoretical DNS-rebinding window
+  remains; resolve-then-connect is exactly the ticketed design. True pinning
+  needs a custom dialer (Bun's fetch has no lookup hook) — revisit in M9
+  hardening if ever.
+- `ARCDROP__METADATA__ALLOW_PRIVATE=true` is a TEST/DEV affordance that
+  relaxes ONLY the initial url (so stub servers on loopback work in e2e);
+  redirect hops are ALWAYS strict because their target is attacker-chosen.
+  Never enable it in production.
+
+### Icon cache + public serving (D18)
+
+- Files live under `ARCDROP__DATA_DIR/icons`; `bookmarks.cover_ref` /
+  `bookmarks.icon_ref` store the FILE NAME (`Vx8…aQ.png`) as the ref. The id
+  part is 24 random bytes → 32 base64url chars (192-bit, `node:crypto` —
+  the nanoid-equivalent; no dependency).
+- **The ref is the capability:** `GET /api/v1/icons/{id}` is PUBLIC,
+  no auth (D18 — web `<img>` tags cannot send Authorization headers), served
+  with the STORED content type (the file extension is the type record — no
+  DB row involved), `Cache-Control: public, max-age=31536000, immutable`
+  and `X-Content-Type-Options: nosniff`. Unknown/malformed refs are 404s;
+  path traversal cannot escape (strict ref regex + containment check).
+  Throttled at 300 req/min per IP (a gallery of covers would drown in the
+  global 100/min).
+- **Write-side allowlist:** png, jpeg, gif, webp, avif, x-icon,
+  vnd.microsoft.icon — `image/svg+xml` is deliberately EXCLUDED (serving
+  attacker-supplied SVG from the API origin is stored XSS: `<img>` can't run
+  scripts but direct navigation can). Empty and >2 MB bodies refused.
+- **Eviction:** `IconEvictionService.evictOrphaned()` deletes icon files no
+  bookmark row references (referenced = ANY row's cover/icon ref, trash
+  state irrelevant — a trashed bookmark may be restored). Only files whose
+  names match the ref pattern are ever unlinked; foreign files survive.
+  Runs daily at 05:00 (`IconEvictionJob`, staggered behind the 03:00 trash
+  purge and 04:00 log retention so purge-orphans are swept the same night)
+  and fire-and-forget after every trash purge (`TrashPurgeService`
+  ride-along).
+
+### Reindex + backfill
+
+- `POST /bookmarks/{id}/reindex` — bearer-authed, owned + ACTIVE only
+  (trashed/unknown → 404, same rules as PUT). Returns `202
+  { id, status: "scheduled" }` immediately; the pipeline runs in `refresh`
+  mode and its completion records the `bookmark:update` event.
+- Backfill for pre-M6 rows is a CLI run IN THE CONTAINER:
+  `docker compose exec api bun dist/scripts/backfill-metadata.js`
+  (options: `--user=<uuid>`). Locally: `bun run backfill:metadata` (builds
+  first). It reuses `MetadataFetchService.enrich` in `fill` mode over active
+  rows missing any field, id-ordered in batches of 100 — re-runnable by
+  construction. Exit 1 with a clear message when env is invalid or the
+  pipeline is disabled; per-row failures are silent and tallied.
 
 ## Collections (M4 — D4, D5)
 
@@ -475,7 +600,7 @@ exact continuity boundary); clients behind it get `resyncRequired`.
   `registrationOpen` (default false), `trashRetentionDays` (30), `changeLogRetentionDays`
   (90). Secrets/infra stay env-only.
 
-## Module map (as of M5)
+## Module map (as of M6)
 
 ```
 src/
@@ -499,27 +624,93 @@ src/
   bookmarks/               /bookmarks CRUD + trash/restore + list/search/stats;
                            /bookmarks/{id}/tags; /tags/{name} rename/merge/delete;
                            /bookmarks/{id}/collections (delegates to CollectionsService);
+                           /bookmarks/{id}/reindex (schedules the M6 pipeline);
                            UrlDecompositionService (D12); TrashPurgeService + cron job
+                           (purge now fires the icon-eviction ride-along)
   collections/             /collections flat list + tree + CRUD + restore + order;
                            cycle protection, two-phase delete, membership sync;
                            tree-builder.ts (pure, unit-tested)
+  metadata/                M6: SsrfSafeFetchService (DNS-resolve-first guard, per-hop
+                           re-validation, redirect/deadline/size/content-type caps);
+                           html-metadata.ts (pure parser); IconCacheService (unguessable
+                           refs on the data volume); /icons/{id} PUBLIC serve route (D18);
+                           MetadataFetchService (async fill/refresh pipeline + reindex);
+                           IconEvictionService + daily 05:00 job; private-ip.ts (pure
+                           blocklist math)
+  scripts/                 backfill-metadata.ts — CLI entry point (bundled to
+                           dist/scripts/backfill-metadata.js; container workflow)
   sync/                    /sync/state + /sync/changes cursor deltas (snapshots at
                            pull time, resyncRequired contract); /sync/ticket
                            (one-time 60s ws tickets, in-memory store); ws gateway
                            (raw `ws` adapter, per-user rooms, protocol heartbeat);
                            change-log retention service + daily 04:00 job
 test/
-  helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset)
+  helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset;
+                           metadata pipeline DISABLED by default — see the M6 section)
   api-foundation.e2e.test.ts   full contract suite (two boots: default + metrics/CORS on)
   auth-users.e2e.test.ts       M2 lifecycle suite (main boot + isolated throttle boot)
   bookmarks.e2e.test.ts        M3 suite (lifecycle boot + isolated search/paging boot)
   collections.e2e.test.ts      M4 suite (lifecycle boot + isolated validation boot)
+  metadata.e2e.test.ts         M6 suite (permissive boot: happy path, SSRF refusals incl.
+                               redirect-to-private, oversized, content-type gates, public
+                               icon fetch, reindex, url-change refresh, eviction + backfill;
+                               strict boot: loopback refused at hop 0)
   sync.e2e.test.ts             M5 suite (ws convergence, offline catch-up,
                                resyncRequired, ticket paths, isolation, retention)
 ```
 
 Both `main.ts` and the e2e boots go through `app-setup.ts` — keep runtime behavior and
 tests in lockstep by wiring new app-level concerns THERE.
+
+## Decisions recorded (M6)
+
+- **The pipeline is disable-able and DEFAULTS OFF in every test boot.**
+  `ARCDROP__METADATA__ENABLED` (default true in production) exists as a real
+  operator knob AND the test seam: `test/helpers.ts` pins it to `false`, so
+  no other suite scrapes real URLs mid-test or picks up extra
+  `bookmark:update` events that would break the sync suite's exact-seq
+  assertions. The metadata e2e flips it on for its own boots and restores
+  the env in `afterAll` — bun runs all test files in one process, so env
+  hygiene across files is load-bearing.
+- **Text is fill-if-null everywhere; server-owned refs are the only
+  refreshable fields.** The pipeline cannot distinguish its own earlier
+  title fill from client data, so "never overwrite client-provided" forces
+  fill-if-null for title/excerpt in BOTH modes. coverRef/iconRef, by
+  contrast, are pure server artifacts for THE URL's page — `refresh` mode
+  (url change, reindex) replaces them on success and the eviction job sweeps
+  the orphans. The documented recipe to force a text re-fill: PUT an
+  explicit `null`, then reindex.
+- **`allowPrivate` relaxes only hop 0; redirect hops are ALWAYS strict.**
+  The e2e stub servers live on loopback, so some boot must be allowed to
+  fetch them — but a redirect target is attacker-chosen, so hop ≥ 1 keeps
+  the full private-range validation even in permissive test boots. This is
+  what makes the ticket's "public host redirects to a private address" case
+  honestly testable over real HTTP (the stub plays the public host).
+- **Icon refs are file names; the extension is the content-type record.**
+  `GET /icons/{id}` is public (D18) and serves with no DB row involved — the
+  strict ref regex maps the extension back to an exact media type. SVG is
+  excluded from the write allowlist on purpose: attacker-supplied SVG served
+  from the API origin is stored XSS. The id is 192 bits of `node:crypto`
+  randomness (nanoid-equivalent, zero deps).
+- **Eviction is pattern-scoped.** Only files matching the ref regex are
+  evictable — foreign files dropped into `icons/` are never unlinked, and
+  trashed bookmarks still count as references (they can be restored). The
+  05:00 job is the safety net; the trash-purge ride-along just makes the
+  common orphan case same-minute.
+- **The SSRF guard is one component, unit-tested with injected transport.**
+  `SsrfSafeFetchService` takes `dns.lookup`/`fetch` via `withDeps` (never via
+  constructor params — Nest DI must stay single-dependency), so the whole
+  refusal matrix (private ranges, mixed-answer rebinding, redirect-to-private,
+  redirect cap, size caps, content-type gates, timeout) is provable without
+  any network, and the e2e suite re-proves the same refusals over real HTTP.
+- **Unread response bodies are cancelled on every refusal path.** Found in
+  e2e: a refused body pins the pooled keep-alive socket and the NEXT fetch
+  to the same origin stalls until its deadline. Cancel-before-throw is now
+  part of the guard's contract.
+- **No new runtime dependencies.** The icon ids are plain `node:crypto`, the
+  HTML parsing is regex-based and lenient (a missed field beats a parser
+  dependency that can crash on tag soup), and the IP math is hand-rolled and
+  matrix-tested — same discipline as the hand-rolled JWTs (M2).
 
 ## Decisions recorded (M5)
 
@@ -716,3 +907,8 @@ tests in lockstep by wiring new app-level concerns THERE.
 - M5 added `@nestjs/websockets@11`, `@nestjs/platform-ws@11` and `ws@8` as
   runtime deps (`ws` is `--external` in the build) and `@types/ws` as a dev
   dep.
+- M6 added NO dependencies — the fetch guard, IP blocklist math, HTML
+  parsing and icon ids are all stdlib (`node:dns`, `node:crypto`,
+  `node:fs/promises`). The build gained a third entry point
+  (`dist/scripts/backfill-metadata.js`); the Dockerfile copies `dist/`
+  wholesale, so the container ships it without changes.
