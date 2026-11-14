@@ -1,8 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { isUUID } from 'class-validator';
 import { randomUUID } from 'node:crypto';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
+import { BookmarkCollection } from '@api/database/entities/bookmark-collection.entity';
 import { BookmarkTag } from '@api/database/entities/bookmark-tag.entity';
+import { Collection } from '@api/database/entities/collection.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import type { EntityManager, Repository } from 'typeorm';
 import { In, IsNull, Not } from 'typeorm';
@@ -26,8 +29,9 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 
 /**
  * Bookmark CRUD, trash/restore, server-side search + paging and stats
- * (plan M3, D10/D12/D13/D17). Every route is user-scoped — a row another
- * user owns simply does not exist (404, never 403: existence is not leaked).
+ * (plan M3, D10/D12/D13/D17; enriched M10). Every route is user-scoped — a
+ * row another user owns simply does not exist (404, never 403: existence is
+ * not leaked).
  *
  * Every mutation runs through `ChangeLogService.transact` so the ChangeEvent
  * is appended in the mutation's own transaction with a gapless per-user seq,
@@ -58,7 +62,7 @@ export class BookmarksService {
   }
 
   /**
-   * Search + filters + paging (plan D10). Defaults: active set (trashed
+   * Search + filters + paging (plan D10, M10). Defaults: active set (trashed
    * excluded), sort by `updatedAt` desc, pageSize 20 clamped to 200.
    */
   async list(user: RequestUser, query: ListBookmarksQueryDto): Promise<BookmarkListDto> {
@@ -101,9 +105,15 @@ export class BookmarksService {
       qb.andWhere('b.domain = :domain', { domain: query.domain.trim().toLowerCase() });
     }
 
+    if (query.favorite !== undefined) {
+      qb.andWhere('b.favorite = :favorite', { favorite: query.favorite });
+    }
+
+    if (query.type !== undefined) {
+      qb.andWhere('b.contentType = :contentType', { contentType: query.type });
+    }
+
     if (query.unassignedOnly) {
-      // The bookmark_collections table exists since M3 (D5); memberships
-      // only appear from M4 — until then nothing is assigned.
       qb.andWhere('NOT EXISTS (SELECT 1 FROM bookmark_collections bc WHERE bc.bookmark_id = b.id)');
     }
 
@@ -149,7 +159,7 @@ export class BookmarksService {
     };
   }
 
-  /** `{ total, unassigned, trashed }` over the caller's data (ticket M3). */
+  /** `{ total, unassigned, trashed, favorites }` over the caller's data (M3/M10). */
   async stats(user: RequestUser): Promise<BookmarkStatsDto> {
     const base = this.bookmarks.createQueryBuilder('b').where('b.userId = :userId', {
       userId: user.id,
@@ -162,8 +172,13 @@ export class BookmarksService {
       .andWhere('b.deletedAt IS NULL')
       .andWhere('NOT EXISTS (SELECT 1 FROM bookmark_collections bc WHERE bc.bookmark_id = b.id)')
       .getCount();
+    const favorites = await base
+      .clone()
+      .andWhere('b.deletedAt IS NULL')
+      .andWhere('b.favorite = true')
+      .getCount();
 
-    return { total, unassigned, trashed };
+    return { total, unassigned, trashed, favorites };
   }
 
   // -- Mutations -------------------------------------------------------------
@@ -173,14 +188,35 @@ export class BookmarksService {
    * The url is decomposed once here; the derived parts are never accepted
    * from the client (D12).
    *
-   * After the commit, the M6 metadata pipeline is scheduled fire-and-forget:
+   * When `collectionRef` is supplied (quick-add `?collection=`), resolves the
+   * active owned collection by UUID or title and attaches the bookmark to it
+   * in the same transaction.
+   *
+   * After the commit, the M6/M10 metadata pipeline is scheduled fire-and-forget:
    * the response below never waits for the fetch, and failures are silent.
    */
-  async create(user: RequestUser, dto: CreateBookmarkDto): Promise<BookmarkDto> {
+  async create(
+    user: RequestUser,
+    dto: CreateBookmarkDto,
+    collectionRef?: string,
+  ): Promise<BookmarkDto> {
     const parts = this.urls.decompose(dto.url);
+    const trimmedCollection = collectionRef !== undefined ? collectionRef.trim() : undefined;
+    if (trimmedCollection === '') {
+      throw new BadRequestException('collection must not be empty');
+    }
+
     const now = new Date();
 
     const row = await this.changeLog.transact(async (manager, record) => {
+      let targetCollection: Collection | null = null;
+      if (trimmedCollection !== undefined) {
+        targetCollection = await this.resolveCollectionRef(manager, user.id, trimmedCollection);
+        if (!targetCollection) {
+          throw new NotFoundException('Collection not found');
+        }
+      }
+
       const entity = manager.create(Bookmark, {
         id: randomUUID(), // explicit so the event below can reference it
         userId: user.id,
@@ -188,6 +224,8 @@ export class BookmarksService {
         title: dto.title ?? null,
         excerpt: dto.excerpt ?? null,
         note: dto.note ?? null,
+        favorite: dto.favorite ?? false,
+        contentType: 'link',
         coverRef: null,
         iconRef: null,
         ...parts,
@@ -196,6 +234,19 @@ export class BookmarksService {
       });
       await manager.insert(Bookmark, entity);
       await record(user.id, { entity: 'bookmark', entityId: entity.id, action: 'create' });
+
+      if (targetCollection) {
+        await manager.insert(BookmarkCollection, {
+          bookmarkId: entity.id,
+          collectionId: targetCollection.id,
+        });
+        await record(user.id, {
+          entity: 'collection',
+          entityId: targetCollection.id,
+          action: 'update',
+        });
+      }
+
       return entity;
     });
 
@@ -209,9 +260,8 @@ export class BookmarksService {
    * trashed bookmarks (404 among the active set).
    *
    * A url change also schedules the M6 pipeline in `refresh` mode after the
-   * commit: coverRef/iconRef belong to the page THE URL pointed at, so they
-   * are re-fetched for the new one (server-owned refs only — title/excerpt
-   * stay fill-if-null; client data is never overwritten).
+   * commit: coverRef/iconRef/contentType belong to the page THE URL pointed at,
+   * so they are re-fetched for the new one.
    */
   async update(user: RequestUser, id: string, dto: UpdateBookmarkDto): Promise<BookmarkDto> {
     let urlChangedTo: string | null = null;
@@ -231,6 +281,7 @@ export class BookmarksService {
       if (dto.title !== undefined) patch.title = dto.title;
       if (dto.excerpt !== undefined) patch.excerpt = dto.excerpt;
       if (dto.note !== undefined) patch.note = dto.note;
+      if (dto.favorite !== undefined) patch.favorite = dto.favorite;
 
       if (Object.keys(patch).length > 0) {
         await manager.update(Bookmark, { id: row.id }, patch); // bumps updatedAt
@@ -327,6 +378,31 @@ export class BookmarksService {
 
   // -- internals -------------------------------------------------------------
 
+  private async resolveCollectionRef(
+    manager: EntityManager,
+    userId: string,
+    ref: string,
+  ): Promise<Collection | null> {
+    if (isUUID(ref)) {
+      return manager.findOne(Collection, {
+        where: { id: ref, userId, deletedAt: IsNull() },
+      });
+    }
+    const exact = await manager.findOne(Collection, {
+      where: { userId, title: ref, deletedAt: IsNull() },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
+    if (exact) return exact;
+    return manager
+      .createQueryBuilder(Collection, 'c')
+      .where('c.userId = :userId', { userId })
+      .andWhere('c.deletedAt IS NULL')
+      .andWhere('LOWER(c.title) = LOWER(:title)', { title: ref })
+      .orderBy('c.createdAt', 'ASC')
+      .addOrderBy('c.id', 'ASC')
+      .getOne();
+  }
+
   /**
    * Tag views for a set of bookmarks — one query, grouped by bookmark id.
    * Public so the sync module's snapshot assembly (M5) reuses the exact
@@ -359,8 +435,7 @@ export class BookmarksService {
 
 /**
  * Maps a `Bookmark` row to the wire shape. Exported so the sync module's
- * snapshot assembly (M5) serves byte-identical bookmark payloads — the
- * `BookmarkDto` shape has been frozen since M3.
+ * snapshot assembly (M5) serves byte-identical bookmark payloads.
  */
 export function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
   return {
@@ -369,6 +444,8 @@ export function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
     title: row.title,
     excerpt: row.excerpt,
     note: row.note,
+    favorite: row.favorite ?? false,
+    contentType: row.contentType ?? 'link',
     coverRef: row.coverRef,
     iconRef: row.iconRef,
     urlParts: {

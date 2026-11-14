@@ -15,7 +15,7 @@ import { IconEvictionService } from '../src/metadata/icon-eviction.service';
 import { installTestEnv } from './helpers';
 
 /**
- * M6 metadata & icons e2e — real HTTP against real Postgres, with the
+ * M6 metadata & icons e2e â€” real HTTP against real Postgres, with the
  * outbound world replaced by LOCAL stub servers (Bun.serve on loopback).
  *
  * The boots run with `ARCDROP__METADATA__ALLOW_PRIVATE=true` (the documented
@@ -29,7 +29,7 @@ import { installTestEnv } from './helpers';
  *   loopback target is refused and the bookmark keeps its client data.
  *
  * NOTE for future suites: this file sets ARCDROP__METADATA__* env vars for
- * its own boots and RESTORES them in afterAll — every other suite relies on
+ * its own boots and RESTORES them in afterAll â€” every other suite relies on
  * installTestEnv's metadata=false default (a live pipeline would scrape
  * real URLs mid-test and inject bookmark:update events that break exact-seq
  * sync assertions).
@@ -60,6 +60,8 @@ interface BookmarkView {
   url: string;
   title: string | null;
   excerpt: string | null;
+  favorite: boolean;
+  contentType: string;
   coverRef: string | null;
   iconRef: string | null;
   urlParts: UrlPartsView;
@@ -67,6 +69,11 @@ interface BookmarkView {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+}
+
+interface BookmarkListView {
+  items: BookmarkView[];
+  totalCount: number;
 }
 
 interface ChangesView {
@@ -158,18 +165,23 @@ const pngResponse = (): Response =>
 const stubbedOrigin = (port: number): string => `http://127.0.0.1:${port}`;
 
 /** The stub world; `port` is substituted at serve time. */
-function stubRoutes(port: number): Map<string, (url: URL) => Response> {
+function stubRoutes(
+  port: number,
+  reclassifyToImage: () => boolean,
+): Map<string, (url: URL) => Response> {
   const page = (
     title: string,
     ogImage: string | null,
     favicon: string | null,
     description?: string,
+    extraMeta?: string,
   ): Response => {
     const meta = [
       `<title>${title}</title>`,
       description ? `<meta name="description" content="${description}">` : '',
       ogImage ? `<meta property="og:image" content="${ogImage}">` : '',
       favicon ? `<link rel="icon" href="${favicon}">` : '',
+      extraMeta ?? '',
     ].join('\n');
     return new Response(`<html><head>\n${meta}\n</head><body>stub body</body></html>`, {
       headers: { 'content-type': 'text/html; charset=utf-8' },
@@ -186,6 +198,22 @@ function stubRoutes(port: number): Map<string, (url: URL) => Response> {
       () => page('Second Page', '/icon2.png', '/icon2.png', 'Second page description'),
     ],
     ['/reindex-page', () => page('Reindex Page', '/icon.png', '/icon.png', 'Reindex description')],
+    [
+      '/article',
+      () =>
+        page(
+          'Stub Article',
+          '/icon.png',
+          '/icon.png',
+          'Article excerpt',
+          '<meta property="og:type" content="article">',
+        ),
+    ],
+    ['/photo.png', pngResponse],
+    [
+      '/reclassifies',
+      () => (reclassifyToImage() ? pngResponse() : page('Initially Link', null, null)),
+    ],
     ['/page-badtypes', () => page('BadTypes Page', '/plain', '/plain')],
     ['/icon.png', pngResponse],
     ['/icon2.png', pngResponse],
@@ -193,7 +221,7 @@ function stubRoutes(port: number): Map<string, (url: URL) => Response> {
       '/plain',
       () => new Response('definitely not an image', { headers: { 'content-type': 'text/plain' } }),
     ],
-    // Redirects BACK to this origin's loopback address — hop ≥ 1 is always
+    // Redirects BACK to this origin's loopback address â€” hop â‰¥ 1 is always
     // strictly validated, so this is the real "redirects to a private
     // address" refusal over live HTTP.
     [
@@ -205,7 +233,7 @@ function stubRoutes(port: number): Map<string, (url: URL) => Response> {
         }),
     ],
     ['/secret-page', () => page('Private Leak', null, null, 'metadata that must never land')],
-    // ~3 MiB streamed html (no content-length — exercises the streamed cap).
+    // ~3 MiB streamed html (no content-length â€” exercises the streamed cap).
     [
       '/huge',
       () => {
@@ -227,19 +255,30 @@ function stubRoutes(port: number): Map<string, (url: URL) => Response> {
   ]);
 }
 
-function startStub(): { origin: string; stop: () => void } {
-  let port = 0; // resolved just after serve() — the routes need it for absolute og:image/redirect targets
+function startStub(): {
+  origin: string;
+  setReclassifyImage: (flag: boolean) => void;
+  stop: () => void;
+} {
+  let port = 0; // resolved just after serve() â€” the routes need it for absolute og:image/redirect targets
+  let reclassifyImage = false;
   const server = Bun.serve({
     port: 0,
     fetch: (request) => {
       const url = new URL(request.url);
-      const handler = stubRoutes(port).get(url.pathname);
+      const handler = stubRoutes(port, () => reclassifyImage).get(url.pathname);
       return handler ? handler(url) : new Response('not found', { status: 404 });
     },
   });
   const resolvedPort = server.port ?? 0;
   port = resolvedPort;
-  return { origin: stubbedOrigin(resolvedPort), stop: () => server.stop(true) };
+  return {
+    origin: stubbedOrigin(resolvedPort),
+    setReclassifyImage: (flag: boolean) => {
+      reclassifyImage = flag;
+    },
+    stop: () => server.stop(true),
+  };
 }
 
 // -- boot helpers -------------------------------------------------------------
@@ -248,7 +287,7 @@ async function bootApp(): Promise<{ app: INestApplication; baseUrl: string }> {
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
     // The metadata boots make hundreds of API calls (polling + many
     // bookmarks); the global 100/min IP bucket would 429 mid-suite. These
-    // boots do not test throttling — other suites own that — so it is
+    // boots do not test throttling â€” other suites own that â€” so it is
     // neutralized HERE only.
     .overrideGuard(ThrottlerGuard)
     .useValue({ canActivate: () => true })
@@ -264,6 +303,7 @@ async function bootApp(): Promise<{ app: INestApplication; baseUrl: string }> {
 
 async function wipeData(dataSource: DataSource): Promise<void> {
   await dataSource.query('DELETE FROM change_events');
+  await dataSource.query('DELETE FROM highlights');
   await dataSource.query('DELETE FROM bookmark_tags');
   await dataSource.query('DELETE FROM bookmark_collections');
   await dataSource.query('DELETE FROM tags');
@@ -364,18 +404,22 @@ describe('Metadata & icons (e2e)', () => {
   }, 60_000);
 
   afterAll(async () => {
-    // Restore the suite-safe defaults — later test files rely on them.
+    // Restore the suite-safe defaults â€” later test files rely on them.
     process.env.ARCDROP__METADATA__ENABLED = 'false';
     process.env.ARCDROP__METADATA__ALLOW_PRIVATE = 'false';
   });
 
-  describe('boot A — pipeline on, loopback targets allowed (test affordance)', () => {
+  describe('boot A â€” pipeline on, loopback targets allowed (test affordance)', () => {
     let app: INestApplication;
     let baseUrl: string;
     let admin: AuthSession;
     let alice: AuthSession;
     let device: AuthSession; // second token for the ws listener
-    let stub: { origin: string; stop: () => void };
+    let stub: {
+      origin: string;
+      setReclassifyImage: (flag: boolean) => void;
+      stop: () => void;
+    };
 
     beforeAll(async () => {
       process.env.ARCDROP__METADATA__ENABLED = 'true';
@@ -424,12 +468,13 @@ describe('Metadata & icons (e2e)', () => {
       });
       expect(created.status).toBe(201);
       const bm = created.body.id;
-      // IMMEDIATE: the response carries client data and no refs — the
+      // IMMEDIATE: the response carries client data and no refs â€” the
       // pipeline must not have blocked the request.
       expect(created.body.title).toBe('Client Title');
       expect(created.body.excerpt).toBeNull();
       expect(created.body.coverRef).toBeNull();
       expect(created.body.iconRef).toBeNull();
+      expect(created.body.contentType).toBe('link');
 
       // Devices hear create, then the pipeline's completion update.
       const noteCreate = await waitForNotification(listener);
@@ -448,6 +493,7 @@ describe('Metadata & icons (e2e)', () => {
       expect(filled.coverRef).toMatch(/\.png$/);
       expect(filled.iconRef).toMatch(/\.png$/);
       expect(filled.coverRef).not.toBe(filled.iconRef); // og:image and favicon stored separately
+      expect(filled.contentType).toBe('link');
 
       // The delta carries both events; the update snapshot IS the row.
       const delta = await call<ChangesView>(baseUrl, 'GET', '/sync/changes?since=0', {
@@ -464,13 +510,98 @@ describe('Metadata & icons (e2e)', () => {
       listener.client.close(1000, 'done');
     }, 20_000);
 
+    it('AC: content-type detection (article og:type, direct image, YouTube host, unclassified link, type filter, reindex)', async () => {
+      // 1. HTML article via og:type="article"
+      const articleRes = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
+        bearer: alice.accessToken,
+        body: { url: `${stub.origin}/article` },
+      });
+      expect(articleRes.status).toBe(201);
+      expect(articleRes.body.contentType).toBe('link');
+      const article = await waitFor(8_000, async () => {
+        const row = await readBookmark(baseUrl, alice.accessToken, articleRes.body.id);
+        return row !== null && row.contentType === 'article' ? row : null;
+      });
+      expect(article.title).toBe('Stub Article');
+      expect(article.contentType).toBe('article');
+
+      // 2. Direct image URL (/photo.png serving image/png)
+      const imageRes = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
+        bearer: alice.accessToken,
+        body: { url: `${stub.origin}/photo.png`, title: 'Direct Photo' },
+      });
+      expect(imageRes.status).toBe(201);
+      const imageRow = await waitFor(8_000, async () => {
+        const row = await readBookmark(baseUrl, alice.accessToken, imageRes.body.id);
+        return row !== null && row.contentType === 'image' ? row : null;
+      });
+      expect(imageRow.contentType).toBe('image');
+
+      // 3. YouTube URL (host pattern â†’ video, either live or offline fallback)
+      const videoRes = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
+        bearer: alice.accessToken,
+        body: { url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 'YouTube Video' },
+      });
+      expect(videoRes.status).toBe(201);
+      const videoRow = await waitFor(15_000, async () => {
+        const row = await readBookmark(baseUrl, alice.accessToken, videoRes.body.id);
+        return row !== null && row.contentType === 'video' ? row : null;
+      });
+      expect(videoRow.contentType).toBe('video');
+
+      // 4. type= filter returns only matching bookmarks
+      const onlyVideos = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks?type=video', {
+        bearer: alice.accessToken,
+      });
+      expect(onlyVideos.status).toBe(200);
+      expect(onlyVideos.body.items.map((b) => b.id)).toEqual([videoRow.id]);
+
+      const onlyArticles = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks?type=article', {
+        bearer: alice.accessToken,
+      });
+      expect(onlyArticles.status).toBe(200);
+      expect(onlyArticles.body.items.map((b) => b.id)).toEqual([article.id]);
+
+      const onlyImages = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks?type=image', {
+        bearer: alice.accessToken,
+      });
+      expect(onlyImages.status).toBe(200);
+      expect(onlyImages.body.items.map((b) => b.id)).toEqual([imageRow.id]);
+
+      // 5. Reindex re-classifies when target response changes
+      stub.setReclassifyImage(false);
+      const mutRes = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
+        bearer: alice.accessToken,
+        body: { url: `${stub.origin}/reclassifies` },
+      });
+      expect(mutRes.status).toBe(201);
+      const initialFilled = await waitFor(8_000, async () => {
+        const row = await readBookmark(baseUrl, alice.accessToken, mutRes.body.id);
+        return row !== null && row.title === 'Initially Link' ? row : null;
+      });
+      expect(initialFilled.contentType).toBe('link');
+
+      stub.setReclassifyImage(true);
+      const reindex = await call(baseUrl, 'POST', `/bookmarks/${mutRes.body.id}/reindex`, {
+        bearer: alice.accessToken,
+      });
+      expect(reindex.status).toBe(202);
+      const reclassified = await waitFor(8_000, async () => {
+        const row = await readBookmark(baseUrl, alice.accessToken, mutRes.body.id);
+        return row !== null && row.contentType === 'image' ? row : null;
+      });
+      expect(reclassified.contentType).toBe('image');
+    }, 25_000);
+
     it('AC: the icon URL serves bytes publicly with the stored type + immutable caching', async () => {
       const list = await call<{ items: BookmarkView[] }>(baseUrl, 'GET', '/bookmarks', {
         bearer: alice.accessToken,
       });
-      const withIcon = list.body.items.find((b) => b.iconRef !== null)!;
+      const withIcon = list.body.items.find(
+        (b) => b.url.startsWith(stub.origin) && b.iconRef !== null,
+      )!;
 
-      // No Authorization header at all — plain <img> tags (D18).
+      // No Authorization header at all â€” plain <img> tags (D18).
       const res = await fetch(`${baseUrl}/api/v1/icons/${withIcon.iconRef}`);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toBe('image/png');
@@ -478,7 +609,7 @@ describe('Metadata & icons (e2e)', () => {
       const bytes = new Uint8Array(await res.arrayBuffer());
       expect(Buffer.from(bytes).equals(Buffer.from(PNG_BYTES))).toBeTrue();
 
-      // Unknown and malformed refs are 404 problem+json — still public.
+      // Unknown and malformed refs are 404 problem+json â€” still public.
       const unknown = await call(baseUrl, 'GET', `/icons/${'a'.repeat(32)}.png`);
       expect(unknown.status).toBe(404);
       expect(problem(unknown).code).toBe('NOT_FOUND');
@@ -486,7 +617,7 @@ describe('Metadata & icons (e2e)', () => {
       expect([400, 404]).toContain(malformed.status);
     });
 
-    it('SSRF: a redirect back to a private (loopback) hop is refused — bookmark keeps client data', async () => {
+    it('SSRF: a redirect back to a private (loopback) hop is refused â€” bookmark keeps client data', async () => {
       const created = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
         bearer: alice.accessToken,
         body: { url: `${stub.origin}/redirect-private`, title: 'Redirect Case' },
@@ -494,7 +625,7 @@ describe('Metadata & icons (e2e)', () => {
       expect(created.status).toBe(201);
       expect(created.body.title).toBe('Redirect Case');
 
-      await sleep(1500); // the pipeline completes in ms when allowed — give the refusal time to be the outcome
+      await sleep(1500); // the pipeline completes in ms when allowed â€” give the refusal time to be the outcome
       const after = await call<BookmarkView>(baseUrl, 'GET', `/bookmarks/${created.body.id}`, {
         bearer: alice.accessToken,
       });
@@ -502,7 +633,7 @@ describe('Metadata & icons (e2e)', () => {
       expect(after.body.coverRef).toBeNull();
       expect(after.body.iconRef).toBeNull();
 
-      // …and no completion event was recorded for this bookmark.
+      // â€¦and no completion event was recorded for this bookmark.
       const delta = await call<ChangesView>(baseUrl, 'GET', '/sync/changes?since=0', {
         bearer: alice.accessToken,
       });
@@ -527,7 +658,7 @@ describe('Metadata & icons (e2e)', () => {
     });
 
     it('content-type gates: html text is fetched, non-image og:image/favicon are refused per-field', async () => {
-      // NO client title — the title-less create lets the pipeline fill the
+      // NO client title â€” the title-less create lets the pipeline fill the
       // page's own <title>, proving the html path worked while the image
       // paths refused.
       const created = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
@@ -536,8 +667,8 @@ describe('Metadata & icons (e2e)', () => {
       });
       expect(created.status).toBe(201);
 
-      // The page itself IS html → title fills; the og:image/favicon URLs
-      // serve text/plain → both icon fetches refuse, independently.
+      // The page itself IS html â†’ title fills; the og:image/favicon URLs
+      // serve text/plain â†’ both icon fetches refuse, independently.
       const filled = await waitFor(8_000, async () => {
         const row = await readBookmark(baseUrl, alice.accessToken, created.body.id);
         return row !== null && row.title === 'BadTypes Page' ? row : null;
@@ -632,12 +763,12 @@ describe('Metadata & icons (e2e)', () => {
       });
       expect(refreshed.title).toBe('Client Title'); // text is never overwritten
       expect(refreshed.iconRef).not.toBe(bm.iconRef); // both server-owned refs replaced
-      // Text fields are fill-if-null — the OLD page's description stays
+      // Text fields are fill-if-null â€” the OLD page's description stays
       // (the pipeline cannot tell it apart from client-provided data).
       expect(refreshed.excerpt).toBe('Stub description for the good page');
     }, 15_000);
 
-    it('AC: eviction removes orphaned icons after create → trash → purge', async () => {
+    it('AC: eviction removes orphaned icons after create â†’ trash â†’ purge', async () => {
       const created = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
         bearer: alice.accessToken,
         body: { url: `${stub.origin}/page-good`, title: 'Doomed Bookmark' },
@@ -657,7 +788,7 @@ describe('Metadata & icons (e2e)', () => {
         'keep me',
       );
 
-      // trash → (backdated) purge: the rows die, the files orphan.
+      // trash â†’ (backdated) purge: the rows die, the files orphan.
       const trash = await call(baseUrl, 'DELETE', `/bookmarks/${doomed.id}`, {
         bearer: alice.accessToken,
       });
@@ -670,7 +801,7 @@ describe('Metadata & icons (e2e)', () => {
       expect(purge.purged).toBeGreaterThanOrEqual(1);
 
       // The purge ALSO fires the icon-eviction ride-along (fire-and-forget),
-      // so this explicit sweep may split the work with it — never assert on
+      // so this explicit sweep may split the work with it â€” never assert on
       // the COUNT. The file state below is what is deterministic: whichever
       // sweep runs last leaves the same world.
       await app.get(IconEvictionService).evictOrphaned();
@@ -705,7 +836,7 @@ describe('Metadata & icons (e2e)', () => {
       )) as Array<{ id: string }>;
       const id = inserted[0]!.id;
 
-      // The script runs as its own process — the container workflow, for real.
+      // The script runs as its own process â€” the container workflow, for real.
       // (`bun --cwd=apps/api test` makes the cwd the app dir; both spellings
       // are tried so the suite works from either invocation directory.)
       const candidates = [
@@ -728,7 +859,7 @@ describe('Metadata & icons (e2e)', () => {
         const stderr = await new Response(proc.stderr).text();
         const stdout = await new Response(proc.stdout).text();
         throw new Error(
-          `backfill script exited ${exitCode} — stderr: ${stderr.trim() || '(empty)'} | stdout: ${stdout.trim() || '(empty)'}`,
+          `backfill script exited ${exitCode} â€” stderr: ${stderr.trim() || '(empty)'} | stdout: ${stdout.trim() || '(empty)'}`,
         );
       }
       expect(exitCode).toBe(0);
@@ -743,7 +874,7 @@ describe('Metadata & icons (e2e)', () => {
     }, 30_000);
   });
 
-  describe('boot B — strict (allowPrivate=false): loopback targets are refused at hop 0', () => {
+  describe('boot B â€” strict (allowPrivate=false): loopback targets are refused at hop 0', () => {
     let app: INestApplication;
     let baseUrl: string;
     let alice: AuthSession;
@@ -767,7 +898,7 @@ describe('Metadata & icons (e2e)', () => {
       await app?.close();
     });
 
-    it('SSRF: a private (loopback) target is refused outright — bookmark still created with client data', async () => {
+    it('SSRF: a private (loopback) target is refused outright â€” bookmark still created with client data', async () => {
       const created = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
         bearer: alice.accessToken,
         body: { url: `${stub.origin}/page-good`, title: 'Strict Case' },

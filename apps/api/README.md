@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M9 — hardening & ops (**Wave 1 complete: M0–M9**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (27 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP; plus M9 per-user expensive-route rate limits, `GET /admin/audit` read surface + M2 admin auditing, route-scoped JSON body caps (256 KB REST / 2 MB MCP), OpenAPI `problem+json` sweep, hardened `compose.yaml`, `docs/backup-restore.md`, and `scripts/load-smoke.ts`. **Next:** Wave 2 — M10 (highlights entity + favorites + content types).
+**Status:** M10 — bookmark enrichment (**Wave 2 started: M0–M10**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (31 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; plus M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params. **Next:** Wave 2 — M11 (search operators & full-text search).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -109,17 +109,19 @@ generated migrations.
 - `src/database/entities/` — explicit entity list (NO globs; globs break `bun build`).
   `User`, `RefreshToken`, `OneTimeToken`, `PersonalAccessToken` (M7 agent auth),
   `Setting` (D16 runtime settings), `AuditLogEntry` (M7 tool-call audit),
-  `Bookmark`, `Tag`, `BookmarkTag`, `BookmarkCollection`, `Collection`, `ChangeEvent`
-  (M3/M4).
+  `Bookmark`, `Highlight` (M10 / D6), `Tag`, `BookmarkTag`, `BookmarkCollection`,
+  `Collection`, `ChangeEvent` (M3/M4/M10).
 - `src/database/migrations/` — explicit migration list + the no-op
   `InitialSetup1763000000000` pipeline proof, `M2AuthUsers1794606603617`
   (users/refresh_tokens/one_time_tokens/settings + the three enum types),
   `M3BookmarksCore1794608754948` (bookmarks/tags/memberships/change_events +
   `users.sync_seq`), `M4Collections1794611852359` (collections + the
   `bookmark_collections.collection_id` FK ON DELETE CASCADE + the `collection`
-  value on the `change_entity` enum) and `M7TokensAudit1794619559850`
-  (personal_access_tokens + audit_log_entries). M5 needed NO schema work —
-  `users.sync_seq` and the bus were already live. M8 needed NO schema work either — portability is service-level code over the existing tables.
+  value on the `change_entity` enum), `M7TokensAudit1794619559850`
+  (personal_access_tokens + audit_log_entries), and
+  `M10BookmarkEnrichment1794626882385` (`highlights` table, `bookmarks.favorite`,
+  `bookmark_content_type` enum + `bookmarks.content_type`, and `'highlight'` on
+  `change_entity`). M5/M6/M8/M9 needed NO schema work.
 
 ### Migration workflow
 
@@ -249,15 +251,42 @@ RETURNING` (the row lock serializes concurrent writers → seqs are GAPLESS)
   UPDATE/DELETE..RETURNING. `manager.query` does not normalize this;
   `queryRows` does. Do not destructure `manager.query` results directly.
 
-## Metadata & icons (M6 — D18)
+## Metadata, icons & content types (M6 / M10 — D18, D19)
 
 The enrichment pipeline turns a bare URL into title + description + cover +
-icon, with the SSRF guard as a hard requirement (the fetcher is the security
-boundary — treat it as such). Wave-2 M10 will extend it (content-type
-detection); the pieces are separate collaborators on purpose:
-`SsrfSafeFetchService` (transport) → `parsePageMetadata` (pure HTML parsing)
-→ `IconCacheService` (storage) → `MetadataFetchService` (orchestration +
-change-log write).
+icon + `contentType`, with the SSRF guard as a hard requirement (the fetcher is
+the security boundary — treat it as such). The pieces are separate collaborators:
+`SsrfSafeFetchService` (transport) → `parsePageMetadata` (pure HTML parsing) +
+`classifyContentType` (pure M10 classifier) → `IconCacheService` (storage) →
+`MetadataFetchService` (orchestration + change-log write).
+
+### Content-type detection precedence (M10)
+
+`Bookmark.contentType` (`article | image | video | audio | document | book | link`,
+default `'link'`) is classified asynchronously by `MetadataFetchService` using
+`classifyContentType` (`src/metadata/content-type.ts`) in strict precedence:
+
+1. **Response `Content-Type` header:** `image/*` → `image`, `video/*` → `video`,
+   `audio/*` → `audio`, EPUB/Mobi/AZW → `book`, PDF/Office/Markdown/RTF/CSV →
+   `document` (HTML falls through).
+2. **HTML `<meta property="og:type">`:** `article*`/`blog`/`news` → `article`,
+   `video*` → `video`, `music*`/`audio*` → `audio`, `book*` → `book`, `image*` →
+   `image` (`website` falls through).
+3. **URL pathname file extension:** media/book/document extensions (`.png`,
+   `.mp4`, `.mp3`, `.epub`, `.pdf`, etc.).
+4. **Known host patterns (www-stripped):** video (`youtube.com`, `youtu.be`,
+   `vimeo.com`, `twitch.tv`, `dailymotion.com`, `tiktok.com`), audio
+   (`open.spotify.com`, `podcasts.apple.com`, `soundcloud.com`,
+   `music.youtube.com`, `*.bandcamp.com`), image (`imgur.com`, `giphy.com`,
+   `unsplash.com`, `flickr.com`), book (`goodreads.com`, `openlibrary.org`,
+   `standardebooks.org`, `gutenberg.org`), article (`medium.com`, `*.medium.com`,
+   `substack.com`, `*.substack.com`, `dev.to`).
+5. **Fallback:** `'link'`.
+
+On `fill` (create/backfill), `contentType` updates when still `'link'`; on
+`refresh` (URL change / `POST /bookmarks/{id}/reindex`), `contentType` is
+always re-evaluated. Hard SSRF/policy refusals abort without touching the row;
+transient HTTP/DNS/network errors fall back to URL extension + host patterns.
 
 ### The fetch pipeline
 
@@ -465,17 +494,20 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 catalog (27 tools):** bookmarks `listBookmarks`, `getBookmark`,
-  `createBookmark`, `updateBookmark`, `deleteBookmark` (trash),
-  `restoreBookmark`, `replaceBookmarkTags`, `replaceBookmarkCollections`
-  (membership sync), `reindexBookmark`, `getBookmarkStats`,
-  `listBookmarkTags`; collections `listCollections`, `getCollectionTree`,
-  `getCollection`, `createCollection`, `updateCollection`, `deleteCollection`
-  (two-phase like REST), `restoreCollection`, `reorderCollections`; tags
-  `renameTag` (renames or MERGES, like `PUT /tags/{name}`), `deleteTag`;
-  sync `getSyncState`, `listSyncChanges`, `createSyncTicket` (ws push — an
-  agent can watch the library the same way a device does); portability (M8)
-  `exportData`, `importData`, `exportBookmarkHighlights`. Tools return
+- **v1 + M10 catalog (31 tools):** bookmarks `listBookmarks` (incl. `favorite`
+  and `type` filters), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
+  `favorite` toggle), `deleteBookmark` (trash), `restoreBookmark`,
+  `replaceBookmarkTags`, `replaceBookmarkCollections` (membership sync),
+  `reindexBookmark`, `getBookmarkStats` (incl. `favorites`),
+  `listBookmarkTags`; highlights (M10 / D6) `listHighlights`, `createHighlight`,
+  `updateHighlight`, `deleteHighlight`; collections `listCollections`,
+  `getCollectionTree`, `getCollection`, `createCollection`, `updateCollection`,
+  `deleteCollection` (two-phase like REST), `restoreCollection`,
+  `reorderCollections`; tags `renameTag` (renames or MERGES, like
+  `PUT /tags/{name}`), `deleteTag`; sync `getSyncState`, `listSyncChanges`,
+  `createSyncTicket` (ws push — an agent can watch the library the same way a
+  device does); portability (M8/M10) `exportData`, `importData`,
+  `exportBookmarkHighlights`. Tools return
   `structuredContent` (the exact service result; void operations return a
   bare `ok`) plus the same JSON as readable text content. Annotations carry
   `readOnlyHint` (derived from the REST method) and `idempotentHint`.
@@ -491,15 +523,12 @@ like extra REST JSON bodies (DTO whitelist), never errors.
   extend the e2e parity set. The e2e parity test FAILS the build when a
   covered REST operation has no tool or a tool has no REST operation —
   the catalog cannot silently rot.**
-- **Worked example — highlights:** the plan settles highlights as v1 scope
-  (D6), but the REST surface does not exist yet (no entity, no endpoints —
-  the orchestrator ratified omitting them from M7 and moving the REST
-  surface to wave-2 M10). When `GET/POST /bookmarks/{id}/highlights` +
-  `PUT/DELETE /highlights/{id}` land in M10, M10 adds `listHighlights`,
-  `createHighlight`, `updateHighlight`, `deleteHighlight` to the catalog —
-  names from their operationIds, schemas from their DTOs, handlers calling
-  the highlights service — and the parity test stops failing. Until then
-  the M7 catalog intentionally covers exactly the surface that exists.
+- **Worked example — highlights (landed in M10):** `GET/POST
+/bookmarks/{id}/highlights` and `PUT/DELETE /highlights/{id}` landed in M10
+  alongside `listHighlights`, `createHighlight`, `updateHighlight`, and
+  `deleteHighlight` in the catalog (names from operationIds, schemas from DTOs,
+  dispatched to `HighlightsService`), and `listBookmarks`/`updateBookmark`
+  automatically picked up `favorite` and `type` from their DTO metadata.
 
 ### Tool-call audit (M9 reads this)
 
@@ -573,10 +602,10 @@ the 404 is still a problem document).
 
 - **json** — full fidelity: `{ format: 'arcdrop/v1', exportedAt, scope,
 collections: [{ path, icon, color, order }], tags: [names],
-bookmarks: [{ url, title, excerpt, note, createdAt, updatedAt,
-tags: [names], collections: [paths], highlights: [] }] }`. Each bookmark
-  carries its `highlights` array as the M8 contract (always empty until the
-  M10 storage lands — see below). Paths are segment ARRAYS (`["Work",
+bookmarks: [{ url, title, excerpt, note, favorite, contentType, createdAt, updatedAt,
+tags: [names], collections: [paths], highlights: [{ text, note, color, createdAt }] }] }`.
+  Each bookmark carries its persisted `highlights` array plus `favorite` and
+  `contentType` (M8 contract wired in M10). Paths are segment ARRAYS (`["Work",
 "Rust"]`), so titles containing `/` or `;` round-trip losslessly.
 - **csv** — `url,title,excerpt,note,tags,collections,createdAt,updatedAt`.
   Tags join with `;`, collection paths join with `/`, multiple collections
@@ -667,20 +696,16 @@ decorator constants).
 ### Per-bookmark highlights export — `GET /bookmarks/{id}/highlights/export?format=txt|csv` (G4)
 
 `txt`: quoted text blocks with optional `- note:` lines, blank-line
-separated. `csv`: header `text,note,color,createdAt`. **Well-formed but
-EMPTY until M10** — the Highlight entity + REST surface land there (plan
-D6, ratified out of wave 1); M8 ships the download contract only. The ONE
-M10 plug-in point is marked `M10 HOOK` in `PortabilityService.
-exportBookmarkHighlights`: query the rows, feed the same renderers, and
-extend the ArcDrop JSON import to persist the `highlights` section it
-already validates and counts. Unknown bookmarks are 404s (trash included —
-GET semantics mirror `GET /bookmarks/{id}`).
+separated. `csv`: header `text,note,color,createdAt`. Wired to real `highlights`
+rows in M10 (`PortabilityService.exportBookmarkHighlights` + ArcDrop JSON
+export/import round-trip). Unknown bookmarks are 404s (trash included — GET
+semantics mirror `GET /bookmarks/{id}`).
 
 ### Format quirks worth remembering
 
-- ArcDrop JSON `highlights` sections are VALIDATED and counted as
-  skipped-for-now on import (reason names M10) — when the storage lands,
-  replace the skip with persistence; the wire format does not change.
+- ArcDrop JSON `highlights` are persisted on import (multiset-deduplicated on
+  `(text, note, color)` so re-imports are idempotent with zero duplicate rows or
+  no-op change events). Raindrop JSON highlights remain counted as skipped.
 - Netscape parsing is regex-lenient (M6 philosophy): `<DT><H3>` opens a
   folder, `<DL>` nests it, `<DD>` maps to the bookmark NOTE, attributes
   are case-insensitive; malformed structure heals instead of failing.
@@ -1300,17 +1325,25 @@ tests in lockstep by wiring new app-level concerns THERE.
    - _SSRF DNS-rebinding (M6):_ Bun 1.4.2 `fetch()` lacks a custom DNS lookup hook; documented residual risk & operational egress-firewall/DNS mitigations in [`docs/backup-restore.md`](docs/backup-restore.md#revisit-1--ssrf-fetcher-dns-rebinding-window-from-m6).
    - _JSON body limit (M8):_ tightened global JSON cap to `256 KB`, scoped `2 MB` strictly to `/api/v1/mcp`.
 
-## Wave-2 Handoff (for M10+)
+## Bookmark enrichment (M10 — D6, D19)
 
-Wave 1 (M0–M9) is complete and green (263 unit / 148 e2e tests). Wave 2 starts with **M10 (highlights entity + favorites + content types)**:
+M10 opens Wave 2 with highlights, favorites, automatic content-type classification, and quick-add:
 
-- **Highlights hooks already waiting in Wave-1 code:**
-  - Add the `Highlight` entity + migration + REST surface (`GET/POST /bookmarks/{id}/highlights`, `PUT/DELETE /highlights/{id}`), using plain `deleted_at` (no `@DeleteDateColumn`) if soft-deleted and `ChangeLogService.transact` for sync events.
-  - Wire `PortabilityService.exportBookmarkHighlights` (marked `M10 HOOK`) and replace the skip counter in `parseArcDropDocument` / `ImportUpsertService` with highlight persistence; the JSON/TXT/CSV export contracts are already fixed and tested.
-  - Extend `src/mcp/mcp-tool-catalog.ts` and `EXPECTED_TOOLS` in `test/mcp.e2e.test.ts` for every new authenticated non-admin REST route — the CI parity test fails otherwise.
-- **Metadata & content types:** `src/metadata/` separates `SsrfSafeFetchService` (security boundary — keep all private-IP & redirect-hop checks intact), `parsePageMetadata`, `IconCacheService`, and `MetadataFetchService`.
-- **Guard & OpenAPI conventions:** global guards run `ThrottlerGuard → JwtAuthGuard → PatScopeGuard → RolesGuard`; apply `@UseGuards(UserRateLimitGuard)` + `@UserRateLimit(...)` on new expensive routes; every route needs `@ApiOperation({ operationId, summary })`, and `enrichOpenApiWithProblemResponses` in `src/app-setup.ts` injects standard `application/problem+json` schemas/examples automatically.
-- **Migration & Bun bundle discipline:** keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, and test `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
+- **Highlights (`D6`):** `Highlight` entity (`id`, `bookmarkId` FK `ON DELETE CASCADE`, `userId` FK `ON DELETE CASCADE`, `text`, `note`, `color`, timestamps — hard-deleted; no soft-delete column needed because bookmark trash preserves highlights, restore re-enables mutations, and hard purge emits explicit `highlight:delete` tombstones before cascading). Routes: `GET/POST /bookmarks/{id}/highlights` (`listHighlights`, `createHighlight`), `PUT/DELETE /highlights/{id}` (`updateHighlight`, `deleteHighlight`). `'highlight'` added to `change_entity` enum; `/sync/changes` serves `HighlightSnapshotDto` + delete tombstones.
+- **M8 portability closure:** `PortabilityService.exportBookmarkHighlights` and ArcDrop JSON export/import now persist and round-trip real highlight rows (plus `favorite` and `contentType`) idempotently.
+- **Favorites:** `Bookmark.favorite` (`boolean`, default `false`), toggled via `PUT /bookmarks/{id}` or set on create/quick-add; `GET /bookmarks?favorite=true|false` filter; `GET /bookmarks/stats` returns `{ total, unassigned, trashed, favorites }`.
+- **Content-type detection:** `Bookmark.contentType` (`article | image | video | audio | document | book | link`, default `'link'`), classified in the M6 pipeline via `classifyContentType` (response `Content-Type` → `og:type` → URL file extension → known host patterns → `'link'`). Filterable via `GET /bookmarks?type=…` and re-classified on `POST /bookmarks/{id}/reindex`.
+- **Quick-add:** `POST /bookmarks?url=…&title=…&excerpt=…&note=…&favorite=…&collection=…` shares the exact `CreateBookmarkDto` validation, D13 duplicate-allowing insert, and async enrichment pipeline with JSON body `POST /bookmarks`, plus optional `collection` attachment (active collection UUID or exact active title).
+- **MCP parity:** 31 tools (11 reads, 20 mutations) including `listHighlights`, `createHighlight`, `updateHighlight`, `deleteHighlight`, and DTO-derived `favorite`/`type` support on `listBookmarks` and `updateBookmark`.
+
+## Wave-2 Handoff (for M11+)
+
+M0–M10 are complete and green (269 unit / 155 e2e tests across 41 test files). Next is **M11 (search operators & full-text search)**:
+
+- **Filters already feeding M11's search-operator grammar:** `ListBookmarksQueryDto` and `BookmarksService.list` (`src/bookmarks/bookmarks.service.ts`) already implement composable `favorite` (`favorite=true|false`), `type` (`type=article|image|video|audio|document|book|link`), `tag`, `domain`, `collectionId`, `unassignedOnly`, `trashed`, and `updatedSince` filters alongside `search`. M11's operator parser (e.g. `is:favorite`, `type:video`, `tag:…`, `domain:…`, `in:…`) can compile directly into these same query conditions (remember: all filters must keep composing with `trashed` and `updatedSince` delta reads).
+- **Highlight search consideration:** `highlights` rows carry `text` and `note` scoped by `user_id` and `bookmark_id` (`IX_highlights_user`, `IX_highlights_bookmark_created`) if M11 includes highlight text in full-text/operator matching.
+- **MCP & OpenAPI parity:** keep adding every new authenticated non-admin REST route to `src/mcp/mcp-tool-catalog.ts` and `EXPECTED_TOOLS` in `test/mcp.e2e.test.ts` (any new `ListBookmarksQueryDto` fields auto-propagate to `listBookmarks`'s schema).
+- **Guard, migration & formatting discipline:** keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
 
 ## Decisions recorded (M4)
 

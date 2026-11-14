@@ -28,7 +28,7 @@ describe('decodeHtmlEntities', () => {
 });
 
 describe('parsePageMetadata', () => {
-  it('extracts title, description, og:image and favicon with relative resolution', () => {
+  it('extracts title, description, og:image, og:type and favicon with relative resolution', () => {
     const html = `
       <html lang="en">
       <head>
@@ -37,6 +37,7 @@ describe('parsePageMetadata', () => {
         <title>  Why ArcDrop &amp; the sync backbone&nbsp;&nbsp; </title>
         <meta name="description" content="A long   explanation &quot;with quotes&quot;.">
         <meta property="og:image" content="/img/cover.png?v=2&amp;h=64">
+        <meta property="og:type" content="Article">
         <link rel="stylesheet" href="/style.css">
         <link rel="shortcut icon" href="/favicon.ico">
       </head>
@@ -46,6 +47,7 @@ describe('parsePageMetadata', () => {
     expect(parsed.title).toBe('Why ArcDrop & the sync backbone');
     expect(parsed.description).toBe('A long explanation "with quotes".');
     expect(parsed.ogImage).toBe('https://blog.example.com/img/cover.png?v=2&h=64');
+    expect(parsed.ogType).toBe('article');
     expect(parsed.favicon).toBe('https://blog.example.com/favicon.ico');
   });
 
@@ -60,23 +62,28 @@ describe('parsePageMetadata', () => {
   it('accepts single-quoted and unquoted attributes in any order', () => {
     const parsed = parsePageMetadata(
       `<meta content='/desc.jpg' property='og:image'>
-       <meta name=description content=unquoted-desc>`,
+       <meta name=description content=unquoted-desc>
+       <meta property=og:type content='video.other'>`,
       BASE,
     );
     expect(parsed.ogImage).toBe('https://blog.example.com/desc.jpg');
     expect(parsed.description).toBe('unquoted-desc');
+    expect(parsed.ogType).toBe('video.other');
   });
 
-  it('keeps the FIRST description / og:image occurrence', () => {
+  it('keeps the FIRST description / og:image / og:type occurrence', () => {
     const parsed = parsePageMetadata(
       `<meta name="description" content="first">
        <meta name="description" content="second">
        <meta property="og:image" content="/1.png">
-       <meta property="og:image" content="/2.png">`,
+       <meta property="og:image" content="/2.png">
+       <meta property="og:type" content="article">
+       <meta property="og:type" content="website">`,
       BASE,
     );
     expect(parsed.description).toBe('first');
     expect(parsed.ogImage).toBe('https://blog.example.com/1.png');
+    expect(parsed.ogType).toBe('article');
   });
 
   it('picks the first icon link and tolerates apple-touch-icon', () => {
@@ -95,7 +102,13 @@ describe('parsePageMetadata', () => {
 
   it('returns nulls for pages without metadata', () => {
     const parsed = parsePageMetadata('<html><body>plain</body></html>', BASE);
-    expect(parsed).toEqual({ title: null, description: null, ogImage: null, favicon: null });
+    expect(parsed).toEqual({
+      title: null,
+      description: null,
+      ogImage: null,
+      ogType: null,
+      favicon: null,
+    });
   });
 
   it('finds a late <title> but never inside attribute values', () => {
@@ -114,11 +127,12 @@ describe('parsePageMetadata', () => {
 
   it('maps whitespace-only and empty values to null', () => {
     const parsed = parsePageMetadata(
-      `<title>    </title><meta name="description" content="   ">`,
+      `<title>    </title><meta name="description" content="   "><meta property="og:type" content="  ">`,
       BASE,
     );
     expect(parsed.title).toBeNull();
     expect(parsed.description).toBeNull();
+    expect(parsed.ogType).toBeNull();
   });
 
   it('refuses non-http(s) resolved URLs (javascript: injection)', () => {

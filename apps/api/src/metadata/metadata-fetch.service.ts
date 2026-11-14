@@ -1,12 +1,13 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Bookmark } from '@api/database/entities/bookmark.entity';
+import { Bookmark, type ContentType } from '@api/database/entities/bookmark.entity';
 import { ChangeLogService } from '@api/change-log/change-log.service';
 import type { Repository } from 'typeorm';
 import { AppConfigService } from '@api/config/app-config.service';
+import { classifyContentType } from './content-type';
 import { parsePageMetadata } from './html-metadata';
 import { IconCacheService } from './icon-cache.service';
-import { SsrfSafeFetchService } from './ssrf-fetch.service';
+import { HTML_CONTENT_TYPES, MetadataFetchError, SsrfSafeFetchService } from './ssrf-fetch.service';
 
 /**
  * How the pipeline treats the server-owned icon refs:
@@ -19,7 +20,8 @@ import { SsrfSafeFetchService } from './ssrf-fetch.service';
  *   Client-facing text (title/excerpt) stays fill-if-null in both modes —
  *   the pipeline cannot distinguish a client-provided title from one it
  *   fetched itself, and "never overwrite client-provided fields" (ticket)
- *   wins.
+ *   wins. `contentType` is server-derived: `fill` sets it when still `'link'`,
+ *   `refresh` re-classifies it.
  */
 export type EnrichmentMode = 'fill' | 'refresh';
 
@@ -29,27 +31,34 @@ export type EnrichmentOutcome = 'updated' | 'noop' | 'skipped' | 'failed';
 const MAX_TITLE_LENGTH = 512;
 const MAX_EXCERPT_LENGTH = 2000;
 
+/** Security/policy failures that must abort enrichment completely without fallback. */
+const HARD_REFUSAL_REASONS = new Set([
+  'invalid-url',
+  'scheme-refused',
+  'private-address-blocked',
+  'unclassifiable-address',
+  'response-too-large',
+]);
+
 const clamp = (value: string, max: number): string =>
   value.length > max ? `${value.slice(0, max - 1)}…` : value;
 
 const decodeUtf8 = (bytes: Uint8Array): string => new TextDecoder('utf-8').decode(bytes);
 
 /**
- * The async metadata pipeline (plan M6): on bookmark create / url update a
- * background task fetches the page (SSRF-hardened — see
- * `SsrfSafeFetchService`), extracts title / description / og:image /
- * favicon, caches cover+icon in the icon cache and fills ONLY the fields
- * that are still null. The create/update response NEVER waits for this —
- * scheduling is fire-and-forget and every failure is swallowed (the
- * bookmark keeps its client data).
+ * The async metadata pipeline (plan M6, extended M10): on bookmark create /
+ * url update a background task fetches the target (SSRF-hardened — see
+ * `SsrfSafeFetchService`), classifies `contentType` (response Content-Type →
+ * `og:type` → URL extension → host pattern → `link`), extracts title /
+ * description / og:image / favicon for HTML pages, caches cover+icon in the
+ * icon cache and fills ONLY the fields that are still null. The create/update
+ * response NEVER waits for this — scheduling is fire-and-forget and every
+ * failure is swallowed (the bookmark keeps its client data).
  *
  * Completion writes through `ChangeLogService.transact` (its OWN
  * transaction, per the README contract): the row update and one
  * `bookmark:update` ChangeEvent commit together, and the M5 bus fans the
  * event out to connected devices only after the commit.
- *
- * Wave-2 note (plan M10): content-type detection will hook in HERE — the
- * fetch/parse/store pieces are separate collaborators on purpose.
  */
 @Injectable()
 export class MetadataFetchService {
@@ -105,41 +114,61 @@ export class MetadataFetchService {
     let iconRef: string | null = null;
     let title: string | null = null;
     let description: string | null = null;
+    let classified: ContentType = 'link';
 
     try {
-      // -- 1. the page (SSRF-guarded, HTML allowlisted, ≤2 MB, ≤10 s) ------
-      const document = await this.fetcher.fetchHtml(url);
-      const parsed = parsePageMetadata(decodeUtf8(document.bytes), document.finalUrl);
-      title = parsed.title;
-      description = parsed.description;
+      // -- 1. the resource (SSRF-guarded, HTML streams ≤2 MB, non-HTML cancels body) --
+      const document = await this.fetcher.fetchResource(url);
+      let ogType: string | null = null;
 
-      // -- 2. the cover (og:image) — guarded like everything else; a bad
-      //      og:image never sinks the rest of the run ---------------------
-      if (parsed.ogImage) {
-        try {
-          const image = await this.fetcher.fetchImage(parsed.ogImage);
-          coverRef = await this.icons.store(image.bytes, image.contentType);
-        } catch (error) {
-          this.debugFailure('cover fetch', bookmarkId, error);
+      if (HTML_CONTENT_TYPES.has(document.contentType)) {
+        const parsed = parsePageMetadata(decodeUtf8(document.bytes), document.finalUrl);
+        title = parsed.title;
+        description = parsed.description;
+        ogType = parsed.ogType;
+
+        // -- 2. the cover (og:image) — guarded like everything else; a bad
+        //      og:image never sinks the rest of the run ---------------------
+        if (parsed.ogImage) {
+          try {
+            const image = await this.fetcher.fetchImage(parsed.ogImage);
+            coverRef = await this.icons.store(image.bytes, image.contentType);
+          } catch (error) {
+            this.debugFailure('cover fetch', bookmarkId, error);
+          }
+        }
+
+        // -- 3. the icon — explicit link first, then the conventional
+        //      /favicon.ico fallback ---------------------------------------
+        const iconUrl = parsed.favicon ?? this.conventionalFavicon(document.finalUrl);
+        if (iconUrl) {
+          try {
+            const image = await this.fetcher.fetchImage(iconUrl);
+            iconRef = await this.icons.store(image.bytes, image.contentType);
+          } catch (error) {
+            this.debugFailure('icon fetch', bookmarkId, error);
+          }
         }
       }
 
-      // -- 3. the icon — explicit link first, then the conventional
-      //      /favicon.ico fallback ---------------------------------------
-      const iconUrl = parsed.favicon ?? this.conventionalFavicon(document.finalUrl);
-      if (iconUrl) {
-        try {
-          const image = await this.fetcher.fetchImage(iconUrl);
-          iconRef = await this.icons.store(image.bytes, image.contentType);
-        } catch (error) {
-          this.debugFailure('icon fetch', bookmarkId, error);
-        }
-      }
+      classified = classifyContentType({
+        url: document.finalUrl,
+        responseContentType: document.contentType,
+        ogType,
+      });
     } catch (error) {
-      // Page fetch failed (SSRF refusal, timeout, bad content type, …) —
-      // the silent-failure contract: bookmark keeps its client data.
+      // Page fetch failed (SSRF refusal, timeout, DNS/network failure, …).
+      // SSRF/policy/oversized refusals always abort silently. Network/HTTP/DNS
+      // errors can still classify by URL extension / host patterns (e.g.
+      // youtube.com in an offline environment); unclassified URLs yield 'link'
+      // and return 'failed' below without touching the row.
       this.debugFailure('page fetch', bookmarkId, error);
-      return 'failed';
+      if (error instanceof MetadataFetchError && HARD_REFUSAL_REASONS.has(error.reason)) {
+        return 'failed';
+      }
+      const fallbackType = classifyContentType({ url });
+      if (fallbackType === 'link') return 'failed';
+      classified = fallbackType;
     }
 
     // -- 4. completion write: one transaction, one bookmark:update event --
@@ -150,17 +179,22 @@ export class MetadataFetchService {
 
       const patch: Partial<Bookmark> = {};
       if (row.title === null && title) patch.title = clamp(title, MAX_TITLE_LENGTH);
-      if (row.excerpt === null && description)
+      if (row.excerpt === null && description) {
         patch.excerpt = clamp(description, MAX_EXCERPT_LENGTH);
+      }
 
       if (mode === 'fill') {
         if (row.coverRef === null && coverRef) patch.coverRef = coverRef;
         if (row.iconRef === null && iconRef) patch.iconRef = iconRef;
+        if (row.contentType === 'link' && classified !== 'link') {
+          patch.contentType = classified;
+        }
       } else {
-        // refresh: replace server-owned refs on success (the old files
-        // orphan and the eviction job sweeps them).
+        // refresh: replace server-owned refs & classification on success (the
+        // old icon files orphan and the eviction job sweeps them).
         if (coverRef && coverRef !== row.coverRef) patch.coverRef = coverRef;
         if (iconRef && iconRef !== row.iconRef) patch.iconRef = iconRef;
+        if (classified !== row.contentType) patch.contentType = classified;
       }
 
       if (Object.keys(patch).length === 0) return 'noop';

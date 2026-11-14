@@ -14,11 +14,15 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { CONTENT_TYPES, type ContentType } from '@api/database/entities/bookmark.entity';
 
 export const MAX_PAGE_SIZE = 200;
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_TAG_NAME_LENGTH = 100;
 export const MAX_TAGS_PER_BOOKMARK = 50;
+export const MAX_HIGHLIGHT_TEXT_LENGTH = 10_000;
+export const MAX_HIGHLIGHT_NOTE_LENGTH = 10_000;
+export const MAX_HIGHLIGHT_COLOR_LENGTH = 32;
 
 /** Query-string boolean: `true/1` → true, `false/0/''` → false, else invalid. */
 const toBoolean = ({ value }: { value: unknown }): unknown => {
@@ -54,6 +58,101 @@ export class CreateBookmarkDto {
   @IsString()
   @MaxLength(10_000)
   note?: string | null;
+
+  @ApiPropertyOptional({ default: false })
+  @IsOptional()
+  @IsBoolean()
+  favorite?: boolean;
+}
+
+/**
+ * Request body shape for `POST /bookmarks` — identical to `CreateBookmarkDto`
+ * except `url` may instead arrive in the quick-add query string (`?url=…`).
+ */
+export class CreateBookmarkBodyDto {
+  @ApiPropertyOptional({
+    example: 'https://docs.example.com/guide?page=2#setup',
+    maxLength: 2048,
+    description: 'Required unless provided as the `url` query parameter (quick-add)',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2048)
+  url?: string;
+
+  @ApiPropertyOptional({ maxLength: 512 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  title?: string | null;
+
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  excerpt?: string | null;
+
+  @ApiPropertyOptional({ maxLength: 10_000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10_000)
+  note?: string | null;
+
+  @ApiPropertyOptional({ default: false })
+  @IsOptional()
+  @IsBoolean()
+  favorite?: boolean;
+}
+
+/**
+ * Quick-add query parameters for `POST /bookmarks?url=…&title=…&collection=…`
+ * (plan M10, Raindrop parity G2 — RSS share targets & browser share sheets).
+ */
+export class QuickAddBookmarkQueryDto {
+  @ApiPropertyOptional({
+    maxLength: 2048,
+    description: 'Quick-add URL (same validation as body url)',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2048)
+  url?: string;
+
+  @ApiPropertyOptional({ maxLength: 512 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  title?: string;
+
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  excerpt?: string;
+
+  @ApiPropertyOptional({ maxLength: 10_000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10_000)
+  note?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 255,
+    description: 'Optional collection UUID or title (must already exist and be active)',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(255)
+  collection?: string;
+
+  @ApiPropertyOptional({ description: 'Mark bookmark as favorite on quick-add' })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  favorite?: boolean;
 }
 
 /**
@@ -85,6 +184,11 @@ export class UpdateBookmarkDto {
   @IsString()
   @MaxLength(10_000)
   note?: string | null;
+
+  @ApiPropertyOptional({ description: 'Toggle favorite / star state' })
+  @IsOptional()
+  @IsBoolean()
+  favorite?: boolean;
 }
 
 export class ListBookmarksQueryDto {
@@ -119,6 +223,17 @@ export class ListBookmarksQueryDto {
   @Transform(toBoolean)
   @IsBoolean()
   trashed?: boolean;
+
+  @ApiPropertyOptional({ description: 'Filter by favorite flag (`true` or `false`)' })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  favorite?: boolean;
+
+  @ApiPropertyOptional({ enum: CONTENT_TYPES, description: 'Filter by detected content type' })
+  @IsOptional()
+  @IsIn(CONTENT_TYPES)
+  type?: ContentType;
 
   @ApiPropertyOptional({ description: 'Exact registrable domain match, case-insensitive' })
   @IsOptional()
@@ -156,6 +271,81 @@ export class BookmarkIdParamDto {
   @ApiProperty({ format: 'uuid' })
   @IsUUID()
   id!: string;
+}
+
+export class HighlightIdParamDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  id!: string;
+}
+
+export class CreateHighlightDto {
+  @ApiProperty({ maxLength: MAX_HIGHLIGHT_TEXT_LENGTH, example: 'Key passage from the article' })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(MAX_HIGHLIGHT_TEXT_LENGTH)
+  text!: string;
+
+  @ApiPropertyOptional({ maxLength: MAX_HIGHLIGHT_NOTE_LENGTH, nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_HIGHLIGHT_NOTE_LENGTH)
+  note?: string | null;
+
+  @ApiPropertyOptional({ maxLength: MAX_HIGHLIGHT_COLOR_LENGTH, nullable: true, example: 'yellow' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_HIGHLIGHT_COLOR_LENGTH)
+  color?: string | null;
+}
+
+export class UpdateHighlightDto {
+  @ApiPropertyOptional({ maxLength: MAX_HIGHLIGHT_TEXT_LENGTH })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(MAX_HIGHLIGHT_TEXT_LENGTH)
+  text?: string;
+
+  @ApiPropertyOptional({ maxLength: MAX_HIGHLIGHT_NOTE_LENGTH, nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_HIGHLIGHT_NOTE_LENGTH)
+  note?: string | null;
+
+  @ApiPropertyOptional({ maxLength: MAX_HIGHLIGHT_COLOR_LENGTH, nullable: true })
+  @IsOptional()
+  @IsString()
+  @MaxLength(MAX_HIGHLIGHT_COLOR_LENGTH)
+  color?: string | null;
+}
+
+export class HighlightDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  bookmarkId!: string;
+
+  @ApiProperty()
+  text!: string;
+
+  @ApiProperty({ nullable: true })
+  note!: string | null;
+
+  @ApiProperty({ nullable: true })
+  color!: string | null;
+
+  @ApiProperty({ format: 'date-time' })
+  createdAt!: Date;
+
+  @ApiProperty({ format: 'date-time' })
+  updatedAt!: Date;
+}
+
+export class HighlightListDto {
+  @ApiProperty({ type: [HighlightDto] })
+  items!: HighlightDto[];
 }
 
 /** Path param for `/tags/{name}` — the raw (URL-decoded) tag name. */
@@ -221,6 +411,12 @@ export class BookmarkDto {
   @ApiProperty({ nullable: true })
   note!: string | null;
 
+  @ApiProperty({ description: 'Star/favorite flag (M10)' })
+  favorite!: boolean;
+
+  @ApiProperty({ enum: CONTENT_TYPES, description: 'Detected content type (M10)' })
+  contentType!: ContentType;
+
   @ApiProperty({ nullable: true, description: 'Populated by metadata fetching from M6' })
   coverRef!: string | null;
 
@@ -266,6 +462,9 @@ export class BookmarkStatsDto {
 
   /** Bookmarks currently in the trash. */
   @ApiProperty() trashed!: number;
+
+  /** Active bookmarks marked as favorite. */
+  @ApiProperty() favorites!: number;
 }
 
 export class TagUsageDto {

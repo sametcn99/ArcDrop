@@ -1,4 +1,15 @@
-import { emptyParsedImport, type ParsedCollection, type ParsedImport } from './import-model';
+import {
+  MAX_HIGHLIGHT_COLOR_LENGTH,
+  MAX_HIGHLIGHT_NOTE_LENGTH,
+  MAX_HIGHLIGHT_TEXT_LENGTH,
+} from '@api/bookmarks/bookmarks.dto';
+import { CONTENT_TYPES, type ContentType } from '@api/database/entities/bookmark.entity';
+import {
+  emptyParsedImport,
+  type ParsedCollection,
+  type ParsedHighlight,
+  type ParsedImport,
+} from './import-model';
 import { toIsoOrNull, validateBookmarkItem } from './normalize';
 
 interface RawJsonRecord {
@@ -6,14 +17,12 @@ interface RawJsonRecord {
 }
 
 /**
- * ArcDrop JSON import — the round-trip format our exporter writes (plan M8).
+ * ArcDrop JSON import — the round-trip format our exporter writes (plan M8, M10).
  * Shape: `{ format: 'arcdrop/v1', collections: [{ path, title, icon, color,
- * order }], bookmarks: [{ url, title, excerpt, note, tags, collections,
- * highlights, createdAt, updatedAt }] }`. `collections` per bookmark are
- * root→leaf SEGMENT ARRAYS (no escaping problems, ids are meaningless
- * across instances). The `highlights` section is part of the contract
- * since M8 — the storage lands in M10, so import VALIDATES the section and
- * counts its entries as skipped-for-now instead of dropping it silently.
+ * order }], bookmarks: [{ url, title, excerpt, note, favorite, contentType,
+ * tags, collections, highlights, createdAt, updatedAt }] }`. `collections`
+ * per bookmark are root→leaf SEGMENT ARRAYS (no escaping problems, ids are
+ * meaningless across instances).
  */
 export function isArcDropJson(value: unknown): boolean {
   return (
@@ -74,14 +83,14 @@ export function parseArcDropDocument(value: unknown): ParsedImport {
       continue;
     }
 
-    // The highlights contract (storage lands in M10 — see class doc).
-    const highlights = raw['highlights'];
-    if (Array.isArray(highlights) && highlights.length > 0) {
-      result.skipped.push({
-        reason: `highlight storage lands in M10 — ${highlights.length} highlight(s) not persisted yet`,
-        source,
-      });
-    }
+    const highlights = parseHighlights(raw['highlights'], source, result.errors);
+    const favorite = typeof raw['favorite'] === 'boolean' ? raw['favorite'] : undefined;
+    const contentTypeRaw = raw['contentType'];
+    const contentType =
+      typeof contentTypeRaw === 'string' &&
+      (CONTENT_TYPES as readonly string[]).includes(contentTypeRaw)
+        ? (contentTypeRaw as ContentType)
+        : undefined;
 
     const collectionPaths = Array.isArray(raw['collections'])
       ? (raw['collections'] as unknown[])
@@ -95,10 +104,13 @@ export function parseArcDropDocument(value: unknown): ParsedImport {
         title: optionalText(raw['title']),
         excerpt: optionalText(raw['excerpt']),
         note: optionalText(raw['note']),
+        favorite,
+        contentType,
         tags: Array.isArray(raw['tags'])
           ? raw['tags'].filter((tag): tag is string => typeof tag === 'string')
           : undefined,
         collectionPaths,
+        highlights: highlights.length > 0 ? highlights : undefined,
         createdAt:
           toIsoOrNull(typeof raw['createdAt'] === 'string' ? raw['createdAt'] : null) ?? null,
         updatedAt:
@@ -111,6 +123,59 @@ export function parseArcDropDocument(value: unknown): ParsedImport {
   }
 
   return result;
+}
+
+function parseHighlights(
+  rawList: unknown,
+  bookmarkSource: string,
+  errors: ParsedImport['errors'],
+): ParsedHighlight[] {
+  if (!Array.isArray(rawList)) return [];
+  const parsed: ParsedHighlight[] = [];
+  for (let i = 0; i < rawList.length; i++) {
+    const entry = rawList[i] as RawJsonRecord | null;
+    const source = `${bookmarkSource} highlight ${i + 1}`;
+    if (typeof entry !== 'object' || entry === null) {
+      errors.push({ reason: 'highlight entry is not an object', source });
+      continue;
+    }
+    const text = typeof entry['text'] === 'string' ? entry['text'].trim() : '';
+    if (text.length === 0) {
+      errors.push({ reason: 'highlight text is empty', source });
+      continue;
+    }
+    if (text.length > MAX_HIGHLIGHT_TEXT_LENGTH) {
+      errors.push({
+        reason: `highlight text exceeds ${MAX_HIGHLIGHT_TEXT_LENGTH} characters`,
+        source,
+      });
+      continue;
+    }
+    const note = optionalText(entry['note']);
+    if (note !== null && note.length > MAX_HIGHLIGHT_NOTE_LENGTH) {
+      errors.push({
+        reason: `highlight note exceeds ${MAX_HIGHLIGHT_NOTE_LENGTH} characters`,
+        source,
+      });
+      continue;
+    }
+    const color = optionalText(entry['color']);
+    if (color !== null && color.length > MAX_HIGHLIGHT_COLOR_LENGTH) {
+      errors.push({
+        reason: `highlight color exceeds ${MAX_HIGHLIGHT_COLOR_LENGTH} characters`,
+        source,
+      });
+      continue;
+    }
+    parsed.push({
+      text,
+      note,
+      color,
+      createdAt:
+        toIsoOrNull(typeof entry['createdAt'] === 'string' ? entry['createdAt'] : null) ?? null,
+    });
+  }
+  return parsed;
 }
 
 /** Reads a path entry: array of non-empty string segments. */

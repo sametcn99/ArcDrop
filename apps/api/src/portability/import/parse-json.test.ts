@@ -18,6 +18,8 @@ const ARCDOC = {
       title: 'Guide',
       excerpt: null,
       note: 'read me',
+      favorite: true,
+      contentType: 'article',
       createdAt: '2025-06-01T10:00:00.000Z',
       updatedAt: '2025-06-02T10:00:00.000Z',
       tags: ['a', 'b'],
@@ -45,13 +47,18 @@ describe('parseArcDropDocument (round-trip format)', () => {
     expect(result.bookmarks).toHaveLength(2);
     expect(result.bookmarks[0]!.collectionPaths).toEqual([['Work', 'Rust']]);
     expect(result.bookmarks[0]!.tags).toEqual(['a', 'b']);
+    expect(result.bookmarks[0]!.favorite).toBe(true);
+    expect(result.bookmarks[0]!.contentType).toBe('article');
     expect(result.bookmarks[0]!.updatedAt).toBe('2025-06-02T10:00:00.000Z');
   });
 
-  it('counts highlights as skipped-for-now (M10 hook)', () => {
+  it('parses highlights into bookmark items without skipping (M10)', () => {
     const result = parseArcDropDocument(ARCDOC);
-    expect(result.skipped).toHaveLength(1);
-    expect(result.skipped[0]!.reason).toContain('M10');
+    expect(result.skipped).toHaveLength(0);
+    expect(result.errors).toHaveLength(0);
+    expect(result.bookmarks[1]!.highlights).toEqual([
+      { text: 'future', note: null, color: 'yellow', createdAt: '2025-06-01T10:00:00.000Z' },
+    ]);
   });
 
   it('errors on entries without a usable url', () => {

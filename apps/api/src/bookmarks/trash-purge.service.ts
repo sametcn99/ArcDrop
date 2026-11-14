@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
+import { Highlight } from '@api/database/entities/highlight.entity';
 import { ChangeLogService } from '@api/change-log/change-log.service';
 import { IconEvictionService } from '@api/metadata/icon-eviction.service';
 import { SettingsService } from '@api/settings/settings.service';
-import { LessThan, type Repository } from 'typeorm';
+import { In, LessThan, type Repository } from 'typeorm';
 import { TagsService } from './tags.service';
 
 export interface PurgeSummary {
@@ -14,16 +15,12 @@ export interface PurgeSummary {
 const MS_PER_DAY = 86_400_000;
 
 /**
- * Trash retention sweep (plan D17): hard-deletes bookmarks that have been
- * in the trash longer than the instance's `trashRetentionDays` (default 30,
- * D16). Runs daily via `TrashPurgeJob`; also callable directly (tests,
- * future admin tooling).
+ * Trash retention sweep (plan D17, extended M10): hard-deletes bookmarks that
+ * have been in the trash longer than `trashRetentionDays` (default 30, D16).
  *
  * The purge emits ChangeEvents like any mutation: one `bookmark:delete`
- * tombstone per purged row, plus `tag:delete` for tags whose last
- * membership vanished with the purged bookmarks. Everything happens in one
- * transaction, so events and deletions commit atomically and seqs stay
- * gapless per user.
+ * tombstone per purged row, one `highlight:delete` tombstone per cascaded
+ * highlight row, plus `tag:delete` for tags whose last membership vanished.
  */
 @Injectable()
 export class TrashPurgeService {
@@ -45,13 +42,29 @@ export class TrashPurgeService {
     });
     if (expired.length === 0) return { purged: 0 };
 
+    const expiredIds = expired.map((row) => row.id);
+
     const summary = await this.changeLog.transact(async (manager, record) => {
+      // Collect cascaded highlight ids BEFORE deleting the parent bookmarks so
+      // we can record delete tombstones for syncing devices (M10 AC).
+      const highlights = await manager.find(Highlight, {
+        where: { bookmarkId: In(expiredIds) },
+        select: { id: true, userId: true },
+      });
+
       await manager.delete(
         Bookmark,
-        expired.map((row) => row.id), // memberships CASCADE away with the rows
+        expiredIds, // memberships and highlights CASCADE away with the rows
       );
       for (const row of expired) {
         await record(row.userId, { entity: 'bookmark', entityId: row.id, action: 'delete' });
+      }
+      for (const highlight of highlights) {
+        await record(highlight.userId, {
+          entity: 'highlight',
+          entityId: highlight.id,
+          action: 'delete',
+        });
       }
       // Tags whose memberships all pointed at purged bookmarks are pruned
       // (tag existence invariant), one sweep per affected user.
@@ -61,10 +74,7 @@ export class TrashPurgeService {
       return { purged: expired.length };
     });
 
-    // M6 ride-along (ticket): the purge hard-deleted rows, so their icon
-    // files may now be orphaned — sweep them fire-and-forget. The daily
-    // IconEvictionJob is the safety net either way; never block the purge
-    // outcome on a filesystem sweep.
+    // M6 ride-along: hard-deleted rows may orphan icon files.
     void this.iconEviction.evictOrphaned().catch(() => {});
 
     return summary;

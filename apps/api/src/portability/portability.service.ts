@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { IsNull } from 'typeorm';
+import type { ContentType } from '@api/database/entities/bookmark.entity';
 import { Collection } from '@api/database/entities/collection.entity';
 import { queryRows } from '@api/database/query-rows';
 import { BookmarksService } from '@api/bookmarks/bookmarks.service';
@@ -59,7 +60,7 @@ export interface HighlightsDownload {
 }
 
 /**
- * Portability (plan M8): data in and out, user-scoped.
+ * Portability (plan M8, M10): data in and out, user-scoped.
  *
  * - Export streams in batches (keyset pagination on bookmark id) for
  *   json/csv/txt; HTML buffers the rows it needs for the folder tree
@@ -314,13 +315,19 @@ export class PortabilityService {
 
   /**
    * Keyset-paginated bookmark batches (id ASC) over the ACTIVE scope, each
-   * row bundled with its tag names and (scope-filtered) collection ids.
+   * row bundled with its tag names, (scope-filtered) collection ids, and
+   * highlight rows.
    */
   private async *exportBookmarkBatches(
     user: RequestUser,
     scope: ExportScope | null,
   ): AsyncGenerator<
-    Array<{ row: Record<string, unknown>; tags: Array<{ name: string }>; collectionIds: string[] }>
+    Array<{
+      row: Record<string, unknown>;
+      tags: Array<{ name: string }>;
+      collectionIds: string[];
+      highlights: ExportHighlight[];
+    }>
   > {
     let lastId: string | null = null;
     for (;;) {
@@ -370,17 +377,44 @@ export class PortabilityService {
         byBookmark.set(bookmarkId, list);
       }
 
+      const highlightRows = await queryRows(
+        this.dataSource.manager,
+        `SELECT bookmark_id AS "bookmarkId", text, note, color, created_at
+           FROM highlights
+          WHERE user_id = $1 AND bookmark_id = ANY($2::uuid[])
+          ORDER BY created_at ASC, id ASC`,
+        [user.id, ids],
+      );
+      const highlightsByBookmark = new Map<string, ExportHighlight[]>();
+      for (const hr of highlightRows) {
+        const bookmarkId = String(hr['bookmarkId']);
+        const list = highlightsByBookmark.get(bookmarkId) ?? [];
+        list.push({
+          text: String(hr['text']),
+          note: hr['note'] === null ? null : String(hr['note']),
+          color: hr['color'] === null ? null : String(hr['color']),
+          createdAt: asIso(hr['created_at']),
+        });
+        highlightsByBookmark.set(bookmarkId, list);
+      }
+
       yield rows.map((row) => ({
         row,
         tags: tags.get(String(row['id'])) ?? [],
         collectionIds: byBookmark.get(String(row['id'])) ?? [],
+        highlights: highlightsByBookmark.get(String(row['id'])) ?? [],
       }));
     }
   }
 
-  /** DB row + resolved tags/memberships → the wire-shape export bookmark. */
+  /** DB row + resolved tags/memberships/highlights → the wire-shape export bookmark. */
   private toExportBookmark(
-    entry: { row: Record<string, unknown>; tags: Array<{ name: string }>; collectionIds: string[] },
+    entry: {
+      row: Record<string, unknown>;
+      tags: Array<{ name: string }>;
+      collectionIds: string[];
+      highlights: ExportHighlight[];
+    },
     pathsById: ReadonlyMap<string, string[]>,
   ): ExportBookmark {
     const row = entry.row;
@@ -393,11 +427,13 @@ export class PortabilityService {
       title: row['title'] === null ? null : String(row['title']),
       excerpt: row['excerpt'] === null ? null : String(row['excerpt']),
       note: row['note'] === null ? null : String(row['note']),
+      favorite: Boolean(row['favorite']),
+      contentType: String(row['content_type']) as ContentType,
       createdAt: asIso(row['created_at']),
       updatedAt: asIso(row['updated_at']),
       tags: entry.tags.map((tag) => tag.name).sort((a, b) => a.localeCompare(b)),
       collections: paths,
-      highlights: [],
+      highlights: entry.highlights,
     };
   }
 
@@ -427,10 +463,7 @@ export class PortabilityService {
 
   /**
    * The highlights download for one bookmark (owned; trash state included —
-   * GET semantics mirror `GET /bookmarks/{id}`). The Highlight storage
-   * lands in M10, so the row list is empty today and the download is
-   * well-formed but empty; M10 plugs real rows into the ONE call site
-   * marked below (formats do not change).
+   * GET semantics mirror `GET /bookmarks/{id}`).
    */
   async exportBookmarkHighlights(
     user: RequestUser,
@@ -444,8 +477,21 @@ export class PortabilityService {
     );
     if (rows.length === 0) throw new NotFoundException('Bookmark not found');
 
-    // M10 HOOK: query the highlight rows for this bookmark here.
-    const highlights: ExportHighlight[] = [];
+    const highlightRows = await queryRows(
+      this.dataSource.manager,
+      `SELECT text, note, color, created_at
+         FROM highlights
+        WHERE user_id = $1 AND bookmark_id = $2::uuid
+        ORDER BY created_at ASC, id ASC`,
+      [user.id, bookmarkId],
+    );
+    const highlights: ExportHighlight[] = highlightRows.map((row) => ({
+      text: String(row['text']),
+      note: row['note'] === null ? null : String(row['note']),
+      color: row['color'] === null ? null : String(row['color']),
+      createdAt: asIso(row['created_at']),
+    }));
+
     if (format === 'txt') {
       return {
         body: renderHighlightsTxt(highlights),

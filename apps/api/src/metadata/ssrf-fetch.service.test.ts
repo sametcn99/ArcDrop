@@ -280,6 +280,23 @@ describe('SsrfSafeFetchService', () => {
       expect(doc.contentType).toBe('application/xhtml+xml');
     });
 
+    it('fetchResource reads HTML bodies and cancels non-HTML bodies immediately', async () => {
+      const fetcher = makeFetcher({
+        dns: { 'a.example.test': ['93.184.216.34'] },
+        route: (url) =>
+          url.endsWith('.png')
+            ? new Response(PNG_BYTES, { headers: { 'content-type': 'image/png' } })
+            : htmlResponse('<title>Article</title>'),
+      });
+      const htmlDoc = await fetcher.fetchResource('http://a.example.test/article');
+      expect(htmlDoc.contentType).toBe('text/html');
+      expect(new TextDecoder().decode(htmlDoc.bytes)).toContain('Article');
+
+      const imgDoc = await fetcher.fetchResource('http://a.example.test/photo.png');
+      expect(imgDoc.contentType).toBe('image/png');
+      expect(imgDoc.bytes.byteLength).toBe(0);
+    });
+
     it('fetchImage refuses non-image responses', async () => {
       const fetcher = makeFetcher({
         dns: { 'a.example.test': ['93.184.216.34'] },

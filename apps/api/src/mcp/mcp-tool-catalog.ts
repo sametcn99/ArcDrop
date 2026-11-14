@@ -5,13 +5,17 @@ import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import {
   BookmarkIdParamDto,
   CreateBookmarkDto,
+  CreateHighlightDto,
+  HighlightIdParamDto,
   ListBookmarksQueryDto,
   RenameTagDto,
   ReplaceBookmarkTagsDto,
   TagNameParamDto,
   UpdateBookmarkDto,
+  UpdateHighlightDto,
 } from '@api/bookmarks/bookmarks.dto';
 import { BookmarksService } from '@api/bookmarks/bookmarks.service';
+import { HighlightsService } from '@api/bookmarks/highlights.service';
 import { TagsService } from '@api/bookmarks/tags.service';
 import {
   CollectionIdParamDto,
@@ -73,7 +77,7 @@ function define(
 
 /**
  * The ArcDrop MCP tool catalog (plan M7/D23) — one tool per REST operation
- * of the user-facing surface (bookmarks, collections, tags, sync,
+ * of the user-facing surface (bookmarks, highlights, collections, tags, sync,
  * reindex). Names ARE the REST `operationId`s; input schemas are generated
  * from the same DTO classes the REST routes validate; every call goes
  * through the SAME services — identical validation, user scoping and
@@ -85,6 +89,7 @@ function define(
  */
 export function buildToolCatalog(deps: {
   bookmarks: BookmarksService;
+  highlights: HighlightsService;
   tags: TagsService;
   collections: CollectionsService;
   metadata: MetadataFetchService;
@@ -92,13 +97,14 @@ export function buildToolCatalog(deps: {
   syncTickets: SyncTicketService;
   portability: PortabilityService;
 }): McpToolDefinition[] {
-  const { bookmarks, tags, collections, metadata, sync, syncTickets, portability } = deps;
+  const { bookmarks, highlights, tags, collections, metadata, sync, syncTickets, portability } =
+    deps;
   return [
-    // -- bookmarks (M3/M6) -------------------------------------------------
+    // -- bookmarks (M3/M6/M10) ---------------------------------------------
     define(
       'listBookmarks',
       'GET',
-      'Search / filter / page bookmarks. Case-insensitive search across title, url, excerpt and tag names; filters: collectionId, tag, domain, unassignedOnly, trashed, updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
+      'Search / filter / page bookmarks. Case-insensitive search across title, url, excerpt and tag names; filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, type (article|image|video|audio|document|book|link), updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
       [ListBookmarksQueryDto],
       (user, [query]) => bookmarks.list(user, query as ListBookmarksQueryDto),
     ),
@@ -112,14 +118,14 @@ export function buildToolCatalog(deps: {
     define(
       'createBookmark',
       'POST',
-      'Create a bookmark from a url (stored verbatim) plus optional title/excerpt/note. Duplicates of the same URL are allowed. Missing title/excerpt are filled asynchronously from the page (never overwriting provided values). Returns the full bookmark.',
+      'Create a bookmark from a url (stored verbatim) plus optional title/excerpt/note/favorite. Duplicates of the same URL are allowed. Missing title/excerpt and contentType are filled asynchronously from the page (never overwriting provided values). Returns the full bookmark.',
       [CreateBookmarkDto],
       (user, [dto]) => bookmarks.create(user, dto as CreateBookmarkDto),
     ),
     define(
       'updateBookmark',
       'PUT',
-      'Update a bookmark. PUT semantics: provided fields replace, explicit null clears, absent fields stay; a url change re-runs URL decomposition and refreshes cover/icon from the new page. Refuses trashed bookmarks.',
+      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle), explicit null clears, absent fields stay; a url change re-runs URL decomposition and refreshes cover/icon/contentType from the new page. Refuses trashed bookmarks.',
       [BookmarkIdParamDto, UpdateBookmarkDto],
       (user, [p, dto]) =>
         bookmarks.update(user, (p as BookmarkIdParamDto).id, dto as UpdateBookmarkDto),
@@ -168,14 +174,14 @@ export function buildToolCatalog(deps: {
     define(
       'reindexBookmark',
       'POST',
-      'Re-run the metadata/icon pipeline for one bookmark (202-style immediate "scheduled" answer; completion lands as a change event). Cover/icon are replaced, text only fills while still null.',
+      'Re-run the metadata/icon/content-type pipeline for one bookmark (202-style immediate "scheduled" answer; completion lands as a change event). Cover/icon/contentType are re-evaluated, text only fills while still null.',
       [BookmarkIdParamDto],
       (user, [p]) => metadata.reindex(user.id, (p as BookmarkIdParamDto).id),
     ),
     define(
       'getBookmarkStats',
       'GET',
-      'Bookmark counts: { total, unassigned, trashed } over the caller’s ACTIVE bookmarks.',
+      'Bookmark counts: { total, unassigned, trashed, favorites } over the caller’s bookmarks.',
       [],
       (user) => bookmarks.stats(user),
     ),
@@ -185,6 +191,41 @@ export function buildToolCatalog(deps: {
       'The caller’s tags with usage counts (ACTIVE bookmarks), sorted by name.',
       [],
       (user) => tags.listUsage(user.id),
+    ),
+
+    // -- highlights (M10 / D6) ---------------------------------------------
+    define(
+      'listHighlights',
+      'GET',
+      'List all highlights for one bookmark in chronological order (trashed bookmarks included). Returns { items }.',
+      [BookmarkIdParamDto],
+      (user, [p]) => highlights.list(user, (p as BookmarkIdParamDto).id),
+    ),
+    define(
+      'createHighlight',
+      'POST',
+      'Create a highlight on an active bookmark (text required, optional note and color). Emits a highlight:create change event.',
+      [BookmarkIdParamDto, CreateHighlightDto],
+      (user, [p, dto]) =>
+        highlights.create(user, (p as BookmarkIdParamDto).id, dto as CreateHighlightDto),
+    ),
+    define(
+      'updateHighlight',
+      'PUT',
+      'Update a highlight’s text, note, or color (explicit null clears note/color). Refuses highlights on trashed bookmarks.',
+      [HighlightIdParamDto, UpdateHighlightDto],
+      (user, [p, dto]) =>
+        highlights.update(user, (p as HighlightIdParamDto).id, dto as UpdateHighlightDto),
+    ),
+    define(
+      'deleteHighlight',
+      'DELETE',
+      'Permanently delete a highlight and emit a highlight:delete tombstone. Refuses highlights on trashed bookmarks.',
+      [HighlightIdParamDto],
+      async (user, [p]) => {
+        await highlights.delete(user, (p as HighlightIdParamDto).id);
+        return undefined;
+      },
     ),
 
     // -- tags (M3) ---------------------------------------------------------
@@ -302,11 +343,11 @@ export function buildToolCatalog(deps: {
       (user) => Promise.resolve(syncTickets.issue(user.id)),
     ),
 
-    // -- portability (M8) ----------------------------------------------------
+    // -- portability (M8/M10) ------------------------------------------------
     define(
       'exportData',
       'POST',
-      'Export the caller’s library. format: json (full fidelity — bookmarks incl. tags/collections/highlights section) | csv | html (Netscape) | txt (one url per line); optional collectionId scopes to that collection’s subtree. json answers structuredContent with the parsed document; the other formats answer the document as text content. Covers the ACTIVE library only (trash excluded). NOTE: POST at REST, so scope=read-only tokens cannot call it — list/changes tools cover reads instead.',
+      'Export the caller’s library. format: json (full fidelity — bookmarks incl. favorite/contentType/tags/collections/highlights) | csv | html (Netscape) | txt (one url per line); optional collectionId scopes to that collection’s subtree. json answers structuredContent with the parsed document; the other formats answer the document as text content. Covers the ACTIVE library only (trash excluded). NOTE: POST at REST, so scope=read-only tokens cannot call it — list/changes tools cover reads instead.',
       [ExportDataDto],
       async (user, [dto]) => {
         const request = dto as ExportDataDto;
@@ -329,7 +370,7 @@ export function buildToolCatalog(deps: {
     define(
       'importData',
       'POST',
-      'Import bookmarks: base64 `data` + explicit `format` (json = ArcDrop or Raindrop export, csv, html, txt, enex = Evernote web clips only, zip). Decoded cap 1 MiB — bigger uploads (25 MiB file / 300 MB zip) belong to REST POST /data/import. URL-keyed upsert (D13): existing → updated (last-write-wins on updatedAt, tags/memberships unioned), new → created; returns { created, updated, skipped[], errors[] }.',
+      'Import bookmarks: base64 `data` + explicit `format` (json = ArcDrop or Raindrop export, csv, html, txt, enex = Evernote web clips only, zip). Decoded cap 1 MiB — bigger uploads (25 MiB file / 300 MB zip) belong to REST POST /data/import. URL-keyed upsert (D13): existing → updated (last-write-wins on updatedAt, tags/memberships/highlights unioned), new → created; returns { created, updated, skipped[], errors[] }.',
       [ImportDataToolDto],
       (user, [dto]) => {
         const request = dto as ImportDataToolDto;
@@ -349,7 +390,7 @@ export function buildToolCatalog(deps: {
     define(
       'exportBookmarkHighlights',
       'GET',
-      'One bookmark’s highlights as txt (quoted text blocks, optional notes) or csv (header text,note,color,createdAt) — returned as the document text. Well-formed but empty until the highlight storage lands (M10).',
+      'One bookmark’s highlights as txt (quoted text blocks, optional notes) or csv (header text,note,color,createdAt) — returned as the document text.',
       [BookmarkIdParamDto, ExportHighlightsQueryDto],
       async (user, [p, q]) => {
         const download = await portability.exportBookmarkHighlights(

@@ -19,6 +19,7 @@ import { UserRateLimitService } from '@api/common/rate-limit/user-rate-limit.ser
 import { flatValidationErrors } from '@api/common/validation';
 import { AuditService } from '@api/audit/audit.service';
 import { BookmarksService } from '@api/bookmarks/bookmarks.service';
+import { HighlightsService } from '@api/bookmarks/highlights.service';
 import { TagsService } from '@api/bookmarks/tags.service';
 import { CollectionsService } from '@api/collections/collections.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
@@ -61,6 +62,7 @@ export class McpService implements OnModuleDestroy {
 
   constructor(
     bookmarks: BookmarksService,
+    highlights: HighlightsService,
     tags: TagsService,
     collections: CollectionsService,
     metadata: MetadataFetchService,
@@ -72,6 +74,7 @@ export class McpService implements OnModuleDestroy {
   ) {
     this.tools = buildToolCatalog({
       bookmarks,
+      highlights,
       tags,
       collections,
       metadata,

@@ -8,6 +8,22 @@ import {
 } from 'typeorm';
 
 /**
+ * Detected/classified content type for a bookmark (plan M10, Raindrop parity G7).
+ * Defaults to `'link'` until classified by the M6/M10 metadata pipeline.
+ */
+export const CONTENT_TYPES = [
+  'article',
+  'image',
+  'video',
+  'audio',
+  'document',
+  'book',
+  'link',
+] as const;
+
+export type ContentType = (typeof CONTENT_TYPES)[number];
+
+/**
  * The seven derived URL parts (plan D12). `domain` is the Public Suffix List
  * registrable domain (lowercased); `host` is the hostname WITHOUT port; the
  * port/query/fragment columns are `null` when absent. `null` fields are real
@@ -24,7 +40,7 @@ export interface UrlParts {
 }
 
 /**
- * A user's bookmark (plan M3, D12/D13).
+ * A user's bookmark (plan M3, D12/D13; enriched M10).
  *
  * - `url` is stored VERBATIM — never rewritten, never client-writable derived
  *   columns. The `urlParts` columns are derived on every url write via
@@ -37,6 +53,8 @@ export interface UrlParts {
 @Entity({ name: 'bookmarks' })
 @Index('IX_bookmarks_user_domain', ['userId', 'domain'])
 @Index('IX_bookmarks_user_host', ['userId', 'host'])
+@Index('IX_bookmarks_user_favorite', ['userId', 'favorite'])
+@Index('IX_bookmarks_user_content_type', ['userId', 'contentType'])
 export class Bookmark {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -56,6 +74,20 @@ export class Bookmark {
 
   @Column({ type: 'text', nullable: true })
   note!: string | null;
+
+  /** Star/favorite flag (M10, Raindrop parity G1). */
+  @Column({ type: 'boolean', default: false })
+  favorite!: boolean;
+
+  /** Classified content type (M10, Raindrop parity G7). */
+  @Column({
+    type: 'enum',
+    enum: CONTENT_TYPES,
+    enumName: 'bookmark_content_type',
+    name: 'content_type',
+    default: 'link',
+  })
+  contentType!: ContentType;
 
   /** Set by metadata fetching in M6; stays null until then. */
   @Column({ type: 'text', name: 'cover_ref', nullable: true })

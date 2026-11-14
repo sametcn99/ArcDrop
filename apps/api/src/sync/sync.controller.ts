@@ -2,13 +2,20 @@ import { Controller, Get, Post, Query } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
+  ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from '@api/auth/decorators/current-user.decorator';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
-import { GetSyncChangesQueryDto, SyncChangesDto, SyncStateDto, SyncTicketDto } from './sync.dto';
+import {
+  GetSyncChangesQueryDto,
+  HighlightSnapshotDto,
+  SyncChangesDto,
+  SyncStateDto,
+  SyncTicketDto,
+} from './sync.dto';
 import { SyncService } from './sync.service';
 import { SyncTicketService } from './sync-ticket.service';
 
@@ -23,6 +30,7 @@ import { SyncTicketService } from './sync-ticket.service';
  */
 @ApiTags('Sync')
 @ApiBearerAuth()
+@ApiExtraModels(HighlightSnapshotDto)
 @Controller('sync')
 export class SyncController {
   constructor(

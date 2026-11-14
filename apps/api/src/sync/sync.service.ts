@@ -2,9 +2,11 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { toBookmarkDto, BookmarksService } from '@api/bookmarks/bookmarks.service';
 import type { TagDto } from '@api/bookmarks/bookmarks.dto';
+import { toHighlightDto } from '@api/bookmarks/highlights.service';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
 import type { ChangeEntity } from '@api/database/entities/change-event.entity';
 import { Collection } from '@api/database/entities/collection.entity';
+import { Highlight } from '@api/database/entities/highlight.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import { queryRows } from '@api/database/query-rows';
 import { In, type DataSource } from 'typeorm';
@@ -28,7 +30,7 @@ import { MAX_SYNC_SEQ, needsResync } from './sync-resync';
  *
  * Snapshots are resolved at delta time: each returned event carries the
  * entity's CURRENT row for create/update (bookmarks reuse `BookmarkDto`
- * exactly — including `urlParts` and `tags`), and a `null` snapshot
+ * and highlights reuse `HighlightDto` exactly), and a `null` snapshot
  * (tombstone) for delete events — the row is gone; the event is what
  * tells the client it died. Soft delete (trash) is never a tombstone: the
  * snapshot's `deletedAt` carries that state.
@@ -133,7 +135,12 @@ export class SyncService {
       snapshot: null,
     }));
 
-    const wanted: Record<ChangeEntity, string[]> = { bookmark: [], tag: [], collection: [] };
+    const wanted: Record<ChangeEntity, string[]> = {
+      bookmark: [],
+      tag: [],
+      collection: [],
+      highlight: [],
+    };
     for (const change of changes) {
       if (change.action !== 'delete' && !wanted[change.entity].includes(change.id)) {
         wanted[change.entity].push(change.id);
@@ -150,6 +157,9 @@ export class SyncService {
     const collections = wanted.collection.length
       ? await manager.find(Collection, { where: { id: In(wanted.collection), userId } })
       : [];
+    const highlights = wanted.highlight.length
+      ? await manager.find(Highlight, { where: { id: In(wanted.highlight), userId } })
+      : [];
     const tagViews = wanted.bookmark.length
       ? await this.bookmarks.tagsForBookmarks(wanted.bookmark, manager)
       : new Map<string, TagDto[]>();
@@ -157,6 +167,7 @@ export class SyncService {
     const bookmarkById = new Map(bookmarks.map((row) => [row.id, row]));
     const tagById = new Map(tags.map((row) => [row.id, row]));
     const collectionById = new Map(collections.map((row) => [row.id, row]));
+    const highlightById = new Map(highlights.map((row) => [row.id, row]));
 
     for (const change of changes) {
       if (change.action === 'delete') continue;
@@ -194,6 +205,11 @@ export class SyncService {
               deletedAt: row.deletedAt ?? null,
             } satisfies CollectionSnapshotDto;
           }
+          break;
+        }
+        case 'highlight': {
+          const row = highlightById.get(change.id);
+          if (row) snapshot = toHighlightDto(row);
           break;
         }
       }

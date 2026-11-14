@@ -5,6 +5,7 @@ import { Bookmark } from '@api/database/entities/bookmark.entity';
 import { BookmarkCollection } from '@api/database/entities/bookmark-collection.entity';
 import { BookmarkTag } from '@api/database/entities/bookmark-tag.entity';
 import { Collection } from '@api/database/entities/collection.entity';
+import { Highlight } from '@api/database/entities/highlight.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import { ChangeLogService, type ChangeRecorder } from '@api/change-log/change-log.service';
 import { TagsService } from '@api/bookmarks/tags.service';
@@ -15,7 +16,7 @@ import { IsNull } from 'typeorm';
 import { pickFieldPatch } from './import-merge';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import type { EntityManager, DataSource } from 'typeorm';
-import type { ParsedBookmark, ParsedImport } from './import-model';
+import type { ParsedBookmark, ParsedHighlight, ParsedImport } from './import-model';
 import type { ImportSummaryDto } from '../portability.dto';
 
 /**
@@ -39,11 +40,14 @@ type PathCache = Map<string, string>; // 'a\u0000b\u0000c' → collection id
 
 const pathKey = (path: readonly string[]): string => path.join('\u0000');
 
+const highlightKey = (h: { text: string; note?: string | null; color?: string | null }): string =>
+  `${h.text}\u0000${h.note ?? ''}\u0000${h.color ?? ''}`;
+
 /**
- * The import upsert engine (plan M8, D13): every parsed item is written
+ * The import upsert engine (plan M8/M10, D13): every parsed item is written
  * through the normal domain rules — URL decomposition (D12), tag
- * ci-unique rules, on-demand collection creation from title paths, and a
- * `ChangeLogService` event per actual CHANGE (D4).
+ * ci-unique rules, on-demand collection creation from title paths, highlight
+ * persistence, and a `ChangeLogService` event per actual CHANGE (D4).
  *
  * Semantics (ratified by the orchestrator, documented in the README):
  * - URL-keyed upsert over ACTIVE rows only, exact verbatim `url` match;
@@ -52,7 +56,8 @@ const pathKey = (path: readonly string[]): string => path.join('\u0000');
  *   rule): an item older than the row never overwrites non-empty fields;
  *   empty/absent fields never overwrite anything; a null DB field is
  *   filled from the item regardless of age.
- * - Tags and collection memberships are UNIONED — import never detaches.
+ * - Tags, collection memberships, and highlights are UNIONED — import
+ *   never detaches or deletes existing entries.
  * - A matched bookmark counts as `updated` whether or not anything
  *   changed, but a change event is recorded ONLY when a field, tag or
  *   membership actually changed (a 1000-bookmark re-import must not
@@ -274,6 +279,8 @@ export class ImportUpsertService {
       title: item.title ?? null,
       excerpt: item.excerpt ?? null,
       note: item.note ?? null,
+      favorite: item.favorite ?? false,
+      contentType: item.contentType ?? 'link',
       coverRef: null,
       iconRef: null,
       ...parts,
@@ -291,6 +298,7 @@ export class ImportUpsertService {
       collectionCache,
       record,
     );
+    await this.applyHighlights(manager, user.id, id, [], item.highlights ?? [], record);
     return id;
   }
 
@@ -303,12 +311,29 @@ export class ImportUpsertService {
     record: ChangeRecorder,
   ): Promise<void> {
     // -- field merge: LWW on updatedAt, empty never overwrites --------------
-    const patch = pickFieldPatch(row, item);
+    const patch: Partial<Bookmark> = { ...pickFieldPatch(row, item) };
+    const itemUpdatedAtMs =
+      item.updatedAt !== undefined && item.updatedAt !== null ? Date.parse(item.updatedAt) : null;
+    const itemNewer =
+      itemUpdatedAtMs !== null &&
+      !Number.isNaN(itemUpdatedAtMs) &&
+      itemUpdatedAtMs > row.updatedAt.getTime();
+    if (item.favorite !== undefined && itemNewer && item.favorite !== row.favorite) {
+      patch.favorite = item.favorite;
+    }
+    if (
+      item.contentType !== undefined &&
+      item.contentType !== row.contentType &&
+      (row.contentType === 'link' || itemNewer)
+    ) {
+      patch.contentType = item.contentType;
+    }
+
     if (Object.keys(patch).length > 0) {
       await manager.update(Bookmark, { id: row.id }, patch); // bumps updatedAt
     }
 
-    // -- tags + memberships: UNION (import never detaches) ------------------
+    // -- tags + memberships + highlights: UNION (import never detaches) -----
     const currentTagRows: Array<{ id: string; name: string }> = await manager
       .createQueryBuilder(BookmarkTag, 'bt')
       .innerJoin(Tag, 't', 't.id = bt.tag_id')
@@ -319,6 +344,9 @@ export class ImportUpsertService {
     const currentCollectionRows = await manager.find(BookmarkCollection, {
       where: { bookmarkId: row.id },
       select: { collectionId: true },
+    });
+    const currentHighlightRows = await manager.find(Highlight, {
+      where: { bookmarkId: row.id, userId: user.id },
     });
 
     const changedTags = await this.applyTags(
@@ -336,6 +364,14 @@ export class ImportUpsertService {
       currentCollectionRows.map((m) => m.collectionId),
       item.collectionPaths ?? [],
       collectionCache,
+      record,
+    );
+    await this.applyHighlights(
+      manager,
+      user.id,
+      row.id,
+      currentHighlightRows,
+      item.highlights ?? [],
       record,
     );
 
@@ -410,6 +446,53 @@ export class ImportUpsertService {
       added = true;
     }
     return added;
+  }
+
+  /**
+   * Ensures imported highlights not already present on the bookmark are
+   * persisted (multiset-matched on `(text, note, color)` so re-imports
+   * produce zero duplicates and zero events). Each created highlight
+   * preserves its `createdAt` (when supplied) and emits `highlight:create`.
+   */
+  private async applyHighlights(
+    manager: EntityManager,
+    userId: string,
+    bookmarkId: string,
+    existing: readonly Highlight[],
+    incoming: readonly ParsedHighlight[],
+    record: ChangeRecorder,
+  ): Promise<void> {
+    if (incoming.length === 0) return;
+
+    const remaining = new Map<string, number>();
+    for (const h of existing) {
+      const key = highlightKey(h);
+      remaining.set(key, (remaining.get(key) ?? 0) + 1);
+    }
+
+    for (const h of incoming) {
+      const key = highlightKey(h);
+      const count = remaining.get(key) ?? 0;
+      if (count > 0) {
+        remaining.set(key, count - 1);
+        continue;
+      }
+
+      const id = randomUUID();
+      const createdAt =
+        h.createdAt !== undefined && h.createdAt !== null ? new Date(h.createdAt) : new Date();
+      await record(userId, { entity: 'highlight', entityId: id, action: 'create' });
+      await manager.insert(Highlight, {
+        id,
+        bookmarkId,
+        userId,
+        text: h.text,
+        note: h.note ?? null,
+        color: h.color ?? null,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
   }
 
   // -- post-import enrichment --------------------------------------------------

@@ -1,8 +1,9 @@
 /**
- * Page-metadata extraction (plan M6) — pure, dependency-free, unit-tested.
- * Reads `<title>`, `meta[name=description]`, `meta[property=og:image]` and
- * the first `<link rel~=icon>` out of an HTML document, resolving relative
- * URLs against the page's final URL.
+ * Page-metadata extraction (plan M6, extended M10) — pure, dependency-free,
+ * unit-tested. Reads `<title>`, `meta[name=description]`,
+ * `meta[property=og:image]`, `meta[property=og:type]` and the first
+ * `<link rel~=icon>` out of an HTML document, resolving relative URLs
+ * against the page's final URL.
  *
  * Deliberately regex-based, not a DOM: the fetcher already capped the body
  * at ~2 MB, head metadata sits in the first bytes of real pages, and a
@@ -16,6 +17,8 @@ export interface ParsedPageMetadata {
   description: string | null;
   /** Absolute URL of `og:image` (null when absent or unresolvable). */
   ogImage: string | null;
+  /** Value of `og:type` lowercased (null when absent). */
+  ogType: string | null;
   /** Absolute URL of the first icon link (null when absent or unresolvable). */
   favicon: string | null;
 }
@@ -97,6 +100,7 @@ export function parsePageMetadata(html: string, baseUrl: string): ParsedPageMeta
 
   let description: string | null = null;
   let ogImage: string | null = null;
+  let ogType: string | null = null;
   let favicon: string | null = null;
 
   for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
@@ -108,6 +112,10 @@ export function parsePageMetadata(html: string, baseUrl: string): ParsedPageMeta
     }
     if (key === 'og:image' && ogImage === null) {
       ogImage = resolveUrl(content, baseUrl);
+    }
+    if (key === 'og:type' && ogType === null) {
+      const cleaned = cleanText(content);
+      if (cleaned !== null) ogType = cleaned.toLowerCase();
     }
   }
 
@@ -125,5 +133,5 @@ export function parsePageMetadata(html: string, baseUrl: string): ParsedPageMeta
     if (favicon) break;
   }
 
-  return { title, description, ogImage, favicon };
+  return { title, description, ogImage, ogType, favicon };
 }

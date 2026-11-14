@@ -11,8 +11,8 @@ export const FETCH_DEADLINE_MS = 10_000;
 /** Redirect cap (ticket: 5). */
 export const MAX_REDIRECTS = 5;
 
-/** Content types a metadata (HTML) fetch may return. */
-const HTML_CONTENT_TYPES = new Set(['text/html', 'application/xhtml+xml']);
+/** Content types whose body carries HTML metadata. */
+export const HTML_CONTENT_TYPES = new Set(['text/html', 'application/xhtml+xml']);
 
 export interface FetchedDocument {
   status: number;
@@ -52,6 +52,8 @@ export interface SecureFetchOptions {
   allowedContentTypes?: ReadonlySet<string>;
   /** Prefix allowlist — used for icon fetches (`image/*`). */
   imageOnly?: boolean;
+  /** Read body ONLY if content-type is in `HTML_CONTENT_TYPES`; otherwise cancel body and return empty bytes. */
+  htmlBodyOnly?: boolean;
 }
 
 /**
@@ -98,6 +100,17 @@ export class SsrfSafeFetchService {
     return this.secureFetch(url, { ...opts, allowedContentTypes: HTML_CONTENT_TYPES });
   }
 
+  /**
+   * Fetches any HTTP(S) resource for M10 enrichment: if the response is
+   * HTML/XHTML, streams its body (≤2 MB) for metadata + og:type parsing;
+   * for any other Content-Type (image, video, audio, pdf, …), cancels the
+   * body immediately and returns the Content-Type + finalUrl for content-type
+   * classification.
+   */
+  fetchResource(url: string, opts: SecureFetchOptions = {}): Promise<FetchedDocument> {
+    return this.secureFetch(url, { ...opts, htmlBodyOnly: true });
+  }
+
   /** Fetches an image (cover / favicon → icon cache). */
   fetchImage(url: string, opts: SecureFetchOptions = {}): Promise<FetchedDocument> {
     return this.secureFetch(url, { ...opts, imageOnly: true });
@@ -108,7 +121,7 @@ export class SsrfSafeFetchService {
    * private addresses → fetch (manual redirects) → next hop or body.
    */
   private async secureFetch(url: string, opts: SecureFetchOptions): Promise<FetchedDocument> {
-    const { deadlineMs = FETCH_DEADLINE_MS, allowedContentTypes, imageOnly } = opts;
+    const { deadlineMs = FETCH_DEADLINE_MS, allowedContentTypes, imageOnly, htmlBodyOnly } = opts;
     const deadline = Date.now() + deadlineMs;
 
     let current = this.validatedUrl(url);
@@ -167,7 +180,11 @@ export class SsrfSafeFetchService {
             `unusable status ${response.status} from ${current.href}`,
           );
         }
-        return await this.readBody(response, current, { allowedContentTypes, imageOnly });
+        return await this.readBody(response, current, {
+          allowedContentTypes,
+          imageOnly,
+          htmlBodyOnly,
+        });
       } finally {
         clearTimeout(timer);
       }
@@ -229,7 +246,11 @@ export class SsrfSafeFetchService {
   private async readBody(
     response: Response,
     url: URL,
-    opts: { allowedContentTypes?: ReadonlySet<string>; imageOnly?: boolean },
+    opts: {
+      allowedContentTypes?: ReadonlySet<string>;
+      imageOnly?: boolean;
+      htmlBodyOnly?: boolean;
+    },
   ): Promise<FetchedDocument> {
     const contentType =
       (response.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
@@ -246,6 +267,10 @@ export class SsrfSafeFetchService {
         'content-type-refused',
         `content-type not an image: ${contentType || '(none)'}`,
       );
+    }
+    if (opts.htmlBodyOnly && !HTML_CONTENT_TYPES.has(contentType)) {
+      void response.body?.cancel().catch(() => {}); // headers are enough to classify non-HTML targets
+      return { status: response.status, contentType, bytes: new Uint8Array(0), finalUrl: url.href };
     }
 
     const contentLength = Number(response.headers.get('content-length'));

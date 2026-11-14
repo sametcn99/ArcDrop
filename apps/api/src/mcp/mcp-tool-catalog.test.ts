@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { buildToolCatalog, toolInputSchema } from './mcp-tool-catalog';
 import { dtoSchema } from './dto-schema';
 import type { BookmarksService } from '@api/bookmarks/bookmarks.service';
+import type { HighlightsService } from '@api/bookmarks/highlights.service';
 import type { TagsService } from '@api/bookmarks/tags.service';
 import type { CollectionsService } from '@api/collections/collections.service';
 import type { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
@@ -12,6 +13,7 @@ import type { SyncTicketService } from '@api/sync/sync-ticket.service';
 /** The catalog only ever dispatches — the services are type-level deps here. */
 const stubs = {} as {
   bookmarks: BookmarksService;
+  highlights: HighlightsService;
   tags: TagsService;
   collections: CollectionsService;
   metadata: MetadataFetchService;
@@ -20,7 +22,7 @@ const stubs = {} as {
   portability: PortabilityService;
 };
 
-/** The catalog per the tickets — M8 added the portability tools; highlights CRUD lands with the highlights REST surface (M10). */
+/** The catalog per the tickets — M8 added portability tools; M10 added highlights CRUD. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -33,6 +35,10 @@ const EXPECTED_TOOLS = [
   'reindexBookmark',
   'getBookmarkStats',
   'listBookmarkTags',
+  'listHighlights',
+  'createHighlight',
+  'updateHighlight',
+  'deleteHighlight',
   'renameTag',
   'deleteTag',
   'listCollections',
@@ -74,6 +80,7 @@ describe('MCP tool catalog (M7)', () => {
         'getBookmark',
         'getBookmarkStats',
         'listBookmarkTags',
+        'listHighlights',
         'listCollections',
         'getCollectionTree',
         'getCollection',

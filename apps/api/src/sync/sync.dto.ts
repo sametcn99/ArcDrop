@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
-import { BookmarkDto } from '@api/bookmarks/bookmarks.dto';
+import { BookmarkDto, HighlightDto } from '@api/bookmarks/bookmarks.dto';
 
 /** Page size for `/sync/changes` — above 200 is CLAMPED, like bookmark paging. */
 export const DEFAULT_SYNC_PAGE_SIZE = 100;
@@ -94,21 +94,24 @@ export class CollectionSnapshotDto {
   deletedAt!: Date | null;
 }
 
+export class HighlightSnapshotDto extends HighlightDto {}
+
 /**
  * The entity's current state at delta time: a full row for
- * create/update (bookmarks reuse `BookmarkDto` exactly — including
- * `urlParts` and `tags`), `null` for delete tombstones (and defensively
+ * create/update (bookmarks reuse `BookmarkDto` and highlights reuse
+ * `HighlightDto` exactly), `null` for delete tombstones (and defensively
  * whenever the row has vanished — the entity does not exist now).
  */
-export type SyncSnapshot = BookmarkDto | TagSnapshotDto | CollectionSnapshotDto | null;
+export type SyncSnapshot =
+  BookmarkDto | TagSnapshotDto | CollectionSnapshotDto | HighlightSnapshotDto | null;
 
 export class SyncChangeDto {
   /** Event seq (decimal string, bigint-safe). Strictly ascending across pages. */
   @ApiProperty({ example: '42' })
   seq!: string;
 
-  @ApiProperty({ enum: ['bookmark', 'tag', 'collection'] })
-  entity!: 'bookmark' | 'tag' | 'collection';
+  @ApiProperty({ enum: ['bookmark', 'tag', 'collection', 'highlight'] })
+  entity!: 'bookmark' | 'tag' | 'collection' | 'highlight';
 
   @ApiProperty({ format: 'uuid' })
   id!: string;
@@ -122,6 +125,7 @@ export class SyncChangeDto {
       { $ref: '#/components/schemas/BookmarkDto' },
       { $ref: '#/components/schemas/TagSnapshotDto' },
       { $ref: '#/components/schemas/CollectionSnapshotDto' },
+      { $ref: '#/components/schemas/HighlightSnapshotDto' },
     ],
     nullable: true,
     description: 'Current entity snapshot; null = tombstone (the entity no longer exists)',

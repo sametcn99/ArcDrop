@@ -72,6 +72,7 @@ interface StatsView {
   total: number;
   unassigned: number;
   trashed: number;
+  favorites: number;
 }
 
 interface AuthSession {
@@ -427,7 +428,7 @@ describe('Collections (e2e)', () => {
       const stats = await call<StatsView>(baseUrl, 'GET', '/bookmarks/stats', {
         bearer: admin.accessToken,
       });
-      expect(stats.body).toEqual({ total: 4, unassigned: 1, trashed: 0 });
+      expect(stats.body).toEqual({ total: 4, unassigned: 1, trashed: 0, favorites: 0 });
     });
 
     it('removes the bookmark from absent collections on the next sync (exact set)', async () => {

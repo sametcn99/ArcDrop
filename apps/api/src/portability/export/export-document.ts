@@ -1,14 +1,12 @@
 /**
- * The ArcDrop export model (plan M8). Export is user-scoped and covers the
- * ACTIVE library only (trash excluded — it auto-purges per D17); identities
- * (bookmark/collection/tag ids) are NOT exported: ids are meaningless across
- * instances, so relationships travel as tag NAMES and collection PATHS and
- * the importer re-links through them.
- *
- * The `highlights` field is part of the contract since M8 (the amended
- * ticket G4) — the storage lands in M10, so v1 exports always carry an
- * empty array per bookmark rather than dropping the section silently.
+ * The ArcDrop export model (plan M8, M10). Export is user-scoped and covers
+ * the ACTIVE library only (trash excluded — it auto-purges per D17);
+ * identities (bookmark/collection/tag/highlight ids) are NOT exported: ids
+ * are meaningless across instances, so relationships travel as tag NAMES and
+ * collection PATHS and the importer re-links through them.
  */
+import type { ContentType } from '@api/database/entities/bookmark.entity';
+import type { ExportHighlight } from './export-highlights';
 
 export const ARCDROP_EXPORT_FORMAT = 'arcdrop/v1';
 
@@ -25,14 +23,15 @@ export interface ExportBookmark {
   title: string | null;
   excerpt: string | null;
   note: string | null;
+  favorite?: boolean;
+  contentType?: ContentType;
   createdAt: string;
   updatedAt: string;
   /** Tag names, case-preserving display spellings, sorted. */
   tags: string[];
   /** Each membership as a root→leaf title path. */
   collections: string[][];
-  /** Contract placeholder until the M10 storage lands — always []. */
-  highlights: never[];
+  highlights: ExportHighlight[];
 }
 
 export interface ExportDocument {

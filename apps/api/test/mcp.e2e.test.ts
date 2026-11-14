@@ -179,6 +179,7 @@ async function wipeData(dataSource: DataSource): Promise<void> {
   await dataSource.query('DELETE FROM audit_log_entries');
   await dataSource.query('DELETE FROM personal_access_tokens');
   await dataSource.query('DELETE FROM change_events');
+  await dataSource.query('DELETE FROM highlights');
   await dataSource.query('DELETE FROM bookmark_tags');
   await dataSource.query('DELETE FROM bookmark_collections');
   await dataSource.query('DELETE FROM tags');
@@ -285,7 +286,7 @@ async function waitFor(
   throw new Error('expected change notification did not arrive within the deadline');
 }
 
-/** The catalog per the tickets — M8 added the portability tools; highlights CRUD lands with the highlights REST surface (M10). */
+/** The catalog per the tickets — M8 added portability tools; M10 added highlights CRUD. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -293,6 +294,10 @@ const EXPECTED_TOOLS = [
   'updateBookmark',
   'deleteBookmark',
   'restoreBookmark',
+  'listHighlights',
+  'createHighlight',
+  'updateHighlight',
+  'deleteHighlight',
   'replaceBookmarkTags',
   'replaceBookmarkCollections',
   'reindexBookmark',
@@ -559,7 +564,7 @@ describe('MCP server (e2e)', () => {
       ).tools;
       const byName = new Map(toolList.map((t) => [t.name, t]));
 
-      // schemas derive from the DTOs: createBookmark requires `url` with the DTO bounds
+      // schemas derive from the DTOs: createBookmark accepts quick-add query params or body fields
       const createSchema = byName.get('createBookmark')!.inputSchema;
       expect(createSchema['required'] as string[]).toEqual(['url']);
       expect(
@@ -745,7 +750,7 @@ describe('MCP server (e2e)', () => {
         }
       ).tools;
       const mutationTools = toolList.filter((t) => t.annotations.readOnlyHint === false);
-      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 10); // 10 read tools (M8 added exportBookmarkHighlights)
+      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 11); // 11 read tools (M10 added listHighlights)
 
       let checked = 0;
       for (const tool of mutationTools) {
@@ -762,7 +767,7 @@ describe('MCP server (e2e)', () => {
         expect(text).toContain(tool.name);
         checked += 1;
       }
-      expect(checked).toBe(17);
+      expect(checked).toBe(20);
 
       // read tools DO run for the same token
       const read = await mcpPost(
@@ -907,6 +912,157 @@ describe('MCP server (e2e)', () => {
       expect(mcpPath).toBeDefined();
       const operation = mcpPath['post'] ?? Object.values(mcpPath)[0]!;
       expect(operation.operationId).toBe('mcpStreamableHttp');
+    });
+
+    it('M10 MCP tools: highlights CRUD, updateBookmark favorite toggle, listBookmarks favorite/type filters', async () => {
+      const created = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(100, 'tools/call', {
+          name: 'createBookmark',
+          arguments: { url: 'https://www.youtube.com/watch?v=mcp-demo', title: 'MCP Video' },
+        }),
+        sessionId,
+      );
+      expect(created.message?.error).toBeUndefined();
+      const bookmark = created.message?.result?.['structuredContent'] as {
+        id: string;
+        favorite: boolean;
+        contentType: string;
+      };
+      expect(bookmark.favorite).toBe(false);
+      expect(bookmark.contentType).toBe('link');
+
+      // Toggle favorite via updateBookmark tool
+      const starred = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(101, 'tools/call', {
+          name: 'updateBookmark',
+          arguments: { id: bookmark.id, favorite: true },
+        }),
+        sessionId,
+      );
+      expect(starred.message?.error).toBeUndefined();
+      expect(
+        (starred.message?.result?.['structuredContent'] as { favorite: boolean }).favorite,
+      ).toBe(true);
+
+      // Filter listBookmarks by favorite and type
+      const filtered = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(102, 'tools/call', {
+          name: 'listBookmarks',
+          arguments: { favorite: true, type: 'link' },
+        }),
+        sessionId,
+      );
+      expect(filtered.message?.error).toBeUndefined();
+      const items = (
+        filtered.message?.result?.['structuredContent'] as { items: Array<{ id: string }> }
+      ).items;
+      expect(items.map((b) => b.id)).toContain(bookmark.id);
+
+      const typeMismatch = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(1021, 'tools/call', {
+          name: 'listBookmarks',
+          arguments: { favorite: true, type: 'video' },
+        }),
+        sessionId,
+      );
+      expect(typeMismatch.message?.error).toBeUndefined();
+      expect(
+        (typeMismatch.message?.result?.['structuredContent'] as { items: Array<{ id: string }> })
+          .items,
+      ).toEqual([]);
+
+      // Create highlight
+      const hlCreate = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(103, 'tools/call', {
+          name: 'createHighlight',
+          arguments: {
+            id: bookmark.id,
+            text: 'Key MCP passage',
+            note: 'Remember this',
+            color: 'yellow',
+          },
+        }),
+        sessionId,
+      );
+      expect(hlCreate.message?.error).toBeUndefined();
+      const hl = hlCreate.message?.result?.['structuredContent'] as {
+        id: string;
+        text: string;
+        note: string | null;
+        color: string | null;
+      };
+      expect(hl.text).toBe('Key MCP passage');
+      expect(hl.note).toBe('Remember this');
+      expect(hl.color).toBe('yellow');
+
+      // List highlights (read tool — works even with read-only PAT)
+      const hlList = await mcpPost(
+        baseUrl,
+        aliceReadOnlyPat.token,
+        rpcRequest(104, 'tools/call', {
+          name: 'listHighlights',
+          arguments: { id: bookmark.id },
+        }),
+        readOnlySession,
+      );
+      expect(hlList.message?.error).toBeUndefined();
+      const hlItems = (
+        hlList.message?.result?.['structuredContent'] as { items: Array<{ id: string }> }
+      ).items;
+      expect(hlItems.map((h) => h.id)).toEqual([hl.id]);
+
+      // Update highlight
+      const hlUpdate = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(105, 'tools/call', {
+          name: 'updateHighlight',
+          arguments: { id: hl.id, note: null, color: 'blue' },
+        }),
+        sessionId,
+      );
+      expect(hlUpdate.message?.error).toBeUndefined();
+      expect(hlUpdate.message?.result?.['structuredContent']).toMatchObject({
+        id: hl.id,
+        note: null,
+        color: 'blue',
+      });
+
+      // Delete highlight
+      const hlDelete = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(106, 'tools/call', {
+          name: 'deleteHighlight',
+          arguments: { id: hl.id },
+        }),
+        sessionId,
+      );
+      expect(hlDelete.message?.error).toBeUndefined();
+      expect(hlDelete.message?.result?.['isError']).toBeUndefined();
+
+      const hlAfter = await mcpPost(
+        baseUrl,
+        aliceReadOnlyPat.token,
+        rpcRequest(107, 'tools/call', {
+          name: 'listHighlights',
+          arguments: { id: bookmark.id },
+        }),
+        readOnlySession,
+      );
+      expect(
+        (hlAfter.message?.result?.['structuredContent'] as { items: unknown[] }).items,
+      ).toEqual([]);
     });
   });
 

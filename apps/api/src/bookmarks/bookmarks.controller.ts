@@ -20,10 +20,13 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { CurrentUser } from '@api/auth/decorators/current-user.decorator';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import { UserRateLimit } from '@api/common/rate-limit/user-rate-limit.decorator';
 import { UserRateLimitGuard } from '@api/common/rate-limit/user-rate-limit.guard';
+import { validationExceptionFactory } from '@api/common/validation';
 import { CollectionsService } from '@api/collections/collections.service';
 import {
   BookmarkCollectionsDto,
@@ -34,22 +37,27 @@ import {
   BookmarkIdParamDto,
   BookmarkListDto,
   BookmarkStatsDto,
+  CreateBookmarkBodyDto,
   CreateBookmarkDto,
+  CreateHighlightDto,
+  HighlightDto,
+  HighlightListDto,
   ListBookmarksQueryDto,
+  QuickAddBookmarkQueryDto,
   ReplaceBookmarkTagsDto,
   TagUsageDto,
   UpdateBookmarkDto,
 } from './bookmarks.dto';
 import { BookmarksService } from './bookmarks.service';
+import { HighlightsService } from './highlights.service';
 import { TagsService } from './tags.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 
 /**
- * Bookmark surface (plan M3). All routes are bearer-authenticated (global
- * guard) and user-scoped; `GET /bookmarks/tags` and `PUT /bookmarks/{id}/
- * tags` expose the tag views that live under the bookmarks resource, while
- * rename/merge/delete-by-name live on `/tags/{name}`.
+ * Bookmark surface (plan M3, extended M10). All routes are bearer-authenticated
+ * (global guard) and user-scoped; `GET /bookmarks/tags` and `PUT /bookmarks/{id}/tags`
+ * expose tags, `GET/POST /bookmarks/{id}/highlights` expose highlights.
  */
 @ApiTags('Bookmarks')
 @ApiBearerAuth()
@@ -58,6 +66,7 @@ export class BookmarksController {
   constructor(
     private readonly bookmarks: BookmarksService,
     private readonly tags: TagsService,
+    private readonly highlights: HighlightsService,
     private readonly collections: CollectionsService,
     private readonly metadata: MetadataFetchService,
   ) {}
@@ -65,14 +74,32 @@ export class BookmarksController {
   @Post()
   @ApiOperation({
     operationId: 'createBookmark',
-    summary: 'Create a bookmark (duplicates of the same URL are allowed)',
+    summary: 'Create a bookmark (JSON body or quick-add query params)',
     description:
       'Stores the URL verbatim and derives the filterable URL parts server-side ' +
-      '(plan D12). Saving the same URL twice creates two bookmarks (plan D13).',
+      '(plan D12). Saving the same URL twice creates two bookmarks (plan D13). ' +
+      'Supports quick-add query params (`?url=…&title=…&collection=…`) for RSS readers ' +
+      'and share sheets using the same validation and metadata pipeline.',
   })
   @ApiCreatedResponse({ type: BookmarkDto })
-  create(@CurrentUser() user: RequestUser, @Body() dto: CreateBookmarkDto): Promise<BookmarkDto> {
-    return this.bookmarks.create(user, dto);
+  async create(
+    @CurrentUser() user: RequestUser,
+    @Body() body: CreateBookmarkBodyDto,
+    @Query() query: QuickAddBookmarkQueryDto,
+  ): Promise<BookmarkDto> {
+    const merged = {
+      url: body.url ?? query.url,
+      title: body.title !== undefined ? body.title : query.title,
+      excerpt: body.excerpt !== undefined ? body.excerpt : query.excerpt,
+      note: body.note !== undefined ? body.note : query.note,
+      favorite: body.favorite !== undefined ? body.favorite : query.favorite,
+    };
+    const dto = plainToInstance(CreateBookmarkDto, merged);
+    const errors = await validate(dto, { whitelist: true });
+    if (errors.length > 0) {
+      throw validationExceptionFactory(errors);
+    }
+    return this.bookmarks.create(user, dto, query.collection);
   }
 
   @Get()
@@ -83,6 +110,7 @@ export class BookmarksController {
       'Case-insensitive ILIKE search across title, url, excerpt and tag names. ' +
       '`collectionId` matches bookmarks with a membership in that collection ' +
       '(the collection itself may be trashed — membership is membership). ' +
+      'Supports `favorite` and `type` content-type filters. ' +
       '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc ' +
       '(default), `createdAt` desc or `title` asc.',
   })
@@ -97,7 +125,7 @@ export class BookmarksController {
   @Get('stats')
   @ApiOperation({
     operationId: 'getBookmarkStats',
-    summary: 'Bookmark counts: total, unassigned, trashed',
+    summary: 'Bookmark counts: total, unassigned, trashed, favorites',
   })
   @ApiOkResponse({ type: BookmarkStatsDto })
   stats(@CurrentUser() user: RequestUser): Promise<BookmarkStatsDto> {
@@ -170,6 +198,34 @@ export class BookmarksController {
     return this.bookmarks.restore(user, params.id);
   }
 
+  @Get(':id/highlights')
+  @ApiOperation({
+    operationId: 'listHighlights',
+    summary: 'List a bookmark’s highlights (trashed bookmarks included)',
+  })
+  @ApiOkResponse({ type: HighlightListDto })
+  listHighlights(
+    @CurrentUser() user: RequestUser,
+    @Param() params: BookmarkIdParamDto,
+  ): Promise<HighlightListDto> {
+    return this.highlights.list(user, params.id);
+  }
+
+  @Post(':id/highlights')
+  @ApiOperation({
+    operationId: 'createHighlight',
+    summary: 'Add a highlight to a bookmark (plan D6)',
+    description: 'Refuses trashed or unknown bookmarks (404). Records a `highlight:create` event.',
+  })
+  @ApiCreatedResponse({ type: HighlightDto })
+  createHighlight(
+    @CurrentUser() user: RequestUser,
+    @Param() params: BookmarkIdParamDto,
+    @Body() dto: CreateHighlightDto,
+  ): Promise<HighlightDto> {
+    return this.highlights.create(user, params.id, dto);
+  }
+
   @Put(':id/tags')
   @ApiOperation({
     operationId: 'replaceBookmarkTags',
@@ -217,7 +273,7 @@ export class BookmarksController {
     summary: 'Re-run the metadata/icon pipeline for one bookmark (plan M6)',
     description:
       'Schedules an SSRF-hardened re-scrape in `refresh` mode: coverRef/iconRef ' +
-      'are replaced from the page on success; title/excerpt are only filled while ' +
+      'and contentType are updated from the target on success; title/excerpt are only filled while ' +
       'still null (client data is never overwritten — clear a field with an ' +
       'explicit null first to have it re-filled). The bookmark is updated ' +
       'asynchronously; completion records a `bookmark:update` change event so ' +

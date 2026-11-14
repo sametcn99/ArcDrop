@@ -16,7 +16,7 @@ import { ExportHighlightsQueryDto } from './portability.dto';
 import { PortabilityService } from './portability.service';
 
 /**
- * `GET /bookmarks/{id}/highlights/export` (plan M8, Raindrop parity G4).
+ * `GET /bookmarks/{id}/highlights/export` (plan M8/M10, Raindrop parity G4).
  *
  * Lives on the portability module (it is an export route) while exposing
  * the /bookmarks/{id} resource path — a second controller beside
@@ -35,13 +35,11 @@ export class HighlightsExportController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     operationId: 'exportBookmarkHighlights',
-    summary: 'Export a bookmark’s highlights as txt or csv (plan M8, Raindrop parity G4)',
+    summary: 'Export a bookmark’s highlights as txt or csv (plan M8/M10, Raindrop parity G4)',
     description:
       'Download: `format=txt` (quoted text blocks with optional `- note:` ' +
-      'lines) or `format=csv` (header text,note,color,createdAt). Well-formed ' +
-      'but EMPTY until the highlight storage lands in M10 — the download ' +
-      'shape is the contract. Unknown bookmarks are 404s (trash state ' +
-      'included — GET semantics mirror `GET /bookmarks/{id}`).',
+      'lines) or `format=csv` (header text,note,color,createdAt). Unknown ' +
+      'bookmarks are 404s (trash state included — GET semantics mirror `GET /bookmarks/{id}`).',
   })
   @ApiProduces('text/plain', 'text/csv')
   @ApiOkResponse({

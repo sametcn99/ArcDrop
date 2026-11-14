@@ -13,15 +13,17 @@ import { installTestEnv } from './helpers';
 import { buildTestZip } from './zip-builder';
 
 /**
- * M8 — Portability. Everything runs against real Postgres through the real
- * app. Covers every ticket AC: the JSON round-trip identity, double-import
- * idempotency (all `updated`, zero `created`), the Raindrop + Netscape
- * fixtures with nested collections preserved, TXT + ENEX (web clips only,
- * regular notes skipped and counted), a ZIP of mixed supported files, the
- * per-bookmark highlights downloads (well-formed, empty until M10), sync
- * visibility from a pre-import cursor, the 413 cap (isolated boot), the
- * 409 single-concurrent-import lock, the upsert merge semantics, scope
- * exports, and the three new MCP tools incl. read-only refusals.
+ * M8 — Portability (completed with M10 highlights contract closure).
+ * Everything runs against real Postgres through the real app. Covers every
+ * ticket AC: the JSON round-trip identity (incl. real highlight rows and
+ * favorite), double-import idempotency (all `updated`, zero `created`, zero
+ * duplicate highlights), the Raindrop + Netscape fixtures with nested
+ * collections preserved, TXT + ENEX (web clips only, regular notes skipped and
+ * counted), a ZIP of mixed supported files, the per-bookmark highlights
+ * downloads with real rows, sync visibility from a pre-import cursor, the
+ * 413 cap (isolated boot), the 409 single-concurrent-import lock, the upsert
+ * merge semantics, scope exports, and the portability MCP tools incl.
+ * read-only refusals.
  */
 
 // -- boot + generic REST helpers (same shape as the other suites) -------------
@@ -78,10 +80,22 @@ interface BookmarkView {
   title: string | null;
   excerpt: string | null;
   note: string | null;
+  favorite: boolean;
+  contentType: string;
   tags: Array<{ id: string; name: string }>;
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+}
+
+interface HighlightView {
+  id: string;
+  bookmarkId: string;
+  text: string;
+  note: string | null;
+  color: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface BookmarkListView {
@@ -104,7 +118,18 @@ interface ExportJsonView {
   scope: { collectionId: string; collectionPath: string[] } | null;
   collections: Array<{ path: string[] }>;
   tags: string[];
-  bookmarks: Array<{ url: string; title: string | null; highlights: unknown[] }>;
+  bookmarks: Array<{
+    url: string;
+    title: string | null;
+    favorite?: boolean;
+    contentType?: string;
+    highlights: Array<{
+      text: string;
+      note?: string | null;
+      color?: string | null;
+      createdAt: string;
+    }>;
+  }>;
 }
 
 interface SyncChangesView {
@@ -200,6 +225,7 @@ async function wipeLibrary(dataSource: DataSource): Promise<void> {
   // Data tables only — users/settings/auth survive (import continues the
   // same user's sync seq; that is exactly the sync-contract situation).
   await dataSource.query('DELETE FROM change_events');
+  await dataSource.query('DELETE FROM highlights');
   await dataSource.query('DELETE FROM bookmark_tags');
   await dataSource.query('DELETE FROM bookmark_collections');
   await dataSource.query('DELETE FROM tags');
@@ -383,7 +409,7 @@ describe('Portability (e2e)', () => {
     });
     const b2 = await call<{ id: string }>(baseUrl, 'POST', '/bookmarks', {
       bearer: alice.accessToken,
-      body: { url: 'https://rust.example/book', title: 'Rust Book' },
+      body: { url: 'https://rust.example/book', title: 'Rust Book', favorite: true },
     });
     const b3 = await call<{ id: string }>(baseUrl, 'POST', '/bookmarks', {
       bearer: alice.accessToken,
@@ -405,15 +431,35 @@ describe('Portability (e2e)', () => {
       bearer: alice.accessToken,
       body: { collectionIds: [rust.body.id] },
     });
+
+    // Real highlight rows on guide (M10 contract closure).
+    const h1 = await call(baseUrl, 'POST', `/bookmarks/${b1.body.id}/highlights`, {
+      bearer: alice.accessToken,
+      body: { text: 'Important paragraph', note: 'Review later', color: 'yellow' },
+    });
+    expect(h1.status).toBe(201);
+    const h2 = await call(baseUrl, 'POST', `/bookmarks/${b1.body.id}/highlights`, {
+      bearer: alice.accessToken,
+      body: { text: 'Second highlight' },
+    });
+    expect(h2.status).toBe(201);
+
     return {
       collectionIds: { work: work.body.id, rust: rust.body.id, play: play.body.id },
       bookmarkIds: { guide: b1.body.id, book: b2.body.id, loose: b3.body.id },
     };
   }
 
-  it('round-trip: export JSON → wipe → import → identical library', async () => {
+  it('round-trip: export JSON → wipe → import → identical library (incl. highlights + favorite)', async () => {
     const built = await buildLibrary();
-    void built;
+    const originalHighlights = await call<{ items: HighlightView[] }>(
+      baseUrl,
+      'GET',
+      `/bookmarks/${built.bookmarkIds.guide}/highlights`,
+      { bearer: alice.accessToken },
+    );
+    expect(originalHighlights.status).toBe(200);
+    expect(originalHighlights.body.items).toHaveLength(2);
 
     const exported = await exportData(baseUrl, alice.accessToken, { format: 'json' });
     expect(exported.status).toBe(200);
@@ -424,10 +470,23 @@ describe('Portability (e2e)', () => {
       expect.arrayContaining([['Work'], ['Work', 'Rust'], ['Play']]),
     );
     expect(document.bookmarks).toHaveLength(3);
-    // The highlights contract section is present per bookmark (empty until M10).
-    for (const bookmark of document.bookmarks) {
-      expect(Array.isArray(bookmark['highlights'])).toBe(true);
-    }
+
+    const exportedGuide = document.bookmarks.find(
+      (b) => b.url === 'https://docs.example/guide?page=2#setup',
+    )!;
+    expect(exportedGuide.highlights).toHaveLength(2);
+    expect(exportedGuide.highlights[0]).toMatchObject({
+      text: 'Important paragraph',
+      note: 'Review later',
+      color: 'yellow',
+    });
+    expect(exportedGuide.highlights[1]).toMatchObject({
+      text: 'Second highlight',
+      note: null,
+      color: null,
+    });
+    const exportedBook = document.bookmarks.find((b) => b.url === 'https://rust.example/book')!;
+    expect(exportedBook.favorite).toBe(true);
 
     await wipeLibrary(boot.dataSource);
     const imported = asSummary(
@@ -449,7 +508,7 @@ describe('Portability (e2e)', () => {
     const playNode = tree.body.find((node: CollectionNodeView) => node.title === 'Play')!;
     expect(playNode).toBeDefined();
 
-    // -- identical: bookmarks (fields, tags, memberships, timestamps) ----------
+    // -- identical: bookmarks (fields, favorite, highlights, tags, memberships) --
     const list = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks?pageSize=50', {
       bearer: alice.accessToken,
     });
@@ -460,13 +519,43 @@ describe('Portability (e2e)', () => {
     expect(guide.title).toBe('The Guide');
     expect(guide.excerpt).toBe('how to');
     expect(guide.note).toBe('re-read chapter 3');
+    expect(guide.favorite).toBe(false);
     expect(guide.tags.map((t: { id: string; name: string }) => t.name).sort()).toEqual([
       'Work',
       'reading',
     ]);
+
+    const rustBook = list.body.items.find(
+      (b: BookmarkView) => b.url === 'https://rust.example/book',
+    )!;
+    expect(rustBook.favorite).toBe(true);
+
+    // Highlights round-tripped identically (M10 contract closure).
+    const restoredHighlights = await call<{ items: HighlightView[] }>(
+      baseUrl,
+      'GET',
+      `/bookmarks/${guide.id}/highlights`,
+      { bearer: alice.accessToken },
+    );
+    expect(restoredHighlights.status).toBe(200);
+    expect(restoredHighlights.body.items).toHaveLength(2);
+    expect(
+      restoredHighlights.body.items.map((h) => ({
+        text: h.text,
+        note: h.note,
+        color: h.color,
+        createdAt: new Date(h.createdAt).toISOString(),
+      })),
+    ).toEqual(
+      originalHighlights.body.items.map((h) => ({
+        text: h.text,
+        note: h.note,
+        color: h.color,
+        createdAt: new Date(h.createdAt).toISOString(),
+      })),
+    );
+
     // Multi-membership survived: the guide lists under Work AND Work/Rust.
-    // (Resolve the RECREATED collection ids — the wipe re-rolls identities;
-    // membership re-links through the title paths.)
     const flat = await call<{ items: CollectionNodeView[] }>(baseUrl, 'GET', '/collections', {
       bearer: alice.accessToken,
     });
@@ -491,6 +580,23 @@ describe('Portability (e2e)', () => {
       'https://docs.example/guide?page=2#setup',
     );
     expect(inRust.body.items.map((b) => b.url)).toContain('https://rust.example/book');
+
+    // Re-importing the identical JSON document is idempotent: zero duplicates!
+    const reimported = asSummary(
+      await upload(baseUrl, alice.accessToken, 'arcdrop-export.json', exported.body),
+    );
+    expect(reimported.created).toBe(0);
+    expect(reimported.updated).toBe(3);
+    expect(reimported.errors).toHaveLength(0);
+    expect(reimported.skipped).toHaveLength(0);
+
+    const afterReimport = await call<{ items: HighlightView[] }>(
+      baseUrl,
+      'GET',
+      `/bookmarks/${guide.id}/highlights`,
+      { bearer: alice.accessToken },
+    );
+    expect(afterReimport.body.items).toHaveLength(2);
   });
 
   it('double import: second run reports all `updated`, zero `created`', async () => {
@@ -913,26 +1019,46 @@ describe('Portability (e2e)', () => {
     expect(list.body.items[0]!.title).toBe('Reimported');
   });
 
-  it('highlights export: txt and csv downloads are well-formed (empty until M10)', async () => {
-    const list = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks?pageSize=1', {
+  it('highlights export: txt and csv downloads carry real highlight rows (and handle empty + 404)', async () => {
+    const list = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks?search=docs.example', {
       bearer: alice.accessToken,
     });
-    const bookmarkId = list.body.items[0]!.id as string;
+    const guideId = list.body.items[0]!.id as string;
 
-    const txt = await fetch(
-      `${baseUrl}/api/v1/bookmarks/${bookmarkId}/highlights/export?format=txt`,
-      { headers: { authorization: `Bearer ${alice.accessToken}` } },
-    );
+    const txt = await fetch(`${baseUrl}/api/v1/bookmarks/${guideId}/highlights/export?format=txt`, {
+      headers: { authorization: `Bearer ${alice.accessToken}` },
+    });
     expect(txt.status).toBe(200);
     expect(txt.headers.get('content-type')).toContain('text/plain');
     expect(txt.headers.get('content-disposition')).toContain('highlights.txt');
+    const txtBody = await txt.text();
+    expect(txtBody).toContain('"Important paragraph"');
+    expect(txtBody).toContain('note: Review later');
+    expect(txtBody).toContain('"Second highlight"');
 
-    const csv = await fetch(
-      `${baseUrl}/api/v1/bookmarks/${bookmarkId}/highlights/export?format=csv`,
+    const csv = await fetch(`${baseUrl}/api/v1/bookmarks/${guideId}/highlights/export?format=csv`, {
+      headers: { authorization: `Bearer ${alice.accessToken}` },
+    });
+    expect(csv.status).toBe(200);
+    const csvBody = await csv.text();
+    expect(csvBody).toMatch(/^text,note,color,createdAt\r\n/);
+    expect(csvBody).toContain('Important paragraph,Review later,yellow,');
+    expect(csvBody).toContain('Second highlight,,,');
+
+    // Empty highlights bookmark still returns well-formed empty download.
+    const looseList = await call<BookmarkListView>(
+      baseUrl,
+      'GET',
+      '/bookmarks?search=loose.example',
+      { bearer: alice.accessToken },
+    );
+    const looseId = looseList.body.items[0]!.id as string;
+    const emptyCsv = await fetch(
+      `${baseUrl}/api/v1/bookmarks/${looseId}/highlights/export?format=csv`,
       { headers: { authorization: `Bearer ${alice.accessToken}` } },
     );
-    expect(csv.status).toBe(200);
-    expect(await csv.text()).toBe('text,note,color,createdAt\r\n');
+    expect(emptyCsv.status).toBe(200);
+    expect(await emptyCsv.text()).toBe('text,note,color,createdAt\r\n');
 
     const missing = await fetch(
       `${baseUrl}/api/v1/bookmarks/00000000-0000-4000-8000-000000000000/highlights/export?format=txt`,
@@ -1025,7 +1151,7 @@ describe('Portability (e2e)', () => {
     expect(list.body.totalCount).toBe(2500); // REST-visible — agent as any client
   }, 30_000);
 
-  it('MCP: exportData returns the document; json carries structuredContent', async () => {
+  it('MCP: exportData returns the document; exportBookmarkHighlights serves real rows', async () => {
     const pat = await createPat(baseUrl, alice.accessToken, 'export-agent');
     const session = await mcpInitialize(baseUrl, pat.token);
 
@@ -1040,18 +1166,24 @@ describe('Portability (e2e)', () => {
     const txtDocument = (txt.structuredContent as { document: string }).document;
     expect(txtDocument).toContain('https://mcp-import.example/page/0\n');
 
-    // exportBookmarkHighlights (GET → readable by any token): a real bookmark
-    // id, the well-formed empty download until M10 lands the storage.
+    // exportBookmarkHighlights (GET → readable by any token) with a real highlight row.
     const list = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks?pageSize=1', {
       bearer: alice.accessToken,
     });
+    const targetId = list.body.items[0]!.id;
+    const createdHl = await call(baseUrl, 'POST', `/bookmarks/${targetId}/highlights`, {
+      bearer: alice.accessToken,
+      body: { text: 'MCP exported snippet', note: 'via M10', color: 'green' },
+    });
+    expect(createdHl.status).toBe(201);
+
     const highlights = await callTool(baseUrl, session, 22, 'exportBookmarkHighlights', {
-      id: list.body.items[0]!.id,
+      id: targetId,
       format: 'csv',
     });
-    expect((highlights.structuredContent as { body: string }).body).toBe(
-      'text,note,color,createdAt\r\n',
-    );
+    const body = (highlights.structuredContent as { body: string }).body;
+    expect(body).toMatch(/^text,note,color,createdAt\r\n/);
+    expect(body).toContain('MCP exported snippet,via M10,green,');
   });
 
   it('MCP: read-only tokens refuse importData and exportData, read exportBookmarkHighlights', async () => {
