@@ -118,7 +118,11 @@ export default function PublicSharePage() {
             )}
 
             {hasMore ? (
-              <Button variant="outlined" onClick={() => void loadMore()} data-testid="public-share-load-more">
+              <Button
+                variant="outlined"
+                onClick={() => void loadMore()}
+                data-testid="public-share-load-more"
+              >
                 {S.loadMore}
               </Button>
             ) : null}

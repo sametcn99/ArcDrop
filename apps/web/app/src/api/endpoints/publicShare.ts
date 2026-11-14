@@ -1,8 +1,5 @@
 import { apiClient, type ApiClient } from '../client';
-import {
-  publicCollectionPageSchema,
-  type PublicCollectionPage,
-} from '../schemas/publicShare';
+import { publicCollectionPageSchema, type PublicCollectionPage } from '../schemas/publicShare';
 
 export function createPublicShareApi(client: ApiClient = apiClient) {
   return {
@@ -19,9 +16,7 @@ export function createPublicShareApi(client: ApiClient = apiClient) {
     },
 
     rssUrl(shareToken: string): string {
-      return client.resolveUrl(
-        `/public/collections/${encodeURIComponent(shareToken)}/rss`,
-      );
+      return client.resolveUrl(`/public/collections/${encodeURIComponent(shareToken)}/rss`);
     },
   };
 }

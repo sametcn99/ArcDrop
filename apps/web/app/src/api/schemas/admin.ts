@@ -61,10 +61,8 @@ export interface AuditLogFilters {
 
 // Compile-time structural alignment checks against generated OpenAPI schemas.
 const _entryCheck: components['schemas']['AuditLogEntryDto'] | undefined = undefined as
-  | AuditLogEntry
-  | undefined;
+  AuditLogEntry | undefined;
 const _inviteCheck: components['schemas']['OneTimeTokenDto'] | undefined = undefined as
-  | OneTimeToken
-  | undefined;
+  OneTimeToken | undefined;
 void _entryCheck;
 void _inviteCheck;

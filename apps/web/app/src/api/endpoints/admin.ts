@@ -21,7 +21,10 @@ export function createAdminApi(client: ApiClient = apiClient) {
       return result.items;
     },
 
-    async createUser(input: { email: string; role: 'admin' | 'user' }): Promise<CreateUserResponse> {
+    async createUser(input: {
+      email: string;
+      role: 'admin' | 'user';
+    }): Promise<CreateUserResponse> {
       return client.post('/admin/users', input, {
         schema: createUserResponseSchema,
       });
@@ -35,13 +38,9 @@ export function createAdminApi(client: ApiClient = apiClient) {
     },
 
     async resetUserPassword(userId: string): Promise<ResetPasswordResponse> {
-      return client.post(
-        `/admin/users/${encodeURIComponent(userId)}/reset-password`,
-        undefined,
-        {
-          schema: resetPasswordResponseSchema,
-        },
-      );
+      return client.post(`/admin/users/${encodeURIComponent(userId)}/reset-password`, undefined, {
+        schema: resetPasswordResponseSchema,
+      });
     },
 
     async listAuditLogs(filters: AuditLogFilters = {}): Promise<AuditLogList> {

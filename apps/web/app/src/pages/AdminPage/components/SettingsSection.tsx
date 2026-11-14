@@ -81,8 +81,16 @@ export function SettingsSection() {
               {S.settings.registrationHelper}
             </Typography>
             <Stack direction="row" spacing={2} sx={{ rowGap: 2, flexWrap: 'wrap' }}>
-              {numberField('trashRetentionDays', S.settings.trashRetentionDays, 'admin-settings-trash-retention')}
-              {numberField('changeLogRetentionDays', S.settings.changeLogRetentionDays, 'admin-settings-changelog-retention')}
+              {numberField(
+                'trashRetentionDays',
+                S.settings.trashRetentionDays,
+                'admin-settings-trash-retention',
+              )}
+              {numberField(
+                'changeLogRetentionDays',
+                S.settings.changeLogRetentionDays,
+                'admin-settings-changelog-retention',
+              )}
             </Stack>
             <TextField
               select
@@ -101,9 +109,17 @@ export function SettingsSection() {
               ))}
             </TextField>
             <Stack direction="row" spacing={2} sx={{ rowGap: 2, flexWrap: 'wrap' }}>
-              {numberField('archiveMaxBytes', S.settings.archiveMaxBytes, 'admin-settings-archive-cap')}
+              {numberField(
+                'archiveMaxBytes',
+                S.settings.archiveMaxBytes,
+                'admin-settings-archive-cap',
+              )}
               {numberField('fileMaxBytes', S.settings.fileMaxBytes, 'admin-settings-file-cap')}
-              {numberField('monthlyUploadQuotaBytes', S.settings.monthlyUploadQuotaBytes, 'admin-settings-quota')}
+              {numberField(
+                'monthlyUploadQuotaBytes',
+                S.settings.monthlyUploadQuotaBytes,
+                'admin-settings-quota',
+              )}
             </Stack>
             <Stack direction="row">
               <Button

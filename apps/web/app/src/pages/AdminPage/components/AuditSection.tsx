@@ -45,7 +45,11 @@ export function AuditSection() {
     <Card variant="outlined" data-testid="admin-audit-section">
       <CardContent>
         <Typography variant="h6">{S.audit.heading}</Typography>
-        <Stack direction="row" spacing={2} sx={{ mt: 2, rowGap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Stack
+          direction="row"
+          spacing={2}
+          sx={{ mt: 2, rowGap: 2, flexWrap: 'wrap', alignItems: 'center' }}
+        >
           <TextField
             size="small"
             label={S.audit.filterAction}
@@ -60,7 +64,10 @@ export function AuditSection() {
             label={S.audit.filterActorType}
             value={draft.actorType}
             onChange={(e) =>
-              setDraft((prev) => ({ ...prev, actorType: e.target.value as FilterDraft['actorType'] }))
+              setDraft((prev) => ({
+                ...prev,
+                actorType: e.target.value as FilterDraft['actorType'],
+              }))
             }
             sx={{ minWidth: 120 }}
           >

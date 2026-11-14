@@ -15,8 +15,7 @@ export const ADMIN_PAGE_STRINGS = {
     disable: 'Disable',
     enable: 'Enable',
     reset: 'Reset password',
-    resetOnce:
-      'Reset token shown once. The user sets a new password at /claim before it expires.',
+    resetOnce: 'Reset token shown once. The user sets a new password at /claim before it expires.',
     disabled: 'Disabled',
     totpOn: '2FA',
     createdToast: (email: string) => `User ${email} created.`,

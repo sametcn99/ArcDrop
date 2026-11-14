@@ -27,7 +27,16 @@ export function PublicBookmarkCard({ bookmark }: PublicBookmarkCardProps) {
           </Typography>
         </Stack>
         {bookmark.excerpt ? (
-          <Typography variant="body2" color="text.secondary" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          <Typography
+            variant="body2"
+            color="text.secondary"
+            sx={{
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}
+          >
             {bookmark.excerpt}
           </Typography>
         ) : null}

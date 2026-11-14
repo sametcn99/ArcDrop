@@ -30,8 +30,7 @@ export type CreatePersonalAccessTokenInput = z.infer<typeof createPersonalAccess
 
 // Compile-time structural alignment checks against generated OpenAPI schemas.
 const _patCheck: components['schemas']['PersonalAccessTokenDto'] | undefined = undefined as
-  | PersonalAccessToken
-  | undefined;
+  PersonalAccessToken | undefined;
 const _createdPatCheck: components['schemas']['CreatedPersonalAccessTokenDto'] | undefined =
   undefined as CreatedPersonalAccessToken | undefined;
 void _patCheck;

@@ -50,10 +50,8 @@ export type PublicCollectionPage = z.infer<typeof publicCollectionPageSchema>;
 
 // Compile-time structural alignment checks against generated OpenAPI schemas.
 const _pageCheck: components['schemas']['PublicCollectionPageDto'] | undefined = undefined as
-  | PublicCollectionPage
-  | undefined;
+  PublicCollectionPage | undefined;
 const _bookmarkCheck: components['schemas']['PublicBookmarkDto'] | undefined = undefined as
-  | PublicBookmark
-  | undefined;
+  PublicBookmark | undefined;
 void _pageCheck;
 void _bookmarkCheck;

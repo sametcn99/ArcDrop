@@ -56,7 +56,11 @@ export function UsersSection() {
     status: 'active' | 'disabled',
     userEmail: string,
   ) => {
-    const ok = await updateUserStatusAction(userId, status === 'active' ? 'disabled' : 'active', userEmail);
+    const ok = await updateUserStatusAction(
+      userId,
+      status === 'active' ? 'disabled' : 'active',
+      userEmail,
+    );
     if (ok) {
       await refresh();
     }
@@ -72,7 +76,10 @@ export function UsersSection() {
   return (
     <Card variant="outlined" data-testid="admin-users-section">
       <CardContent>
-        <Stack direction="row" sx={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
+        <Stack
+          direction="row"
+          sx={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}
+        >
           <Typography variant="h6">{S.users.heading}</Typography>
           <Button
             variant="contained"
@@ -136,9 +143,7 @@ export function UsersSection() {
                         <Button
                           size="small"
                           color={user.status === 'active' ? 'error' : 'success'}
-                          onClick={() =>
-                            void handleToggleStatus(user.id, user.status, user.email)
-                          }
+                          onClick={() => void handleToggleStatus(user.id, user.status, user.email)}
                           data-testid={`admin-users-toggle-${user.id}`}
                         >
                           {user.status === 'active' ? S.users.disable : S.users.enable}

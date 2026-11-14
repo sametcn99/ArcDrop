@@ -136,7 +136,9 @@ export function ApiTokensSection() {
                   <Stack spacing={0.5}>
                     <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                       <Typography variant="body1">{token.name}</Typography>
-                      {token.readOnly ? <Chip size="small" variant="outlined" label="read-only" /> : null}
+                      {token.readOnly ? (
+                        <Chip size="small" variant="outlined" label="read-only" />
+                      ) : null}
                     </Stack>
                     <Typography variant="caption" color="text.secondary">
                       {token.lastUsedAt

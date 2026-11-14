@@ -137,7 +137,10 @@ export function TwoFactorSection() {
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1, alignItems: 'center' }}>
             {setup ? (
-              <Box sx={{ p: 1.5, bgcolor: 'background.paper', borderRadius: 1 }} data-testid="settings-tfa-qr">
+              <Box
+                sx={{ p: 1.5, bgcolor: 'background.paper', borderRadius: 1 }}
+                data-testid="settings-tfa-qr"
+              >
                 <QRCodeSVG value={setup.otpauthUri} size={192} />
               </Box>
             ) : null}
@@ -145,7 +148,11 @@ export function TwoFactorSection() {
               Scan with your authenticator app, or enter the secret manually:
             </Typography>
             {setup ? (
-              <Typography variant="body2" sx={{ fontFamily: 'mono.fontFamily', wordBreak: 'break-all' }} data-testid="settings-tfa-secret">
+              <Typography
+                variant="body2"
+                sx={{ fontFamily: 'mono.fontFamily', wordBreak: 'break-all' }}
+                data-testid="settings-tfa-secret"
+              >
                 {setup.secret}
               </Typography>
             ) : null}
@@ -171,12 +178,7 @@ export function TwoFactorSection() {
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={disableOpen}
-        onClose={() => setDisableOpen(false)}
-        maxWidth="xs"
-        fullWidth
-      >
+      <Dialog open={disableOpen} onClose={() => setDisableOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>{S.security.tfaDisableButton}</DialogTitle>
         <DialogContent>
           <TextField

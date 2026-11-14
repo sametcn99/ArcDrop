@@ -39,8 +39,7 @@ export const SETTINGS_PAGE_STRINGS = {
   },
   notifications: {
     heading: 'Notifications',
-    description:
-      'Reminders arrive as toasts while you are connected and pile up here for later.',
+    description: 'Reminders arrive as toasts while you are connected and pile up here for later.',
     unreadCount: (count: number) => `${count} unread`,
     markAll: 'Mark all as read',
     empty: 'No notifications yet.',

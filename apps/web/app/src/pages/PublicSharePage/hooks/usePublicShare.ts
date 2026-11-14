@@ -49,9 +49,7 @@ export function usePublicShare(): PublicShareState {
     const nextPage = page.page + 1;
     try {
       const result = await publicShareApi.getPublicCollection(token ?? '', nextPage, page.pageSize);
-      setPage((prev) =>
-        prev ? { ...result, items: [...prev.items, ...result.items] } : result,
-      );
+      setPage((prev) => (prev ? { ...result, items: [...prev.items, ...result.items] } : result));
     } catch {
       // pagination failures keep the current content; user can retry
     }
