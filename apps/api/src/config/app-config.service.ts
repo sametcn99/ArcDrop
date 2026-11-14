@@ -73,6 +73,21 @@ export class AppConfigService {
     return this.config.portability.importZipMaxBytes;
   }
 
+  /** M9 per-user import rate limit per minute. */
+  get rateLimitImportPerMinute(): number {
+    return this.config.rateLimit.importPerMinute;
+  }
+
+  /** M9 per-user reindex rate limit per minute. */
+  get rateLimitReindexPerMinute(): number {
+    return this.config.rateLimit.reindexPerMinute;
+  }
+
+  /** M9 per-user MCP tools/call rate limit per minute. */
+  get rateLimitMcpToolsPerMinute(): number {
+    return this.config.rateLimit.mcpToolsPerMinute;
+  }
+
   get logLevel(): string {
     return this.config.log.level;
   }

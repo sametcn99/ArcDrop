@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from '@api/audit/audit.module';
 import { AuthModule } from '@api/auth/auth.module';
 import { OneTimeToken } from '@api/database/entities/one-time-token.entity';
 import { RefreshToken } from '@api/database/entities/refresh-token.entity';
@@ -9,7 +10,7 @@ import { UsersService } from './users.service';
 
 /** Admin surface for user management (plan D3/D15) — relies on AuthModule's TokenService and global guards. */
 @Module({
-  imports: [TypeOrmModule.forFeature([User, OneTimeToken, RefreshToken]), AuthModule],
+  imports: [TypeOrmModule.forFeature([User, OneTimeToken, RefreshToken]), AuthModule, AuditModule],
   controllers: [AdminUsersController],
   providers: [UsersService],
 })

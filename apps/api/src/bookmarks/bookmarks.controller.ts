@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -21,6 +22,8 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '@api/auth/decorators/current-user.decorator';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
+import { UserRateLimit } from '@api/common/rate-limit/user-rate-limit.decorator';
+import { UserRateLimitGuard } from '@api/common/rate-limit/user-rate-limit.guard';
 import { CollectionsService } from '@api/collections/collections.service';
 import {
   BookmarkCollectionsDto,
@@ -207,6 +210,8 @@ export class BookmarksController {
 
   @Post(':id/reindex')
   @HttpCode(HttpStatus.ACCEPTED)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('reindex')
   @ApiOperation({
     operationId: 'reindexBookmark',
     summary: 'Re-run the metadata/icon pipeline for one bookmark (plan M6)',
@@ -217,7 +222,8 @@ export class BookmarksController {
       'explicit null first to have it re-filled). The bookmark is updated ' +
       'asynchronously; completion records a `bookmark:update` change event so ' +
       'devices refetch. Refuses unknown and trashed bookmarks (404). The response ' +
-      'is immediate — it says "scheduled", not "done".',
+      'is immediate — it says "scheduled", not "done". Per-user rate limit: ' +
+      '30/min (configurable).',
   })
   @ApiAcceptedResponse({
     type: ReindexBookmarkResponseDto,

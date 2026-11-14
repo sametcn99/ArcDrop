@@ -57,6 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     'metadata',
     'mcp',
     'portability',
+    'rateLimit',
     'log',
   ]) {
     if (collected[section] === undefined) collected[section] = {};

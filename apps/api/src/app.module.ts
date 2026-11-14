@@ -20,24 +20,27 @@ import { SyncModule } from './sync/sync.module';
 import { McpModule } from './mcp/mcp.module';
 import { PortabilityModule } from './portability/portability.module';
 import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
+import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 
 /**
  * ArcDrop API root module (plan M1 — API foundation, M2 — auth & users,
  * M3 — bookmarks core, M4 — collections, M5 — sync, M6 — metadata & icons,
- * M7 — MCP server + personal access tokens + audit, M8 — portability).
+ * M7 — MCP server + personal access tokens + audit, M8 — portability,
+ * M9 — hardening & ops).
  *
  * Import order matters for DI resolution: config first, then logging (so the
  * pino-backed Nest logger exists before anything logs), then infrastructure
  * and features. `ThrottlerModule` is global; its guard is registered inside
  * `AuthModule` (as the first APP_GUARD, ahead of auth/pat-scope/roles).
- * `ScheduleModule` hosts the trash-purge cron (plan D17), the change-log
- * retention cron (plan D4) and the icon-eviction cron (plan M6).
+ * `RateLimitModule` provides per-user budgets for expensive authenticated
+ * routes (`import`, `reindex`, `mcpTools`).
  */
 @Module({
   imports: [
     AppConfigModule,
     LoggingModule,
     DatabaseModule,
+    RateLimitModule,
     // Global default: 100 requests per minute per IP. `/auth/*` overrides
     // this with a strict 10/min (see AuthController).
     ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 100 }] }),

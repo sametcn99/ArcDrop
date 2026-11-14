@@ -8,6 +8,11 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import { Logger } from 'nestjs-pino';
 import type { AppConfig } from '@api/config/env.schema';
 import { AppConfigService } from '@api/config/app-config.service';
+import {
+  enrichOpenApiWithProblemResponses,
+  ProblemDetailsDto,
+  ProblemFieldErrorDto,
+} from '@api/common/problem-json/problem-details.dto';
 import { createValidationPipe } from '@api/common/validation';
 import { MetricsService } from '@api/metrics/metrics.service';
 import pkg from '../package.json';
@@ -25,12 +30,16 @@ export function setupApp(app: INestApplication, config: AppConfig): void {
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(createValidationPipe());
-  // JSON body limit: 2 MB (registered BEFORE Nest installs its default
-  // parsers, so this replaces the 100 KB default — express.json skips a
-  // request whose body was already parsed). Sized for the MCP import tool
-  // (1 MiB decoded payload + base64 overhead + tool-call envelope); M9
-  // hardening re-examines global limits with real traffic numbers.
-  app.use(json({ limit: '2mb' }));
+  // Route-scoped JSON body limits (M9 revisit of M8's 2 MB global cap):
+  // Only `/api/v1/mcp` accepts base64-encoded import payloads (1 MiB decoded +
+  // base64 + JSON-RPC envelope -> 2 MB). All other JSON endpoints carry small
+  // DTOs and stay capped at 256 KB; multipart imports use their own upload
+  // byte caps (`ARCDROP__PORTABILITY__IMPORT*_MAX_BYTES`).
+  // `express.json` skips requests already marked `req._body = true`, so
+  // mounting `/api/v1/mcp` first gives it 2 MB and lets the 256 KB fallback
+  // handle the rest of the API.
+  app.use('/api/v1/mcp', json({ limit: '2mb' }));
+  app.use(json({ limit: '256kb' }));
   // The sync ws gateway (M5) rides the same HTTP server via the raw-`ws`
   // adapter. Must be set before init — same discipline as the routes below.
   app.useWebSocketAdapter(new WsAdapter(app));
@@ -62,6 +71,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addTag('Auth', 'Bootstrap, login, refresh rotation, sessions, invite/reset claim')
     .addTag('Users', 'Admin user management (invite/reset tokens via API, plan D15)')
     .addTag('Settings', 'Admin instance settings (plan D16)')
+    .addTag('Audit', 'Admin audit trail over admin actions and MCP tool calls (plan M9)')
     .addTag('Bookmarks', 'Bookmark CRUD, trash/restore, search + paging, stats, per-bookmark tags')
     .addTag('Tags', 'Tag rename/merge and delete-detach (plan M3)')
     .addTag('Sync', 'Change-log sync: state poll, cursor deltas, ws push + tickets (plan M5/D4)')
@@ -73,10 +83,13 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       'Export/import: JSON/CSV/HTML/TXT/ENEX/ZIP with URL-keyed upsert (plan M8)',
     )
     .addTag('MCP', 'Model Context Protocol endpoint: the app surface as agent tools (plan M7/D23)')
-    // Bearer auth (plan D2): `Authorization: Bearer <access JWT>`.
+    // Bearer auth (plan D2): `Authorization: Bearer <access JWT>` (or PAT where allowed).
     .addBearerAuth()
     .build();
-  return SwaggerModule.createDocument(app, openApiConfig);
+  const document = SwaggerModule.createDocument(app, openApiConfig, {
+    extraModels: [ProblemDetailsDto, ProblemFieldErrorDto],
+  });
+  return enrichOpenApiWithProblemResponses(document);
 }
 
 export interface InfrastructureRoutesOptions {

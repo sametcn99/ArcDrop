@@ -2,23 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M8 — portability (M1 foundation + first-run admin bootstrap,
-bearer JWT auth with rotating refresh tokens and reuse detection, sessions,
-admin user management with single-use invite/reset tokens, DB-backed instance
-settings, route throttling; M3 bookmark CRUD with URL decomposition, tags,
-server-side search/paging/stats, trash with auto-purge, and the per-user
-change log; M4 hierarchical collections with the nested tree, membership
-sync, cycle protection, ordering — all change-logged; M5 the sync backbone:
-`/sync/state`, `/sync/changes` cursor deltas, the ws push gateway with
-one-time tickets, and the change-log retention job; M6 the SSRF-hardened
-metadata pipeline with the async enrichment on create/url-change, the
-public unguessable icon cache + serve route, per-bookmark reindex, the
-icon-eviction job and the backfill CLI; M7 personal access tokens for
-agents, the MCP server at `/api/v1/mcp` exposing the whole user surface as
-tools, per-PAT rate budget, and the audit log for tool calls; M8 the
-portability surface — export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with
-the URL-keyed upsert, per-user import lock, streaming downloads, and the
-matching MCP tools). Next: M9 — hardening & ops.
+**Status:** M9 — hardening & ops (**Wave 1 complete: M0–M9**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (27 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP; plus M9 per-user expensive-route rate limits, `GET /admin/audit` read surface + M2 admin auditing, route-scoped JSON body caps (256 KB REST / 2 MB MCP), OpenAPI `problem+json` sweep, hardened `compose.yaml`, `docs/backup-restore.md`, and `scripts/load-smoke.ts`. **Next:** Wave 2 — M10 (highlights entity + favorites + content types).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -38,6 +22,7 @@ collections, sync, metadata & icons, MCP, portability, hardening & ops.
 | `bun run migration:revert`   | Build, then revert the last migration                                         |
 | `bun run migration:generate` | Build, then generate a migration (see Migration workflow)                     |
 | `bun run backfill:metadata`  | Build, then backfill metadata/icons for pre-M6 bookmarks (see the M6 section) |
+| `bun run load:smoke`         | Run M9 scripted rate-limit & correlation smoke test against a live server     |
 
 Repo-root scripts (`bun run dev`, `bun run lint`, `bun test`, …) proxy into this app.
 
@@ -103,7 +88,8 @@ docker rm -f arcdrop-e2e-pg   # throw it away afterwards
   and tool-level failures are `CallToolResult { isError: true }`, not problem+json.
 - **Correlation:** request id = incoming `x-request-id` (or a minted UUID), echoed on
   every response and attached to request logs, error logs, and problem bodies.
-- **Docs:** OpenAPI 3 at `/openapi.json`, Scalar UI at `/docs` (the UI bundle comes
+- **Body limits:** global REST JSON bodies are capped at **256 KB** (`413 PAYLOAD_TOO_LARGE` `application/problem+json`, with malformed JSON mapped to `400 BAD_REQUEST`); `/api/v1/mcp` is route-scoped to **2 MB** for base64 MCP `importData` payloads; multipart uploads on `POST /api/v1/data/import` enforce streaming `ARCDROP__PORTABILITY__IMPORT*_MAX_BYTES`.
+- **Docs:** OpenAPI 3 at `/openapi.json` (enriched with `ProblemDetailsDto` schemas and `application/problem+json` error examples across all routes), Scalar UI at `/docs` (the UI bundle comes
   from the jsdelivr CDN; the document itself is served locally — codegen never needs
   the network). Metrics (optional) at `/metrics`.
 
@@ -184,6 +170,8 @@ bun run migration:revert     # undo the last one
 ```sh
 docker compose up --build        # from the repo root
 ```
+
+Compose is hardened for self-hosting (M9): resource limits/reservations (`api`: 1G/1.0 CPU, `db`: 512M/1.0 CPU), `no-new-privileges:true`, graceful stop periods, JSON log rotation (`10m` x 5), and healthchecks on both services. Production backup, restore, upgrade, and Caddy/Nginx TLS reverse-proxy guides live in [`docs/backup-restore.md`](docs/backup-restore.md).
 
 ## Bookmarks core (M3 — D4, D5, D10, D12, D13, D17)
 
@@ -1277,6 +1265,52 @@ tests in lockstep by wiring new app-level concerns THERE.
   canonical decimal string (≤ 19 digits, no leading zeros); a regex-valid
   cursor beyond the pg bigint ceiling short-circuits to `resyncRequired`
   BEFORE any SQL cast (no 500s from client-supplied cursors).
+
+## Hardening, Audit & Self-Host Ops (M9)
+
+### Rate limits (verified under load)
+
+- **Global IP throttle:** `100/min` per controller handler per IP (`ThrottlerGuard`).
+- **Strict auth throttle:** `10/min` per IP on `/api/v1/auth/*` login/bootstrap/refresh/claim endpoints.
+- **Public icon cache throttle:** `300/min` per IP on `GET /api/v1/icons/{id}`.
+- **Per-PAT shared budget:** `ARCDROP__MCP__PAT_REQUESTS_PER_MINUTE` (default `300/min`) shared across REST and `/api/v1/mcp`.
+- **Per-user expensive-route limits (`UserRateLimitGuard`):**
+  - `POST /api/v1/data/import` & MCP `importData`: `30/min` (`ARCDROP__RATE_LIMIT__IMPORT_PER_MINUTE`)
+  - `POST /api/v1/bookmarks/{id}/reindex` & MCP `reindexBookmark`: `30/min` (`ARCDROP__RATE_LIMIT__REINDEX_PER_MINUTE`)
+  - MCP `tools/call`: `300/min` (`ARCDROP__RATE_LIMIT__MCP_TOOLS_PER_MINUTE`)
+- **Smoke load script:** `ARCDROP_SMOKE_URL=http://127.0.0.1:3000 bun run load:smoke` exercises auth, reindex, global IP, PAT REST+MCP shared limits, 413 body limit, and end-to-end `x-request-id` correlation.
+
+### Admin audit surface & M2 action auditing
+
+- **Endpoint:** `GET /api/v1/admin/audit` (`operationId: listAuditLogs`) — admin session only (regular users and all PATs receive `403`), ordered newest-first (`createdAt DESC, id DESC`), paged (`page`, `pageSize` clamped to 200), filterable by `action`, `actorUserId`, `actorType`, `outcome`, `subject`, `since`, `until`.
+- **Coverage:** M7 MCP `mcp.tools.call` entries plus M2 admin operations (`admin.user.create`, `admin.user.update`, `admin.user.reset_password`, `admin.settings.update`), recording both `ok` and `error` outcomes. Invite/reset token secrets are **never** written to `audit_log_entries.detail`.
+
+### Self-Host Operational Checklist
+
+1. **Required env vars:** set `ARCDROP__DATABASE__URL` and `ARCDROP__JWT__SECRET` (min 32 random hex/base64 chars, e.g. `openssl rand -hex 32`). Keep `ARCDROP__METADATA__ALLOW_PRIVATE=false` outside tests.
+2. **First-run bootstrap:** start Compose (`docker compose up -d`), wait for `GET /api/v1/readyz` (`200`), then call `POST /api/v1/auth/bootstrap` once with the initial admin email/password (subsequent calls return `409`).
+3. **Retention knobs (DB-backed via `PUT /api/v1/admin/settings`):**
+   - `trashRetentionDays` (default `30`, min `1`) — hard-purge job runs daily at `03:00`.
+   - `changeLogRetentionDays` (default `90`, min `1`) — sync compaction runs daily at `04:00`.
+   - Icon orphan eviction runs daily at `05:00` (and rides along after trash purge).
+4. **Logs:** structured pino JSON written to stdout (collected by Docker `json-file` driver with `max-size: 10m`, `max-file: 5`). Set `ARCDROP__LOG__LEVEL` (`info` default, `debug`/`trace` for troubleshooting, `warn`/`error` for quiet prod). Authorization headers and cookies are redacted; `x-request-id` threads request → response → error logs → `problem.requestId`.
+5. **Reverse-proxy TLS & backups:** deploy behind Caddy or Nginx terminating TLS (see [`docs/backup-restore.md`](docs/backup-restore.md)); run regular `pg_dump -Fc` + `arcdrop-data` volume backups together.
+6. **Dependency policy:** runtime dependencies in `apps/api/package.json` are pinned to exact `bun.lock` versions; `bun audit --audit-level=high` is clean and the production container (`bun install --production`) ships zero dev/ESLint packages.
+7. **Security revisits (M9):**
+   - _SSRF DNS-rebinding (M6):_ Bun 1.4.2 `fetch()` lacks a custom DNS lookup hook; documented residual risk & operational egress-firewall/DNS mitigations in [`docs/backup-restore.md`](docs/backup-restore.md#revisit-1--ssrf-fetcher-dns-rebinding-window-from-m6).
+   - _JSON body limit (M8):_ tightened global JSON cap to `256 KB`, scoped `2 MB` strictly to `/api/v1/mcp`.
+
+## Wave-2 Handoff (for M10+)
+
+Wave 1 (M0–M9) is complete and green (263 unit / 148 e2e tests). Wave 2 starts with **M10 (highlights entity + favorites + content types)**:
+
+- **Highlights hooks already waiting in Wave-1 code:**
+  - Add the `Highlight` entity + migration + REST surface (`GET/POST /bookmarks/{id}/highlights`, `PUT/DELETE /highlights/{id}`), using plain `deleted_at` (no `@DeleteDateColumn`) if soft-deleted and `ChangeLogService.transact` for sync events.
+  - Wire `PortabilityService.exportBookmarkHighlights` (marked `M10 HOOK`) and replace the skip counter in `parseArcDropDocument` / `ImportUpsertService` with highlight persistence; the JSON/TXT/CSV export contracts are already fixed and tested.
+  - Extend `src/mcp/mcp-tool-catalog.ts` and `EXPECTED_TOOLS` in `test/mcp.e2e.test.ts` for every new authenticated non-admin REST route — the CI parity test fails otherwise.
+- **Metadata & content types:** `src/metadata/` separates `SsrfSafeFetchService` (security boundary — keep all private-IP & redirect-hop checks intact), `parsePageMetadata`, `IconCacheService`, and `MetadataFetchService`.
+- **Guard & OpenAPI conventions:** global guards run `ThrottlerGuard → JwtAuthGuard → PatScopeGuard → RolesGuard`; apply `@UseGuards(UserRateLimitGuard)` + `@UserRateLimit(...)` on new expensive routes; every route needs `@ApiOperation({ operationId, summary })`, and `enrichOpenApiWithProblemResponses` in `src/app-setup.ts` injects standard `application/problem+json` schemas/examples automatically.
+- **Migration & Bun bundle discipline:** keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, and test `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
 
 ## Decisions recorded (M4)
 

@@ -1,11 +1,16 @@
 name: arcdrop
 
-# ArcDrop API + PostgreSQL 16 bundle (plan D1/D8/D11).
+# ArcDrop API + PostgreSQL 16 bundle (plan D1/D8/D11, hardened M9).
 #   docker compose up --build
 # The API service migrates on boot (TypeORM CLI) and reports readiness at
 # /api/v1/readyz; compose healthchecks gate on it. Override the variables
 # below via your shell or a .env file next to this compose file (see
-# .env.example).
+# apps/api/.env.example).
+#
+# Production TLS note: ArcDrop serves plain HTTP/WS on port 3000 and assumes
+# a reverse proxy (Caddy / Nginx — see apps/api/docs/backup-restore.md)
+# terminates TLS. Bind `127.0.0.1:3000:3000` if the proxy runs on the same
+# host and you do not want port 3000 exposed directly.
 
 services:
   api:
@@ -13,6 +18,9 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    stop_grace_period: 15s
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       db:
         condition: service_healthy
@@ -31,6 +39,19 @@ services:
       - '3000:3000'
     volumes:
       - arcdrop-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     healthcheck:
       # bun is already in the image — no extra tooling needed for probing.
       test:
@@ -48,12 +69,28 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-arcdrop}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-arcdrop}
       POSTGRES_DB: ${POSTGRES_DB:-arcdrop}
     volumes:
       - arcdrop-pgdata:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-arcdrop} -d ${POSTGRES_DB:-arcdrop}']
       interval: 5s

@@ -89,6 +89,40 @@ describe('ProblemJsonFilter', () => {
     expect(body.errors).toEqual([{ field: 'name', messages: ['name must be a string'] }]);
   });
 
+  it('maps Express body-parser PayloadTooLargeError (413) to problem+json', () => {
+    const { filter, host, capture } = createHost('/api/v1/bookmarks', 'req-413');
+    const err = Object.assign(new Error('request entity too large'), {
+      status: 413,
+      statusCode: 413,
+      type: 'entity.too.large',
+    });
+    filter.catch(err, host);
+
+    expect(capture.statusCode).toBe(413);
+    expect(capture.contentType).toBe('application/problem+json; charset=utf-8');
+    const body = capture.body!;
+    expect(body.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(body.status).toBe(413);
+    expect(body.requestId).toBe('req-413');
+  });
+
+  it('maps Express body-parser SyntaxError (entity.parse.failed) to 400 problem+json', () => {
+    const { filter, host, capture } = createHost('/api/v1/bookmarks', 'req-400');
+    const err = Object.assign(new SyntaxError('Unexpected token b in JSON'), {
+      status: 400,
+      statusCode: 400,
+      type: 'entity.parse.failed',
+    });
+    filter.catch(err, host);
+
+    expect(capture.statusCode).toBe(400);
+    expect(capture.contentType).toBe('application/problem+json; charset=utf-8');
+    const body = capture.body!;
+    expect(body.code).toBe('BAD_REQUEST');
+    expect(body.detail).toBe('Malformed JSON request body');
+    expect(body.requestId).toBe('req-400');
+  });
+
   it('does nothing when headers are already sent', () => {
     const { filter, host, capture } = createHost('/api/v1/stream', undefined, true);
     filter.catch(new NotFoundException(), host);

@@ -15,6 +15,7 @@ import {
 import { validate } from 'class-validator';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import { problemForStatus } from '@api/common/problem-json/problem-codes';
+import { UserRateLimitService } from '@api/common/rate-limit/user-rate-limit.service';
 import { flatValidationErrors } from '@api/common/validation';
 import { AuditService } from '@api/audit/audit.service';
 import { BookmarksService } from '@api/bookmarks/bookmarks.service';
@@ -67,6 +68,7 @@ export class McpService implements OnModuleDestroy {
     syncTickets: SyncTicketService,
     portability: PortabilityService,
     private readonly audit: AuditService,
+    private readonly rateLimiter: UserRateLimitService,
   ) {
     this.tools = buildToolCatalog({
       bookmarks,
@@ -165,9 +167,10 @@ export class McpService implements OnModuleDestroy {
   /**
    * One tool call. Order of checks (each audited): unknown tool → protocol
    * error; read-only refusal → spec-compliant tool error result; argument
-   * validation (same DTO pipeline as REST) → protocol error; service call →
-   * domain failures (404/409/…) are tool error results, unknown throws are
-   * protocol-level internal errors.
+   * validation (same DTO pipeline as REST) → protocol error; expensive
+   * per-user tool budgets (import/reindex) + service call → domain failures
+   * (404/409/429…) are tool error results, unknown throws are protocol-level
+   * internal errors.
    */
   private async dispatchToolCall(
     name: string,
@@ -227,6 +230,13 @@ export class McpService implements OnModuleDestroy {
     }
 
     try {
+      // Share expensive per-user rate budgets with the REST endpoints so MCP
+      // callers cannot bypass import or reindex caps.
+      if (name === 'importData') {
+        this.rateLimiter.assertWithinLimit('import', principal.id);
+      } else if (name === 'reindexBookmark') {
+        this.rateLimiter.assertWithinLimit('reindex', principal.id);
+      }
       const result = await tool.run(principal, instances as object[]);
       this.audit.recordToolCall({ principal, tool: name, outcome: 'ok', args, requestId });
       if (result === undefined) {

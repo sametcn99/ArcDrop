@@ -25,6 +25,7 @@ function makeConfig(dataDir: string): AppConfig {
     metadata: { enabled: false, allowPrivate: false },
     mcp: { patRequestsPerMinute: 300 },
     portability: { importMaxBytes: 26_214_400, importZipMaxBytes: 314_572_800 },
+    rateLimit: { importPerMinute: 30, reindexPerMinute: 30, mcpToolsPerMinute: 300 },
     log: { level: 'fatal' },
   };
 }

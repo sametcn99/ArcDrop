@@ -1,7 +1,9 @@
-import { All, Controller, Req, Res } from '@nestjs/common';
+import { All, Controller, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
 import { PatScopeDeferred } from '@api/auth/decorators/pat-scope-deferred.decorator';
+import { UserRateLimit } from '@api/common/rate-limit/user-rate-limit.decorator';
+import { UserRateLimitGuard } from '@api/common/rate-limit/user-rate-limit.guard';
 import { McpService } from './mcp.service';
 
 /**
@@ -13,8 +15,8 @@ import { McpService } from './mcp.service';
  * method (every tool call is a POST) to the MCP layer, which refuses each
  * mutation TOOL individually with a spec-compliant tool error. The same
  * deferral exempts the endpoint from nothing else — `/auth` and `/admin`
- * rules never apply here (this controller is neither), and the per-PAT
- * rate budget still counts every request.
+ * rules never apply here (this controller is neither), and both the per-PAT
+ * rate budget and the per-user `tools/call` budget apply.
  *
  * The handler hands the raw Express request/response pair to the SDK's
  * `StreamableHTTPServerTransport` — the endpoint speaks JSON-RPC, not
@@ -24,6 +26,8 @@ import { McpService } from './mcp.service';
 @ApiTags('MCP')
 @ApiBearerAuth()
 @PatScopeDeferred()
+@UseGuards(UserRateLimitGuard)
+@UserRateLimit('mcpTools', { jsonRpcMethod: 'tools/call' })
 @Controller('mcp')
 export class McpController {
   constructor(private readonly mcp: McpService) {}
@@ -39,7 +43,8 @@ export class McpController {
       'later request carries the returned Mcp-Session-Id header; DELETE ' +
       'closes the session. GET opens the server-push SSE stream. The caller ' +
       'must be bearer-authenticated (access JWT or personal access token); ' +
-      'a session is bound to the credential that created it.',
+      'a session is bound to the credential that created it. Per-user ' +
+      'tools/call limit: 300/min (configurable), plus per-PAT 300/min.',
   })
   async handle(@Req() req: Request, @Res() res: Response): Promise<void> {
     await this.mcp.handle(req, res);

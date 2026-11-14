@@ -37,6 +37,11 @@ describe('loadConfig', () => {
     expect(config.dataDir).toBe('/data');
     expect(config.metrics.enabled).toBe(false);
     expect(config.cors.origins).toEqual([]);
+    expect(config.rateLimit).toEqual({
+      importPerMinute: 30,
+      reindexPerMinute: 30,
+      mcpToolsPerMinute: 300,
+    });
     expect(config.log.level).toBe('info');
   });
 
@@ -47,12 +52,14 @@ describe('loadConfig', () => {
       ARCDROP__CORS__ORIGINS: 'https://a.example , https://b.example,,',
       ARCDROP__DATA_DIR: '/var/arcdrop',
       ARCDROP__METRICS__ENABLED: 'TRUE',
+      ARCDROP__RATE_LIMIT__IMPORT_PER_MINUTE: '15',
       ARCDROP__LOG__LEVEL: 'debug',
     });
     expect(config.port).toBe(8080);
     expect(config.cors.origins).toEqual(['https://a.example', 'https://b.example']);
     expect(config.dataDir).toBe('/var/arcdrop');
     expect(config.metrics.enabled).toBe(true);
+    expect(config.rateLimit.importPerMinute).toBe(15);
     expect(config.log.level).toBe('debug');
   });
 

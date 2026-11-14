@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Post,
   StreamableFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import {
@@ -18,6 +19,8 @@ import {
 import { Readable } from 'node:stream';
 import { CurrentUser } from '@api/auth/decorators/current-user.decorator';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
+import { UserRateLimit } from '@api/common/rate-limit/user-rate-limit.decorator';
+import { UserRateLimitGuard } from '@api/common/rate-limit/user-rate-limit.guard';
 import { ExportDataDto, ImportSummaryDto } from './portability.dto';
 import { PortabilityService, type ExportScope } from './portability.service';
 import {
@@ -84,6 +87,8 @@ export class PortabilityController {
 
   @Post('import')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('import')
   @UseInterceptors(ImportUploadInterceptor)
   @ApiConsumes('multipart/form-data')
   @ApiOperation({
@@ -97,7 +102,8 @@ export class PortabilityController {
       'existing bookmarks are updated (last-write-wins on updatedAt, tags and ' +
       'memberships unioned), new ones created; everything through the normal ' +
       'domain services and change log. One concurrent import per user (409 ' +
-      'when busy). Caps: 25 MiB per file, 300 MB for ZIP (configurable).',
+      'when busy). Per-user rate limit: 30/min (configurable). Caps: 25 MiB ' +
+      'per file, 300 MB for ZIP (configurable).',
   })
   @ApiOkResponse({ type: ImportSummaryDto })
   async importData(

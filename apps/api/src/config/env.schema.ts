@@ -81,6 +81,16 @@ export const envSchema = z.strictObject({
     importMaxBytes: z.coerce.number().int().min(1).default(26_214_400), // 25 MiB
     importZipMaxBytes: z.coerce.number().int().min(1).default(314_572_800), // 300 MB
   }),
+  rateLimit: z.strictObject({
+    /**
+     * M9 per-user rate budgets on expensive routes (fixed 60s window).
+     * Applied after authentication so multi-IP abuse of a single account
+     * is bounded independently of the per-IP ThrottlerGuard.
+     */
+    importPerMinute: z.coerce.number().int().min(1).default(30),
+    reindexPerMinute: z.coerce.number().int().min(1).default(30),
+    mcpToolsPerMinute: z.coerce.number().int().min(1).default(300),
+  }),
   log: z.strictObject({
     level: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   }),
