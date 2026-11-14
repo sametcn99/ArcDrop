@@ -12,6 +12,7 @@ function makeJwtService(secret: string): JwtService {
     metrics: { enabled: false },
     metadata: { enabled: false, allowPrivate: false },
     mcp: { patRequestsPerMinute: 300 },
+    portability: { importMaxBytes: 26_214_400, importZipMaxBytes: 314_572_800 },
     log: { level: 'fatal' },
   });
   return new JwtService(config);

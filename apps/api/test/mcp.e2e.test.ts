@@ -285,7 +285,7 @@ async function waitFor(
   throw new Error('expected change notification did not arrive within the deadline');
 }
 
-/** The v1 catalog per the ticket — highlights tools land with the highlights REST surface (M10). */
+/** The catalog per the tickets — M8 added the portability tools; highlights CRUD lands with the highlights REST surface (M10). */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -311,6 +311,9 @@ const EXPECTED_TOOLS = [
   'getSyncState',
   'listSyncChanges',
   'createSyncTicket',
+  'exportData',
+  'importData',
+  'exportBookmarkHighlights',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -742,7 +745,7 @@ describe('MCP server (e2e)', () => {
         }
       ).tools;
       const mutationTools = toolList.filter((t) => t.annotations.readOnlyHint === false);
-      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 9); // 9 read tools
+      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 10); // 10 read tools (M8 added exportBookmarkHighlights)
 
       let checked = 0;
       for (const tool of mutationTools) {
@@ -759,7 +762,7 @@ describe('MCP server (e2e)', () => {
         expect(text).toContain(tool.name);
         checked += 1;
       }
-      expect(checked).toBe(15);
+      expect(checked).toBe(17);
 
       // read tools DO run for the same token
       const read = await mcpPost(

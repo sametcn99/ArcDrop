@@ -1,4 +1,6 @@
 import type { ClassConstructor } from 'class-transformer';
+import { Buffer } from 'node:buffer';
+import { BadRequestException, PayloadTooLargeException } from '@nestjs/common';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import {
   BookmarkIdParamDto,
@@ -21,6 +23,13 @@ import {
 } from '@api/collections/collections.dto';
 import { CollectionsService } from '@api/collections/collections.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
+import {
+  ExportDataDto,
+  ExportHighlightsQueryDto,
+  ImportDataToolDto,
+  MCP_IMPORT_MAX_DECODED_BYTES,
+} from '@api/portability/portability.dto';
+import { PortabilityService } from '@api/portability/portability.service';
 import { GetSyncChangesQueryDto } from '@api/sync/sync.dto';
 import { SyncService } from '@api/sync/sync.service';
 import { SyncTicketService } from '@api/sync/sync-ticket.service';
@@ -81,8 +90,9 @@ export function buildToolCatalog(deps: {
   metadata: MetadataFetchService;
   sync: SyncService;
   syncTickets: SyncTicketService;
+  portability: PortabilityService;
 }): McpToolDefinition[] {
-  const { bookmarks, tags, collections, metadata, sync, syncTickets } = deps;
+  const { bookmarks, tags, collections, metadata, sync, syncTickets, portability } = deps;
   return [
     // -- bookmarks (M3/M6) -------------------------------------------------
     define(
@@ -290,6 +300,65 @@ export function buildToolCatalog(deps: {
       'Mint a one-time websocket ticket (single use, 60 s) for the push channel /api/v1/sync/ws?ticket=… — change notifications {seq, entity, id, action} per committed mutation.',
       [],
       (user) => Promise.resolve(syncTickets.issue(user.id)),
+    ),
+
+    // -- portability (M8) ----------------------------------------------------
+    define(
+      'exportData',
+      'POST',
+      'Export the caller’s library. format: json (full fidelity — bookmarks incl. tags/collections/highlights section) | csv | html (Netscape) | txt (one url per line); optional collectionId scopes to that collection’s subtree. json answers structuredContent with the parsed document; the other formats answer the document as text content. Covers the ACTIVE library only (trash excluded). NOTE: POST at REST, so scope=read-only tokens cannot call it — list/changes tools cover reads instead.',
+      [ExportDataDto],
+      async (user, [dto]) => {
+        const request = dto as ExportDataDto;
+        const { exportedAt, body } = await portability.exportDocument(
+          user,
+          request.format,
+          request.collectionId,
+        );
+        if (request.format === 'json') {
+          return { exportedAt, document: JSON.parse(body) as unknown };
+        }
+        return {
+          exportedAt,
+          format: request.format,
+          document: body,
+          _note: 'text formats travel as the document string (structuredContent mirrors content)',
+        };
+      },
+    ),
+    define(
+      'importData',
+      'POST',
+      'Import bookmarks: base64 `data` + explicit `format` (json = ArcDrop or Raindrop export, csv, html, txt, enex = Evernote web clips only, zip). Decoded cap 1 MiB — bigger uploads (25 MiB file / 300 MB zip) belong to REST POST /data/import. URL-keyed upsert (D13): existing → updated (last-write-wins on updatedAt, tags/memberships unioned), new → created; returns { created, updated, skipped[], errors[] }.',
+      [ImportDataToolDto],
+      (user, [dto]) => {
+        const request = dto as ImportDataToolDto;
+        const compact = request.data.replaceAll(/\s+/g, '');
+        if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
+          throw new BadRequestException('data must be base64 text');
+        }
+        const bytes = Buffer.from(compact, 'base64');
+        if (bytes.length > MCP_IMPORT_MAX_DECODED_BYTES) {
+          throw new PayloadTooLargeException(
+            `decoded payload exceeds the ${MCP_IMPORT_MAX_DECODED_BYTES} byte MCP import cap — use REST POST /data/import`,
+          );
+        }
+        return portability.importData(user, request.format, bytes);
+      },
+    ),
+    define(
+      'exportBookmarkHighlights',
+      'GET',
+      'One bookmark’s highlights as txt (quoted text blocks, optional notes) or csv (header text,note,color,createdAt) — returned as the document text. Well-formed but empty until the highlight storage lands (M10).',
+      [BookmarkIdParamDto, ExportHighlightsQueryDto],
+      async (user, [p, q]) => {
+        const download = await portability.exportBookmarkHighlights(
+          user,
+          (p as BookmarkIdParamDto).id,
+          (q as ExportHighlightsQueryDto).format,
+        );
+        return { format: (q as ExportHighlightsQueryDto).format, body: download.body };
+      },
     ),
   ];
 }

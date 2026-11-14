@@ -21,6 +21,7 @@ import { BookmarksService } from '@api/bookmarks/bookmarks.service';
 import { TagsService } from '@api/bookmarks/tags.service';
 import { CollectionsService } from '@api/collections/collections.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
+import { PortabilityService } from '@api/portability/portability.service';
 import { SyncService } from '@api/sync/sync.service';
 import { SyncTicketService } from '@api/sync/sync-ticket.service';
 import pkg from '../../package.json';
@@ -64,9 +65,18 @@ export class McpService implements OnModuleDestroy {
     metadata: MetadataFetchService,
     sync: SyncService,
     syncTickets: SyncTicketService,
+    portability: PortabilityService,
     private readonly audit: AuditService,
   ) {
-    this.tools = buildToolCatalog({ bookmarks, tags, collections, metadata, sync, syncTickets });
+    this.tools = buildToolCatalog({
+      bookmarks,
+      tags,
+      collections,
+      metadata,
+      sync,
+      syncTickets,
+      portability,
+    });
   }
 
   /** Entry point of `POST/GET/DELETE /api/v1/mcp` (the controller hands over raw req/res). */

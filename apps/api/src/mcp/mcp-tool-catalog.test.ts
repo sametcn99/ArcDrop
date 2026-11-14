@@ -5,6 +5,7 @@ import type { BookmarksService } from '@api/bookmarks/bookmarks.service';
 import type { TagsService } from '@api/bookmarks/tags.service';
 import type { CollectionsService } from '@api/collections/collections.service';
 import type { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
+import type { PortabilityService } from '@api/portability/portability.service';
 import type { SyncService } from '@api/sync/sync.service';
 import type { SyncTicketService } from '@api/sync/sync-ticket.service';
 
@@ -16,9 +17,10 @@ const stubs = {} as {
   metadata: MetadataFetchService;
   sync: SyncService;
   syncTickets: SyncTicketService;
+  portability: PortabilityService;
 };
 
-/** The v1 catalog per the ticket (highlights land with the highlights REST surface in M10). */
+/** The catalog per the tickets — M8 added the portability tools; highlights CRUD lands with the highlights REST surface (M10). */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -44,6 +46,9 @@ const EXPECTED_TOOLS = [
   'getSyncState',
   'listSyncChanges',
   'createSyncTicket',
+  'exportData',
+  'importData',
+  'exportBookmarkHighlights',
 ] as const;
 
 describe('MCP tool catalog (M7)', () => {
@@ -74,6 +79,7 @@ describe('MCP tool catalog (M7)', () => {
         'getCollection',
         'getSyncState',
         'listSyncChanges',
+        'exportBookmarkHighlights',
       ].sort(),
     );
   });

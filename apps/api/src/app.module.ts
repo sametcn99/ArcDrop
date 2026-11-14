@@ -18,12 +18,13 @@ import { CollectionsModule } from './collections/collections.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { SyncModule } from './sync/sync.module';
 import { McpModule } from './mcp/mcp.module';
+import { PortabilityModule } from './portability/portability.module';
 import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
 
 /**
  * ArcDrop API root module (plan M1 — API foundation, M2 — auth & users,
  * M3 — bookmarks core, M4 — collections, M5 — sync, M6 — metadata & icons,
- * M7 — MCP server + personal access tokens + audit).
+ * M7 — MCP server + personal access tokens + audit, M8 — portability).
  *
  * Import order matters for DI resolution: config first, then logging (so the
  * pino-backed Nest logger exists before anything logs), then infrastructure
@@ -54,6 +55,7 @@ import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
     CollectionsModule,
     SyncModule,
     McpModule,
+    PortabilityModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: ProblemJsonFilter }],
 })

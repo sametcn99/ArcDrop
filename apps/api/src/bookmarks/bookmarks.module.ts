@@ -42,6 +42,6 @@ import { UrlDecompositionService } from './url-decomposition.service';
     TrashPurgeService,
     TrashPurgeJob,
   ],
-  exports: [BookmarksService, TagsService],
+  exports: [BookmarksService, TagsService, UrlDecompositionService],
 })
 export class BookmarksModule {}

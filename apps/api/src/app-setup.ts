@@ -1,6 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import { VersioningType } from '@nestjs/common';
 import type { Express, Request, Response } from 'express';
+import { json } from 'express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { OpenAPIObject } from '@nestjs/swagger';
 import { WsAdapter } from '@nestjs/platform-ws';
@@ -24,6 +25,12 @@ export function setupApp(app: INestApplication, config: AppConfig): void {
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(createValidationPipe());
+  // JSON body limit: 2 MB (registered BEFORE Nest installs its default
+  // parsers, so this replaces the 100 KB default — express.json skips a
+  // request whose body was already parsed). Sized for the MCP import tool
+  // (1 MiB decoded payload + base64 overhead + tool-call envelope); M9
+  // hardening re-examines global limits with real traffic numbers.
+  app.use(json({ limit: '2mb' }));
   // The sync ws gateway (M5) rides the same HTTP server via the raw-`ws`
   // adapter. Must be set before init — same discipline as the routes below.
   app.useWebSocketAdapter(new WsAdapter(app));
@@ -61,6 +68,10 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addTag('Metadata', 'SSRF-hardened metadata enrichment + reindex (plan M6)')
     .addTag('Icons', 'Public unguessable icon cache (plan M6/D18)')
     .addTag('Tokens', 'Personal access tokens — agent auth (plan M7/D23)')
+    .addTag(
+      'Portability',
+      'Export/import: JSON/CSV/HTML/TXT/ENEX/ZIP with URL-keyed upsert (plan M8)',
+    )
     .addTag('MCP', 'Model Context Protocol endpoint: the app surface as agent tools (plan M7/D23)')
     // Bearer auth (plan D2): `Authorization: Bearer <access JWT>`.
     .addBearerAuth()

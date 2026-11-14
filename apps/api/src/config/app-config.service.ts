@@ -63,6 +63,16 @@ export class AppConfigService {
     return this.config.mcp.patRequestsPerMinute;
   }
 
+  /** M8 import cap for a single uploaded file (bytes) — see `env.schema.ts`. */
+  get portabilityImportMaxBytes(): number {
+    return this.config.portability.importMaxBytes;
+  }
+
+  /** M8 import cap for ZIP uploads (bytes) — see `env.schema.ts`. */
+  get portabilityImportZipMaxBytes(): number {
+    return this.config.portability.importZipMaxBytes;
+  }
+
   get logLevel(): string {
     return this.config.log.level;
   }

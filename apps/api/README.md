@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M7 — MCP server (M1 foundation + first-run admin bootstrap,
+**Status:** M8 — portability (M1 foundation + first-run admin bootstrap,
 bearer JWT auth with rotating refresh tokens and reuse detection, sessions,
 admin user management with single-use invite/reset tokens, DB-backed instance
 settings, route throttling; M3 bookmark CRUD with URL decomposition, tags,
@@ -15,8 +15,10 @@ metadata pipeline with the async enrichment on create/url-change, the
 public unguessable icon cache + serve route, per-bookmark reindex, the
 icon-eviction job and the backfill CLI; M7 personal access tokens for
 agents, the MCP server at `/api/v1/mcp` exposing the whole user surface as
-tools, per-PAT rate budget, and the audit log for tool calls). Next: M8 —
-portability.
+tools, per-PAT rate budget, and the audit log for tool calls; M8 the
+portability surface — export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with
+the URL-keyed upsert, per-user import lock, streaming downloads, and the
+matching MCP tools). Next: M9 — hardening & ops.
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -47,18 +49,20 @@ Config is validated with zod at boot (fail-fast: invalid env → report with the
 (typo protection). Copy `.env.example` to `.env` for local dev — bun loads it
 automatically.
 
-| Variable                                | Required | Default | Meaning                                                                                                                  |
-| --------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ARCDROP__DATABASE__URL`                | yes      | —       | PostgreSQL connection URL (`postgres://…`)                                                                               |
-| `ARCDROP__JWT__SECRET`                  | yes      | —       | JWT signing secret, min 32 chars (used from M2)                                                                          |
-| `ARCDROP__PORT`                         | no       | `3000`  | HTTP port                                                                                                                |
-| `ARCDROP__CORS__ORIGINS`                | no       | empty   | Comma-separated browser origins; empty = CORS off                                                                        |
-| `ARCDROP__DATA_DIR`                     | no       | `/data` | Data volume root (icons live in `…/icons` since M6); must be writable                                                    |
-| `ARCDROP__METRICS__ENABLED`             | no       | `false` | Serve Prometheus metrics at `/metrics`                                                                                   |
-| `ARCDROP__METADATA__ENABLED`            | no       | `true`  | M6 outbound metadata/icon fetch pipeline master switch                                                                   |
-| `ARCDROP__METADATA__ALLOW_PRIVATE`      | no       | `false` | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
-| `ARCDROP__MCP__PAT_REQUESTS_PER_MINUTE` | no       | `300`   | M7 per-PAT request budget per minute (REST + MCP combined)                                                               |
-| `ARCDROP__LOG__LEVEL`                   | no       | `info`  | pino level: `fatal…trace`                                                                                                |
+| Variable                                     | Required | Default     | Meaning                                                                                                                  |
+| -------------------------------------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `ARCDROP__DATABASE__URL`                     | yes      | —           | PostgreSQL connection URL (`postgres://…`)                                                                               |
+| `ARCDROP__JWT__SECRET`                       | yes      | —           | JWT signing secret, min 32 chars (used from M2)                                                                          |
+| `ARCDROP__PORT`                              | no       | `3000`      | HTTP port                                                                                                                |
+| `ARCDROP__CORS__ORIGINS`                     | no       | empty       | Comma-separated browser origins; empty = CORS off                                                                        |
+| `ARCDROP__DATA_DIR`                          | no       | `/data`     | Data volume root (icons live in `…/icons` since M6); must be writable                                                    |
+| `ARCDROP__METRICS__ENABLED`                  | no       | `false`     | Serve Prometheus metrics at `/metrics`                                                                                   |
+| `ARCDROP__METADATA__ENABLED`                 | no       | `true`      | M6 outbound metadata/icon fetch pipeline master switch                                                                   |
+| `ARCDROP__METADATA__ALLOW_PRIVATE`           | no       | `false`     | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
+| `ARCDROP__MCP__PAT_REQUESTS_PER_MINUTE`      | no       | `300`       | M7 per-PAT request budget per minute (REST + MCP combined)                                                               |
+| `ARCDROP__PORTABILITY__IMPORT_MAX_BYTES`     | no       | `26214400`  | M8 import cap per uploaded file (25 MiB); larger uploads are a `413` problem+json                                        |
+| `ARCDROP__PORTABILITY__IMPORT_ZIP_MAX_BYTES` | no       | `314572800` | M8 import cap for ZIP uploads (300 MB — archives unpack to many files)                                                   |
+| `ARCDROP__LOG__LEVEL`                        | no       | `info`      | pino level: `fatal…trace`                                                                                                |
 
 ## Local development
 
@@ -129,7 +133,7 @@ generated migrations.
   `bookmark_collections.collection_id` FK ON DELETE CASCADE + the `collection`
   value on the `change_entity` enum) and `M7TokensAudit1794619559850`
   (personal_access_tokens + audit_log_entries). M5 needed NO schema work —
-  `users.sync_seq` and the bus were already live.
+  `users.sync_seq` and the bus were already live. M8 needed NO schema work either — portability is service-level code over the existing tables.
 
 ### Migration workflow
 
@@ -473,7 +477,7 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 catalog (24 tools):** bookmarks `listBookmarks`, `getBookmark`,
+- **v1 catalog (27 tools):** bookmarks `listBookmarks`, `getBookmark`,
   `createBookmark`, `updateBookmark`, `deleteBookmark` (trash),
   `restoreBookmark`, `replaceBookmarkTags`, `replaceBookmarkCollections`
   (membership sync), `reindexBookmark`, `getBookmarkStats`,
@@ -482,10 +486,18 @@ like extra REST JSON bodies (DTO whitelist), never errors.
   (two-phase like REST), `restoreCollection`, `reorderCollections`; tags
   `renameTag` (renames or MERGES, like `PUT /tags/{name}`), `deleteTag`;
   sync `getSyncState`, `listSyncChanges`, `createSyncTicket` (ws push — an
-  agent can watch the library the same way a device does). Tools return
+  agent can watch the library the same way a device does); portability (M8)
+  `exportData`, `importData`, `exportBookmarkHighlights`. Tools return
   `structuredContent` (the exact service result; void operations return a
   bare `ok`) plus the same JSON as readable text content. Annotations carry
   `readOnlyHint` (derived from the REST method) and `idempotentHint`.
+  Portability specifics: `exportData` (POST at REST → mutation-classified,
+  same as `createSyncTicket` — read-only agents use the list/changes reads
+  instead) answers json as structuredContent and csv/html/txt as the
+  document text; `importData` takes base64 `data` + explicit `format`,
+  decoded cap **1 MiB** — bigger uploads (25 MiB file / 300 MB zip) belong
+  to REST; the JSON body limit is **2 MB** (see `setupApp`) exactly so this
+  tool's envelope fits.
 - **THE CONVENTION FOR FUTURE MILESTONES: new authenticated, non-admin REST
   surface ⇒ add the matching tool(s) in `src/mcp/mcp-tool-catalog.ts` and
   extend the e2e parity set. The e2e parity test FAILS the build when a
@@ -549,6 +561,154 @@ Notes: use a read-only token for exploratory assistants and a read-write
 token only when the agent should actually organize the library; tokens are
 revocable from `DELETE /me/tokens/{id}` (or the web client once it ships
 the surface) without touching device sessions.
+
+## Portability (M8 — D13, Raindrop parity G3/G4)
+
+Data in and out, user-scoped. **The ACTIVE library only, by design:** the
+trash is not exported and not an upsert target (it auto-purges per D17 —
+portability is for the living library). Identities are NOT exported:
+bookmark/collection/tag ids are meaningless across instances, so
+relationships travel as tag NAMES and collection PATHS and the importer
+re-links through them (imported libraries are structurally identical, not
+id-identical — the round-trip e2e proves hierarchy, memberships, tags,
+fields and timestamps).
+
+### Export — `POST /data/export` (operationId `exportData`)
+
+`{ format: json|csv|html|txt, collectionId? }` → streaming file download
+(`Content-Disposition: attachment`, `arcdrop-export.<ext>`; bookmark rows
+stream out in keyset-paged batches of 500 — never one giant buffer; HTML
+buffers the rows it needs for the folder tree, personal-scale).
+`collectionId` scopes to that collection's ACTIVE subtree (unknown or
+trashed scope → 404 problem+json — validated BEFORE the stream starts, so
+the 404 is still a problem document).
+
+- **json** — full fidelity: `{ format: 'arcdrop/v1', exportedAt, scope,
+collections: [{ path, icon, color, order }], tags: [names],
+bookmarks: [{ url, title, excerpt, note, createdAt, updatedAt,
+tags: [names], collections: [paths], highlights: [] }] }`. Each bookmark
+  carries its `highlights` array as the M8 contract (always empty until the
+  M10 storage lands — see below). Paths are segment ARRAYS (`["Work",
+"Rust"]`), so titles containing `/` or `;` round-trip losslessly.
+- **csv** — `url,title,excerpt,note,tags,collections,createdAt,updatedAt`.
+  Tags join with `;`, collection paths join with `/`, multiple collections
+  with `;`. LOSSY (documented): titles containing `/`, `;` or `,` cannot
+  round-trip; no highlights.
+- **html** — Netscape bookmark file (`<!DOCTYPE
+NETSCAPE-Bookmark-file-1>`), collections as nested `<H3>/<DL>` folders,
+  `ADD_DATE` in UNIX seconds, `TAGS="a,b"`, note (or excerpt) as `<DD>`.
+  LOSSY: a bookmark in several collections renders once (first path);
+  tags with commas break the TAGS list.
+- **txt** — one URL per line. Everything except URLs is lossy by definition.
+
+### Import — `POST /data/import` (operationId `importData`)
+
+Multipart/form-data, field `file`; format detected from the filename
+extension (`.json` sniffs the dialect: our `format: 'arcdrop/v1'` marker vs
+Raindrop's `link`-keyed items). Accepted: ArcDrop JSON (full-fidelity
+round-trip), Raindrop JSON (collections via `$oid` parent chains; `{"id":
+-1}` unsorted / `-99` broken → no collection; Raindrop highlights are
+counted as skipped), CSV (our export columns), Netscape HTML, TXT (one URL
+per line; blank lines ignored silently, broken lines error with their line
+number), ENEX (Evernote — WEB CLIPS ONLY: the first external http(s) link
+in a note is the source URL; notes without one are skipped and counted,
+Evernote `20231118T120000Z` stamps parse), ZIP (classic archives only —
+zip64 refuses; every supported member is parsed and aggregated, unsupported
+members are skipped and counted with the member name; no recursion into
+nested zips).
+
+Response: `{ created, updated, skipped[], errors[] }` — skipped/errors
+carry a reason + source (`row 12`, `note 3 "title"`, `archive.zip/x.csv:
+row 2`) and are capped at 500 entries each (`… N more entries suppressed`
+tail) so a hostile upload cannot return megabytes of reasons.
+
+**The upsert contract (D13, orchestrator-ratified — read before touching
+`import-upsert.service.ts`):**
+
+- Match on `(userId, url)` over ACTIVE rows, exact verbatim url equality;
+  several active duplicates resolve to the most recently updated row. A
+  trashed duplicate absorbs nothing — a fresh ACTIVE row is created
+  (duplicates are allowed, D13; the trash is read-only).
+- Field merge = last-write-wins on `updatedAt` (plan D4's conflict rule):
+  an item WITHOUT a parseable timestamp (CSV/HTML/TXT/ENEX) is treated as
+  older and only fills gaps; empty/absent incoming fields never overwrite
+  anything; a null DB field is filled regardless of age. `createdAt` is
+  preserved on CREATE (from the item when it carries one), never restored
+  on update.
+- Tags and collection memberships are UNIONED — import never detaches,
+  never prunes. Missing collections are created from nested title paths on
+  demand (case-SENSITIVE title match against active rows; first definition
+  wins when one file defines the same path twice; `order` honored from
+  ArcDrop JSON, else appended). Missing tags go through the normal
+  ci-unique rules (`resolveTagNames` — first spelling wins).
+- Everything rides the normal domain services: URL decomposition (D12) on
+  every url, `ChangeLogService.transact` per mutation, `tag:create` /
+  `collection:create` / `bookmark:*` events — so `/sync/changes` from a
+  pre-import cursor shows the whole import (e2e-proven).
+- A matched bookmark counts as `updated` whether or not anything changed
+  (the idempotency AC: re-import → all `updated`, zero `created`) — but a
+  change event is recorded ONLY when a field, tag or membership actually
+  changed. A no-op re-import leaves `users.sync_seq` untouched: devices
+  are not spammed into refetching 1000 identical bookmarks.
+- Bookmarks commit in CHUNKS of 50 (short transactions, the per-user seq
+  lock held briefly, incremental sync visibility mid-import, and
+  restartability: an aborted chunk leaves committed chunks behind and a
+  re-run resumes idempotently). Per-item data problems (invalid URL,
+  oversized fields, >50 tags, >100-char tag names) are caught at PARSE
+  time and land in `errors` — an aborted chunk is a genuine infrastructure
+  failure, not data.
+- Created bookmarks get the metadata pipeline scheduled after the last
+  chunk commits (bounded concurrency 4, fire-and-forget, silent failures —
+  the same fill-if-null pipeline as `POST /bookmarks`, just pooled so a
+  25 MB upload cannot open thousands of concurrent fetches).
+
+**Caps + concurrency:** `ARCDROP__PORTABILITY__IMPORT_MAX_BYTES` (25 MiB)
+for single files, `…_ZIP_MAX_BYTES` (300 MB) for `.zip` — enforced DURING
+the streaming upload (a 400 MB body dies mid-stream, never after
+buffering; the tighter non-zip cap binds right after parsing). Exceeding
+either is a `413` problem+json (`code: PAYLOAD_TOO_LARGE`). ONE concurrent
+import per user — a second request is a `409` problem+json
+(`code: CONFLICT`); the lock is in-memory (single-instance posture, same
+as the ws tickets). The upload is buffered in memory (multer
+`memoryStorage`) — ≤ 300 MB RAM for one request, accepted v1 posture.
+Multer joined as a DIRECT dependency for this (it was already in the tree
+via `@nestjs/platform-express`; a custom interceptor wraps it because the
+cap is config-driven and format-dependent — `FileInterceptor` caps are
+decorator constants).
+
+### Per-bookmark highlights export — `GET /bookmarks/{id}/highlights/export?format=txt|csv` (G4)
+
+`txt`: quoted text blocks with optional `- note:` lines, blank-line
+separated. `csv`: header `text,note,color,createdAt`. **Well-formed but
+EMPTY until M10** — the Highlight entity + REST surface land there (plan
+D6, ratified out of wave 1); M8 ships the download contract only. The ONE
+M10 plug-in point is marked `M10 HOOK` in `PortabilityService.
+exportBookmarkHighlights`: query the rows, feed the same renderers, and
+extend the ArcDrop JSON import to persist the `highlights` section it
+already validates and counts. Unknown bookmarks are 404s (trash included —
+GET semantics mirror `GET /bookmarks/{id}`).
+
+### Format quirks worth remembering
+
+- ArcDrop JSON `highlights` sections are VALIDATED and counted as
+  skipped-for-now on import (reason names M10) — when the storage lands,
+  replace the skip with persistence; the wire format does not change.
+- Netscape parsing is regex-lenient (M6 philosophy): `<DT><H3>` opens a
+  folder, `<DL>` nests it, `<DD>` maps to the bookmark NOTE, attributes
+  are case-insensitive; malformed structure heals instead of failing.
+- ENEX "web clip" detection is a HEURISTIC (ENEX has no clip marker): the
+  first external http(s) `<a href>` wins; `evernote:///` internal links do
+  not count; regular notes are skipped WITH their titles in the reason.
+- CSV quoting is RFC 4180 (quotes doubled, commas/newlines inside quotes
+  literal); the `tags`/`collections` sub-lists use `;` — see the lossy
+  notes above.
+- ZIP: stored + deflate members only, encrypted members refuse, EOCD found
+  through a trailing comment, zip64 (> 65535 entries / ≥ 4 GiB members)
+  refuses with a clear error. There is no filesystem extraction — members
+  go straight into the parsers, so zip-slip does not apply.
+- `POST /data/export` is a POST by ticket → mutation-classified for
+  read-only PATs (consistent with `createSyncTicket`); the REST-level
+  `PatScopeGuard` refuses it for read-only tokens the same way.
 
 ## Collections (M4 — D4, D5)
 
@@ -839,6 +999,14 @@ src/
                            creating credential); tool catalog mirroring the REST
                            surface (names = operationIds, schemas = DTO metadata);
                            per-tool read-only enforcement + audit
+  portability/             M8: POST /data/export (streaming json/csv/html/txt,
+                           collectionId subtree scope) + POST /data/import
+                           (multipart; ArcDrop/Raindrop JSON, CSV, Netscape HTML,
+                           TXT, ENEX web clips, ZIP — URL-keyed upsert with LWW
+                           merge, per-user import lock, dynamic caps); GET
+                           /bookmarks/{id}/highlights/export (txt/csv — M8
+                           contract, M10 storage); pure parsers under import/,
+                           pure renderers under export/
 test/
   helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset;
                            metadata pipeline DISABLED by default — see the M6 section)
@@ -858,10 +1026,88 @@ test/
                                per tool and per method, tools/list ↔ DTO ↔ OpenAPI
                                parity, JSON-RPC errors, audit rows, per-PAT rate
                                budget (isolated boot), no /ai/* routes)
+  portability.e2e.test.ts      M8 suite (JSON round-trip identity, double-import
+                                idempotency with zero no-op events, Raindrop +
+                                Netscape + TXT + ENEX + ZIP fixtures, CSV round-trip,
+                                collectionId scope export + 404, trash-not-exported,
+                                highlights downloads, sync visibility from a
+                                pre-import cursor, 409 import lock, MCP import/
+                                export tools incl. read-only refusals, import caps
+                                413 (isolated boot))
+  zip-builder.ts               test-only minimal ZIP WRITER (inverse of the M8
+                                reader) — builds stored/deflate archives for fixtures
 ```
 
 Both `main.ts` and the e2e boots go through `app-setup.ts` — keep runtime behavior and
 tests in lockstep by wiring new app-level concerns THERE.
+
+## Decisions recorded (M8)
+
+- **Highlights are CONTRACT-ONLY in M8 — ratified scope discipline.** The
+  amended ticket puts highlights export in scope (G4) but the plan defers
+  the Highlight entity + REST surface to M10. M8 therefore ships the
+  formats (JSON bookmarks carry a `highlights: []` section; the
+  per-bookmark txt/csv downloads exist and are well-formed) and the ONE
+  M10 plug-in point (`M10 HOOK` in `PortabilityService`), with nothing
+  to persist yet. The e2e proves the contract as well-formed-empty; M10's
+  ticket owns flipping it to real rows.
+- **The upsert never writes no-op events.** A matched bookmark counts as
+  `updated` (the idempotency AC), but the change event fires only when a
+  field, tag or membership actually changed — a 1000-bookmark re-import
+  must not push 1000 `bookmark:update` notifications that make every
+  device refetch identical rows. This deliberately departs from the M4
+  membership-sync "always record" convention because import no-ops are the
+  COMMON case, not an explicit client action. `/sync/changes` still sees
+  every real change (e2e-proven from a pre-import cursor).
+- **Field merge is last-write-wins on `updatedAt`** (plan D4's conflict
+  rule), with two absolutes: empty/absent incoming data never overwrites
+  anything, and null DB fields fill regardless of age. Items without a
+  parseable timestamp (CSV/HTML/TXT/ENEX) are treated as older — the
+  database row wins every non-empty field. The decision lives in ONE pure
+  function (`pickFieldPatch`) so it stays testable and reviewable.
+- **Import commits in chunks of 50, not one transaction.** Short
+  transactions keep the per-user seq lock held briefly, make import
+  progress visible via `/sync/changes` mid-import, and make a failed run
+  restartable: committed chunks stay, a re-run resumes idempotently (D13
+  upsert). Per-item data problems are caught at PARSE time so an aborted
+  chunk means infrastructure, not data.
+- **The export covers the ACTIVE library only; identities travel as names
+  - paths.** Trash is ephemeral by design (D17 auto-purge) — exporting it
+    would resurrect purged data on another instance. Ids are meaningless
+    across instances, so memberships re-link through tag NAMES and
+    collection title PATHS; the round-trip is structurally identical, not
+    id-identical (that is what the e2e asserts).
+- **Multer joined as a direct dependency — justified.** It was already in
+  the dependency tree (`@nestjs/platform-express` requires it); nothing
+  declared it, so the isolated linker never linked it. A custom
+  interceptor wraps the raw multer API because the cap is CONFIG-driven
+  and format-dependent (FileInterceptor caps are decorator constants), and
+  because multer errors must translate to problem+json (413/400).
+  Hand-rolling multipart parsing for 300 MB uploads would be strictly
+  worse — same reasoning as the M5 `ws` and M7 SDK additions.
+- **Caps enforce DURING the streaming upload; memoryStorage accepted.**
+  Stream-time enforcement uses the larger (ZIP) cap so an oversized body
+  dies mid-stream; the tighter non-zip cap binds right after parsing once
+  the filename is known. One upload lives in RAM (≤ 300 MB) — fine for
+  single-instance v1, revisit with M9's hardening pass if self-hosters
+  report memory pressure.
+- **The MCP import cap is 1 MiB decoded, and the global JSON body limit
+  rose to 2 MB** (registered in `setupApp` ahead of Nest's defaults, so
+  it REPLACES the 100 KB express default for every JSON route). Sized for
+  the MCP import envelope (base64 + tool-call framing); REST multipart
+  remains the path for big imports. M9 re-examines global limits with real
+  traffic numbers.
+- **ENEX web-clip detection is an honest heuristic.** ENEX has no clip
+  marker; the first external http(s) link wins and link-less notes are
+  skipped WITH their titles. Evernote's compact timestamps
+  (`20231118T120000Z`) get a dedicated parser. Documented as lossy-by-
+  contract rather than pretending at full note fidelity.
+- **The minimal ZIP reader hand-rolled, zero deps.** Classic archives
+  only: central-directory walk, stored + deflate members (node:zlib),
+  EOCD through trailing comments, zip64 and encrypted members refuse with
+  clear errors. No filesystem extraction — members go straight into the
+  format parsers, so zip-slip cannot apply. A test-only ZIP WRITER
+  (`test/zip-builder.ts`) provides fixtures without a dependency.
 
 ## Decisions recorded (M7)
 

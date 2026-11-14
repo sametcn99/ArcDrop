@@ -71,6 +71,16 @@ export const envSchema = z.strictObject({
      */
     patRequestsPerMinute: z.coerce.number().int().min(1).default(300),
   }),
+  portability: z.strictObject({
+    /**
+     * M8 import size cap in bytes for a single uploaded file. ZIP archives
+     * get their own, larger cap below (they unpack to many files at once).
+     * Exceeding either is a `413` problem+json — enforced DURING the
+     * streaming upload, never after buffering.
+     */
+    importMaxBytes: z.coerce.number().int().min(1).default(26_214_400), // 25 MiB
+    importZipMaxBytes: z.coerce.number().int().min(1).default(314_572_800), // 300 MB
+  }),
   log: z.strictObject({
     level: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   }),
