@@ -88,6 +88,11 @@ export class AppConfigService {
     return this.config.rateLimit.mcpToolsPerMinute;
   }
 
+  /** M13 per-user bulk operations rate limit per minute. */
+  get rateLimitBulkPerMinute(): number {
+    return this.config.rateLimit.bulkPerMinute;
+  }
+
   get logLevel(): string {
     return this.config.log.level;
   }

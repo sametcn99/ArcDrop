@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { buildToolCatalog, toolInputSchema } from './mcp-tool-catalog';
 import { dtoSchema } from './dto-schema';
 import type { BookmarksService } from '@api/bookmarks/bookmarks.service';
+import type { BulkBookmarksService } from '@api/bookmarks/bulk-bookmarks.service';
 import type { HighlightsService } from '@api/bookmarks/highlights.service';
 import type { TagsService } from '@api/bookmarks/tags.service';
 import type { CollectionsService } from '@api/collections/collections.service';
@@ -14,6 +15,7 @@ import type { SyncTicketService } from '@api/sync/sync-ticket.service';
 /** The catalog only ever dispatches — the services are type-level deps here. */
 const stubs = {} as {
   bookmarks: BookmarksService;
+  bulkBookmarks: BulkBookmarksService;
   highlights: HighlightsService;
   tags: TagsService;
   collections: CollectionsService;
@@ -24,7 +26,7 @@ const stubs = {} as {
   portability: PortabilityService;
 };
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -32,6 +34,7 @@ const EXPECTED_TOOLS = [
   'updateBookmark',
   'deleteBookmark',
   'restoreBookmark',
+  'bulkBookmarks',
   'replaceBookmarkTags',
   'replaceBookmarkCollections',
   'reindexBookmark',
@@ -53,6 +56,9 @@ const EXPECTED_TOOLS = [
   'deleteCollection',
   'restoreCollection',
   'reorderCollections',
+  'mergeCollections',
+  'sortCollectionsAlphabetical',
+  'deleteEmptyCollections',
   'getSyncState',
   'listSyncChanges',
   'createSyncTicket',
@@ -61,7 +67,7 @@ const EXPECTED_TOOLS = [
   'exportBookmarkHighlights',
 ] as const;
 
-describe('MCP tool catalog (M7/M12)', () => {
+describe('MCP tool catalog (M7/M12/M13)', () => {
   const catalog = buildToolCatalog(stubs);
   const byName = new Map(catalog.map((tool) => [tool.name, tool]));
 

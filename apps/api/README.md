@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M12 — library health (**Wave 2: M0–M12**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (33 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); plus M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation). **Next:** Wave 2 — M13 (bulk operations).
+**Status:** M13 — bulk operations (**Wave 2: M0–M13**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (37 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); plus M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit. **Next:** Wave 2 — M14 (reminders & notifications).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -123,7 +123,7 @@ generated migrations.
   `bookmark_content_type` enum + `bookmarks.content_type`, and `'highlight'` on
   `change_entity`), and `M12LibraryHealth1794629705566` (`bookmarks.last_checked_at`,
   `bookmarks.broken_reason`, `bookmarks.broken_at`, and `IX_bookmarks_user_broken_at`).
-  M5/M6/M8/M9/M11 needed NO schema work.
+  M5/M6/M8/M9/M11/M13 needed NO schema work.
 
 ### Migration workflow
 
@@ -500,16 +500,18 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 + M10–M12 catalog (33 tools):** bookmarks `listBookmarks` (incl. M11/M12
+- **v1 + M10–M13 catalog (37 tools):** bookmarks `listBookmarks` (incl. M11/M12
   `search`/`q` operator grammar, `favorite`, `type`, and `broken` filters + broken-status fields), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
   `favorite` toggle), `deleteBookmark` (trash), `restoreBookmark`,
+  `bulkBookmarks` (M13: move/addTags/removeTags/trash/restore/delete),
   `replaceBookmarkTags`, `replaceBookmarkCollections` (membership sync),
   `reindexBookmark`, `getBookmarkStats` (incl. `favorites`),
   `listBookmarkTags`; highlights (M10 / D6) `listHighlights`, `createHighlight`,
   `updateHighlight`, `deleteHighlight`; collections `listCollections`,
   `getCollectionTree`, `getCollection`, `createCollection`, `updateCollection`,
   `deleteCollection` (two-phase like REST), `restoreCollection`,
-  `reorderCollections`; tags `renameTag` (renames or MERGES, like
+  `reorderCollections`, `mergeCollections`, `sortCollectionsAlphabetical`,
+  `deleteEmptyCollections` (M13); tags `renameTag` (renames or MERGES, like
   `PUT /tags/{name}`), `deleteTag`; sync `getSyncState`, `listSyncChanges`,
   `createSyncTicket` (ws push — an agent can watch the library the same way a
   device does); portability (M8/M10) `exportData`, `importData`,
@@ -986,16 +988,18 @@ src/
   settings/                SettingsService (typed DB settings) + /admin/settings
   change-log/              ChangeLogService (transact + gapless seq) + ChangeEventBus
                            (in-process fan-out for M5's ws push)
-  bookmarks/               /bookmarks CRUD + trash/restore + list/search/stats;
+  bookmarks/               /bookmarks CRUD + bulk + trash/restore + list/search/stats;
+                           `BulkBookmarksService` (M13: `POST /bookmarks/bulk`);
                            /bookmarks/{id}/tags; /tags/{name} rename/merge/delete;
                            /bookmarks/{id}/collections (delegates to CollectionsService);
                            /bookmarks/{id}/reindex (schedules the M6 pipeline);
                            UrlDecompositionService (D12); `search-query.parser.ts` +
                            `search-query.compiler.ts` (M11 grammar); TrashPurgeService +
                            cron job (purge now fires the icon-eviction ride-along)
-  collections/             /collections flat list + tree + CRUD + restore + order;
+  collections/             /collections flat list + tree + CRUD + restore + order +
+                           M13 `merge` / `sort-alphabetical` / `delete-empty`;
                            cycle protection, two-phase delete, membership sync;
-                           tree-builder.ts (pure, unit-tested)
+                           tree-builder.ts & collection-bulk-helpers.ts (pure, unit-tested)
   metadata/                M6: SsrfSafeFetchService (DNS-resolve-first guard, per-hop
                            re-validation, redirect/deadline/size/content-type caps);
                            html-metadata.ts (pure parser); IconCacheService (unguessable
@@ -1059,6 +1063,10 @@ test/
                                 NULL-safe negations, match:OR vs default AND, `q` alias +
                                 conflict 400, REST filter composability, reserved/unknown
                                 operator 400s with positions, OpenAPI & MCP `listBookmarks`)
+  bulk-operations.e2e.test.ts  M13 suite (`POST /bookmarks/bulk`, `POST /collections/merge`,
+                                `sort-alphabetical`, `delete-empty`, mid-list invalid rollback,
+                                2nd-device cursor sync reconstruction, MCP parity, shared
+                                isolated per-user `bulk` rate limit)
   zip-builder.ts               test-only minimal ZIP WRITER (inverse of the M8
                                 reader) — builds stored/deflate archives for fixtures
 ```
@@ -1315,6 +1323,7 @@ tests in lockstep by wiring new app-level concerns THERE.
   - `POST /api/v1/data/import` & MCP `importData`: `30/min` (`ARCDROP__RATE_LIMIT__IMPORT_PER_MINUTE`)
   - `POST /api/v1/bookmarks/{id}/reindex` & MCP `reindexBookmark`: `30/min` (`ARCDROP__RATE_LIMIT__REINDEX_PER_MINUTE`)
   - MCP `tools/call`: `300/min` (`ARCDROP__RATE_LIMIT__MCP_TOOLS_PER_MINUTE`)
+  - `POST /api/v1/bookmarks/bulk`, `POST /api/v1/collections/{merge,sort-alphabetical,delete-empty}`, & matching MCP bulk tools: `30/min` (`ARCDROP__RATE_LIMIT__BULK_PER_MINUTE`)
 - **Smoke load script:** `ARCDROP_SMOKE_URL=http://127.0.0.1:3000 bun run load:smoke` exercises auth, reindex, global IP, PAT REST+MCP shared limits, 413 body limit, and end-to-end `x-request-id` correlation.
 
 ### Admin audit surface & M2 action auditing
@@ -1382,15 +1391,24 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 - **SSRF & gentle scheduling:** `BrokenLinksService` reuses M6's `SsrfSafeFetchService.probeUrl` (DNS-resolve-first, private-IP blocking on hop 0 when `ALLOW_PRIVATE=false` and strictly on every hop `≥ 1`, `HEAD` with `405` → `GET` fallback). Policy refusals (`private-address-blocked`, `scheme-refused`, `invalid-url`, `unclassifiable-address`) are skipped without connecting or flagging broken. `BrokenLinksJob` runs daily at `06:00` (staggered behind `03:00` trash purge, `04:00` sync retention, `05:00` icon eviction) with concurrency capped at `≤ 5` and jittered intervals. Successful recovery (`2xx–3xx`) or editing a bookmark's URL (`PUT /bookmarks/{id}`) clears `brokenAt`/`brokenReason` (and records `bookmark:update` on sweep status changes).
 - **Filtering & MCP parity:** `GET /bookmarks?broken=true|false` and M11 grammar `broken:true|false` (`-broken:true`) filter active/trashed lists; `findDuplicates` and `resolveDuplicates` are registered in `src/mcp/mcp-tool-catalog.ts` (33 tools total: 12 reads, 21 mutations, with read-only PAT enforcement on `resolveDuplicates`).
 
-## Wave-2 Handoff (for M13+)
+## Bulk operations (M13 — D19, Raindrop parity G14)
 
-M0–M12 are complete and green (307 unit / 175 e2e tests across 47 test files). Next is **M13 (bulk operations)**:
+- **Bookmarks bulk (`POST /api/v1/bookmarks/bulk`, `operationId: bulkBookmarks`):** Executes `move` (`collectionIds`, `mode: 'assign' | 'union'`), `addTags` / `removeTags` (ci-unique tag rules + orphan pruning), `trash`, `restore`, or `delete` (hard delete strictly for already-trashed IDs per M4 two-phase semantics; active IDs return `409 CONFLICT` and hard deletes emit `highlight:delete` tombstones before cascading + ride-along icon eviction) over 1–500 unique bookmark IDs in one `ChangeLogService.transact` transaction. Uses flat optional `collectionIds` / `mode` / `tags` fields on `BulkBookmarksDto` so `class-validator-jsonschema` emits `$ref`-free JSON Schema for MCP `tools/list`.
+- **Collections merge (`POST /api/v1/collections/merge`, `operationId: mergeCollections`):** Validates `sourceIds` (1–500, active, owned) and `targetId` (active, owned, `targetId ∉ sourceIds` → `400`, not a descendant of any source → `409 CONFLICT`), reparents non-source direct children onto `targetId`, inserts/deduplicates `bookmark_collections` memberships onto `targetId` and removes old source memberships, soft-trashes `sourceIds`, and records change events for `target`, moved children, trashed sources, and affected bookmarks inside one transaction.
+- **Alphabetical sort (`POST /api/v1/collections/sort-alphabetical`, `operationId: sortCollectionsAlphabetical`):** Pure `planAlphabeticalSort` (`src/collections/collection-bulk-helpers.ts`) reorders roots and every nested sibling group case-insensitively with deterministic tie-breaking, updating and change-logging only rows whose `order` actually changes; returns `{ updated }`.
+- **Delete empty (`POST /api/v1/collections/delete-empty`, `operationId: deleteEmptyCollections`):** Pure `findRecursivelyEmptyCollectionIds` identifies active collections whose active subtree contains zero active (non-trashed) bookmarks (collections holding only trashed bookmarks count as empty), soft-trashes them in one transaction, and returns `{ trashed, kept }`.
+- **Atomicity, rate limit & MCP parity:** Any mid-list invalid/foreign ID or state conflict rolls back the entire transaction cleanly with zero partial writes and zero sync events. All 4 routes and their mirrored MCP tools share the per-user `bulk` bucket (`ARCDROP__RATE_LIMIT__BULK_PER_MINUTE`, default `30/min`). MCP catalog now holds **37 tools** (12 reads, 25 mutations).
 
-- **Change-log atomicity & sync convergence:** M12's `DuplicatesService.resolveDuplicates` demonstrates batching multi-bookmark updates + membership merges inside one `ChangeLogService.transact` transaction with exact event emission per affected bookmark and collection. Reuse that pattern for M13 bulk tag/collection/favorite/trash/restore/move endpoints (chunking large batches carefully if needed to avoid holding `users.sync_seq` locks excessively long).
-- **URL edit broken-flag reset & metadata reindex:** Any bulk URL rewrite path (if applicable) must clear `brokenAt`/`brokenReason`/`lastCheckedAt` and re-run `UrlDecompositionService.decompose` (D12); bulk trash/restore must keep plain `deletedAt` scoping and preserve tag/collection invariants.
-- **MCP & OpenAPI parity:** Add every new authenticated non-admin M13 REST operation to `src/mcp/mcp-tool-catalog.ts` (with `@ApiOperation({ operationId })` matching the tool name) and extend `EXPECTED_TOOLS` in `test/mcp.e2e.test.ts` (read-only PAT enforcement derives automatically from the REST HTTP method).
-- **Reserved search operators remaining:** `broken:` is now active (M12); `file:` (M18) and `reminder:` (M14) remain reserved in `src/bookmarks/search-query.parser.ts`.
-- **Guard, migration & formatting discipline:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun test src && bun test e2e`.
+## Wave-2 Handoff (for M14+)
+
+M0–M13 are complete and green (311 unit / 184 e2e tests across 49 test files). Next is **M14 (reminders & notifications)**:
+
+- **M5 WebSocket gateway contract (critical for M14 real-time reminders):**
+  - Ticket minting: `POST /api/v1/sync/ticket` issues a 60s single-use opaque ticket (sha256-hashed in an in-memory `Map`).
+  - Handshake & room isolation: clients connect to `/api/v1/sync/ws?ticket=<ticket>` (raw `ws` adapter via `@nestjs/platform-ws`, fixed path bypassing prefix/versioning; missing/invalid/replayed tickets close with **1008**; 30s protocol ping/pong heartbeat). `SyncConnections` maps `userId → Set<WebSocket>` in `src/sync/`.
+  - Event fan-out discipline: `ChangeLogService.transact` collects `change_events` during the SQL transaction and publishes to `ChangeEventBus` strictly **after commit**, emitting `{ seq, entity, id, action }` JSON frames (no payload — clients reconcile via `GET /api/v1/sync/changes?since=cursor`). Keep any M14 reminder/notification push post-commit so rolled-back reminders never notify connected sockets; check the M5 ws gateway tests in `src/sync/` and `test/sync.e2e.test.ts` before extending or adding frame types.
+- **Reserved search operators:** M14 should activate `reminder:` in `src/bookmarks/search-query.parser.ts` & `search-query.compiler.ts` (leaving only `file:` reserved for M18).
+- **MCP, migrations & verification discipline:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, add all new authenticated non-admin M14 operations to `src/mcp/mcp-tool-catalog.ts` (matching `operationId` and flat `class-validator-jsonschema`-friendly DTOs) + `test/mcp.e2e.test.ts`, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun test src && bun test e2e`.
 
 ## Decisions recorded (M4)
 

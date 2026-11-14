@@ -10,6 +10,7 @@ import {
   Post,
   Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -21,6 +22,8 @@ import {
 } from '@nestjs/swagger';
 import { CurrentUser } from '@api/auth/decorators/current-user.decorator';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
+import { UserRateLimit } from '@api/common/rate-limit/user-rate-limit.decorator';
+import { UserRateLimitGuard } from '@api/common/rate-limit/user-rate-limit.guard';
 import {
   CollectionDto,
   CollectionIdParamDto,
@@ -28,15 +31,20 @@ import {
   CollectionNodeDto,
   CreateCollectionDto,
   DeleteCollectionQueryDto,
+  DeleteEmptyCollectionsResponseDto,
+  MergeCollectionsDto,
+  MergeCollectionsResponseDto,
   ReorderCollectionsDto,
+  SortCollectionsResponseDto,
   UpdateCollectionDto,
 } from './collections.dto';
 import { CollectionsService } from './collections.service';
 
 /**
- * Collection surface (plan M4). All routes are bearer-authenticated (global
- * guard) and user-scoped. Static paths (`tree`, `order`) are declared ahead
- * of the `:id` routes so Nest never mistakes them for ids.
+ * Collection surface (plan M4, extended M13). All routes are bearer-authenticated
+ * (global guard) and user-scoped. Static paths (`tree`, `order`, `merge`,
+ * `sort-alphabetical`, `delete-empty`) are declared ahead of the `:id` routes
+ * so Nest never mistakes them for ids.
  */
 @ApiTags('Collections')
 @ApiBearerAuth()
@@ -104,6 +112,61 @@ export class CollectionsController {
     @Body() dto: ReorderCollectionsDto,
   ): Promise<void> {
     await this.collections.reorder(user, dto);
+  }
+
+  @Post('merge')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('bulk')
+  @ApiOperation({
+    operationId: 'mergeCollections',
+    summary: 'Merge source collections into a target collection in one transaction',
+    description:
+      'Reparents non-source direct children and moves all bookmark memberships from ' +
+      '`sourceIds` into `targetId`, then soft-trashes `sourceIds`. Refuses if `targetId` ' +
+      'is in `sourceIds` (400) or is a descendant of any source collection (409). ' +
+      'Per-user rate limit: 30/min (configurable).',
+  })
+  @ApiOkResponse({ type: MergeCollectionsResponseDto })
+  merge(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: MergeCollectionsDto,
+  ): Promise<MergeCollectionsResponseDto> {
+    return this.collections.merge(user, dto);
+  }
+
+  @Post('sort-alphabetical')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('bulk')
+  @ApiOperation({
+    operationId: 'sortCollectionsAlphabetical',
+    summary: 'Reorder every sibling level alphabetically by title',
+    description:
+      'Sorts roots and every nested parent level alphabetically in a single transaction. ' +
+      'Only collections whose `order` actually changes are updated and change-logged. ' +
+      'Per-user rate limit: 30/min (configurable).',
+  })
+  @ApiOkResponse({ type: SortCollectionsResponseDto })
+  sortAlphabetical(@CurrentUser() user: RequestUser): Promise<SortCollectionsResponseDto> {
+    return this.collections.sortAlphabetical(user);
+  }
+
+  @Post('delete-empty')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('bulk')
+  @ApiOperation({
+    operationId: 'deleteEmptyCollections',
+    summary: 'Trash every collection with no non-trashed bookmarks anywhere in its subtree',
+    description:
+      'Recursively identifies active collections whose entire active subtree holds zero ' +
+      'active (non-trashed) bookmarks, soft-trashes them in one change-logged transaction, ' +
+      'and reports `{ trashed, kept }`. Per-user rate limit: 30/min (configurable).',
+  })
+  @ApiOkResponse({ type: DeleteEmptyCollectionsResponseDto })
+  deleteEmpty(@CurrentUser() user: RequestUser): Promise<DeleteEmptyCollectionsResponseDto> {
+    return this.collections.deleteEmpty(user);
   }
 
   @Get(':id')

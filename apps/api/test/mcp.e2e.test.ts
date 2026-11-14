@@ -286,7 +286,7 @@ async function waitFor(
   throw new Error('expected change notification did not arrive within the deadline');
 }
 
-/** The catalog per the tickets — M8 added portability tools; M10 added highlights CRUD. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -294,6 +294,7 @@ const EXPECTED_TOOLS = [
   'updateBookmark',
   'deleteBookmark',
   'restoreBookmark',
+  'bulkBookmarks',
   'listHighlights',
   'createHighlight',
   'updateHighlight',
@@ -313,6 +314,9 @@ const EXPECTED_TOOLS = [
   'deleteCollection',
   'restoreCollection',
   'reorderCollections',
+  'mergeCollections',
+  'sortCollectionsAlphabetical',
+  'deleteEmptyCollections',
   'getSyncState',
   'listSyncChanges',
   'createSyncTicket',
@@ -752,7 +756,7 @@ describe('MCP server (e2e)', () => {
         }
       ).tools;
       const mutationTools = toolList.filter((t) => t.annotations.readOnlyHint === false);
-      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 12); // 12 read tools (M12 added findDuplicates)
+      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 12); // 12 read tools
 
       let checked = 0;
       for (const tool of mutationTools) {
@@ -769,7 +773,7 @@ describe('MCP server (e2e)', () => {
         expect(text).toContain(tool.name);
         checked += 1;
       }
-      expect(checked).toBe(21);
+      expect(checked).toBe(25);
 
       // read tools DO run for the same token
       const read = await mcpPost(

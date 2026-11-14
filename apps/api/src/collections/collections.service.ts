@@ -20,10 +20,15 @@ import type {
   CollectionListDto,
   CollectionNodeDto,
   CreateCollectionDto,
+  DeleteEmptyCollectionsResponseDto,
+  MergeCollectionsDto,
+  MergeCollectionsResponseDto,
   ReorderCollectionsDto,
+  SortCollectionsResponseDto,
   UpdateCollectionDto,
 } from './collections.dto';
-import { buildCollectionTree, type CollectionTreeRow } from './tree-builder';
+import { findRecursivelyEmptyCollectionIds, planAlphabeticalSort } from './collection-bulk-helpers';
+import { buildCollectionTree, compareSiblings, type CollectionTreeRow } from './tree-builder';
 
 /**
  * Defensive cap for parent-chain walks (cycle detection). Unreachable
@@ -34,9 +39,10 @@ import { buildCollectionTree, type CollectionTreeRow } from './tree-builder';
 const MAX_TREE_WALK = 10_000;
 
 /**
- * Collections domain (plan M4, D5): hierarchical folders, the nested tree
- * with direct bookmark counts, exact membership sync, cycle protection and
- * sibling ordering — all user-scoped and change-logged (plan D4).
+ * Collections domain (plan M4, D5, extended M13): hierarchical folders, the
+ * nested tree with direct bookmark counts, exact membership sync, cycle
+ * protection, sibling ordering, and transactional bulk merge/sort/delete-empty
+ * — all user-scoped and change-logged (plan D4).
  *
  * A row another user owns simply does not exist (404, never 403). Trash is
  * the plain-`deletedAt` discipline shared with bookmarks:
@@ -364,6 +370,229 @@ export class CollectionsService {
   }
 
   /**
+   * Merges `sourceIds` into `targetId` in one transaction (`POST /collections/merge`):
+   * reparents non-source direct children of sources into `targetId`, moves all
+   * bookmark memberships into `targetId` (preserving existing target memberships),
+   * and soft-trashes `sourceIds`. Refuses merging into own descendant (409).
+   */
+  async merge(user: RequestUser, dto: MergeCollectionsDto): Promise<MergeCollectionsResponseDto> {
+    const uniqueSourceIds = dedupeIds(dto.sourceIds);
+    if (uniqueSourceIds.includes(dto.targetId)) {
+      throw new BadRequestException('targetId must not be included in sourceIds');
+    }
+
+    return this.changeLog.transact(async (manager, record) => {
+      const target = await manager.findOne(Collection, {
+        where: { id: dto.targetId, userId: user.id },
+      });
+      if (!target) throw new NotFoundException('Target collection not found');
+      if (target.deletedAt !== null) {
+        throw new NotFoundException('Target collection not found among the active collections');
+      }
+
+      const sources = await manager.find(Collection, {
+        where: { userId: user.id, id: In(uniqueSourceIds) },
+      });
+      const byId = new Map(sources.map((row) => [row.id, row]));
+      for (const sourceId of uniqueSourceIds) {
+        const row = byId.get(sourceId);
+        if (!row) throw new NotFoundException(`Collection not found: ${sourceId}`);
+        if (row.deletedAt !== null) {
+          throw new NotFoundException(
+            `Collection not found among the active collections: ${sourceId}`,
+          );
+        }
+      }
+
+      const sourceSet = new Set(uniqueSourceIds);
+      const hierarchyRows = await queryRows(
+        manager,
+        `SELECT id, parent_id FROM collections WHERE user_id = $1`,
+        [user.id],
+      );
+      const parentById = new Map<string, string | null>(
+        hierarchyRows.map((r) => [String(r.id), r.parent_id ? String(r.parent_id) : null]),
+      );
+
+      const visited = new Set<string>([target.id]);
+      let current: string | null = parentById.get(target.id) ?? null;
+      let steps = 0;
+      while (current !== null && steps < MAX_TREE_WALK) {
+        if (sourceSet.has(current)) {
+          throw new ConflictException(
+            'Target collection cannot be a descendant of any source collection',
+          );
+        }
+        if (visited.has(current)) break;
+        visited.add(current);
+        current = parentById.get(current) ?? null;
+        steps++;
+      }
+      if (current !== null && steps >= MAX_TREE_WALK) {
+        throw new Error(`Collection parent chain exceeded ${MAX_TREE_WALK} steps — corrupt data`);
+      }
+
+      const now = new Date();
+      const directChildren = await manager.find(Collection, {
+        where: { userId: user.id, parentId: In(uniqueSourceIds) },
+      });
+      const movedChildren = directChildren.filter((c) => !sourceSet.has(c.id));
+      const movedActive = movedChildren
+        .filter((c) => c.deletedAt === null)
+        .map(toTreeRow)
+        .sort(compareSiblings);
+      const movedTrashed = movedChildren.filter((c) => c.deletedAt !== null);
+
+      if (movedActive.length > 0) {
+        const maxRows = await queryRows(
+          manager,
+          `SELECT COALESCE(MAX("order"), -1) + 1 AS next
+             FROM collections
+            WHERE user_id = $1
+              AND parent_id = $2::uuid
+              AND deleted_at IS NULL
+              AND NOT (id = ANY($3::uuid[]))`,
+          [user.id, target.id, uniqueSourceIds],
+        );
+        let nextOrder = Number(maxRows[0]?.next ?? 0);
+        for (const child of movedActive) {
+          await manager.update(
+            Collection,
+            { id: child.id, userId: user.id },
+            { parentId: target.id, order: nextOrder++, updatedAt: now },
+          );
+        }
+      }
+      if (movedTrashed.length > 0) {
+        await manager.update(
+          Collection,
+          { id: In(movedTrashed.map((c) => c.id)), userId: user.id },
+          { parentId: target.id, updatedAt: now },
+        );
+      }
+
+      const membershipRows = await queryRows(
+        manager,
+        `SELECT DISTINCT bookmark_id
+           FROM bookmark_collections
+          WHERE collection_id = ANY($1::uuid[])`,
+        [uniqueSourceIds],
+      );
+      const affectedBookmarkIds = membershipRows.map((r) => String(r.bookmark_id));
+      if (affectedBookmarkIds.length > 0) {
+        await manager
+          .createQueryBuilder()
+          .insert()
+          .into(BookmarkCollection)
+          .values(
+            affectedBookmarkIds.map((bookmarkId) => ({
+              bookmarkId,
+              collectionId: target.id,
+            })),
+          )
+          .orIgnore()
+          .execute();
+        await manager.delete(BookmarkCollection, { collectionId: In(uniqueSourceIds) });
+        await manager.update(
+          Bookmark,
+          { id: In(affectedBookmarkIds), userId: user.id },
+          { updatedAt: now },
+        );
+      }
+
+      await manager.update(
+        Collection,
+        { id: In(uniqueSourceIds), userId: user.id },
+        { deletedAt: now },
+      );
+
+      await record(user.id, { entity: 'collection', entityId: target.id, action: 'update' });
+      for (const child of movedChildren) {
+        await record(user.id, { entity: 'collection', entityId: child.id, action: 'update' });
+      }
+      for (const sourceId of uniqueSourceIds) {
+        await record(user.id, { entity: 'collection', entityId: sourceId, action: 'update' });
+      }
+      for (const bookmarkId of affectedBookmarkIds) {
+        await record(user.id, { entity: 'bookmark', entityId: bookmarkId, action: 'update' });
+      }
+
+      const freshTarget = await manager.findOneByOrFail(Collection, { id: target.id });
+      const counts = await this.bookmarkCounts(user.id, manager);
+      return {
+        target: toCollectionDto(freshTarget, counts),
+        trashedIds: uniqueSourceIds,
+        movedChildren: movedChildren.length,
+        movedBookmarks: affectedBookmarkIds.length,
+      };
+    });
+  }
+
+  /**
+   * Alphabetically sorts every sibling group across the user's active
+   * collections (roots + every nested parent) in one transaction. Rows whose
+   * `order` did not change record no change event.
+   */
+  async sortAlphabetical(user: RequestUser): Promise<SortCollectionsResponseDto> {
+    return this.changeLog.transact(async (manager, record) => {
+      const rows = await manager.find(Collection, {
+        where: { userId: user.id, deletedAt: IsNull() },
+      });
+      const updates = planAlphabeticalSort(rows.map(toTreeRow));
+      if (updates.length === 0) {
+        return { updated: 0 };
+      }
+
+      const now = new Date();
+      for (const update of updates) {
+        await manager.update(
+          Collection,
+          { id: update.id, userId: user.id },
+          { order: update.order, updatedAt: now },
+        );
+        await record(user.id, { entity: 'collection', entityId: update.id, action: 'update' });
+      }
+      return { updated: updates.length };
+    });
+  }
+
+  /**
+   * Soft-trashes every active collection whose active subtree contains zero
+   * active (non-trashed) bookmarks, in one transaction. Returns `{ trashed, kept }`.
+   */
+  async deleteEmpty(user: RequestUser): Promise<DeleteEmptyCollectionsResponseDto> {
+    return this.changeLog.transact(async (manager, record) => {
+      const rows = await manager.find(Collection, {
+        where: { userId: user.id, deletedAt: IsNull() },
+        select: { id: true, parentId: true },
+      });
+      if (rows.length === 0) {
+        return { trashed: 0, kept: 0 };
+      }
+
+      const counts = await this.bookmarkCounts(user.id, manager);
+      const emptyIds = findRecursivelyEmptyCollectionIds(
+        rows.map((r) => ({ id: r.id, parentId: r.parentId ?? null })),
+        counts,
+      );
+      if (emptyIds.length === 0) {
+        return { trashed: 0, kept: rows.length };
+      }
+
+      const now = new Date();
+      await manager.update(
+        Collection,
+        { id: In(emptyIds), userId: user.id, deletedAt: IsNull() },
+        { deletedAt: now },
+      );
+      for (const id of emptyIds) {
+        await record(user.id, { entity: 'collection', entityId: id, action: 'update' });
+      }
+      return { trashed: emptyIds.length, kept: rows.length - emptyIds.length };
+    });
+  }
+
+  /**
    * Replaces a bookmark's exact collection set (plan D5 — many-to-many):
    * memberships to listed collections are ensured, memberships to absent
    * ones are removed, and every collection whose set actually changed
@@ -550,6 +779,18 @@ export class CollectionsService {
     }
     return counts;
   }
+}
+
+function dedupeIds(ids: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of ids) {
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
 }
 
 function toTreeRow(row: Collection): CollectionTreeRow {

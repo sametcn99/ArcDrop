@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
+  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsIn,
@@ -14,15 +15,30 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
+import { MAX_COLLECTIONS_PER_BOOKMARK } from '@api/collections/collections.dto';
 import { CONTENT_TYPES, type ContentType } from '@api/database/entities/bookmark.entity';
 
 export const MAX_PAGE_SIZE = 200;
 export const DEFAULT_PAGE_SIZE = 20;
 export const MAX_TAG_NAME_LENGTH = 100;
 export const MAX_TAGS_PER_BOOKMARK = 50;
+export const MAX_BULK_BOOKMARK_IDS = 500;
 export const MAX_HIGHLIGHT_TEXT_LENGTH = 10_000;
 export const MAX_HIGHLIGHT_NOTE_LENGTH = 10_000;
 export const MAX_HIGHLIGHT_COLOR_LENGTH = 32;
+
+export const BULK_BOOKMARK_ACTIONS = [
+  'move',
+  'addTags',
+  'removeTags',
+  'trash',
+  'restore',
+  'delete',
+] as const;
+export type BulkBookmarkAction = (typeof BULK_BOOKMARK_ACTIONS)[number];
+
+export const BULK_MOVE_MODES = ['assign', 'union'] as const;
+export type BulkMoveMode = (typeof BULK_MOVE_MODES)[number];
 
 /** Query-string boolean: `true/1` → true, `false/0/''` → false, else invalid. */
 const toBoolean = ({ value }: { value: unknown }): unknown => {
@@ -189,6 +205,79 @@ export class UpdateBookmarkDto {
   @IsOptional()
   @IsBoolean()
   favorite?: boolean;
+}
+
+export class BulkBookmarksDto {
+  @ApiProperty({
+    enum: BULK_BOOKMARK_ACTIONS,
+    description:
+      'Bulk action to run in a single transaction: move | addTags | removeTags | trash | restore | delete',
+  })
+  @IsIn(BULK_BOOKMARK_ACTIONS)
+  action!: BulkBookmarkAction;
+
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    minItems: 1,
+    maxItems: MAX_BULK_BOOKMARK_IDS,
+    description: `Target bookmark IDs (1–${MAX_BULK_BOOKMARK_IDS} per call)`,
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_BULK_BOOKMARK_IDS)
+  @IsUUID(undefined, { each: true })
+  ids!: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    maxItems: MAX_COLLECTIONS_PER_BOOKMARK,
+    description: 'Required when action="move": target active collection IDs',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_COLLECTIONS_PER_BOOKMARK)
+  @IsUUID(undefined, { each: true })
+  collectionIds?: string[];
+
+  @ApiPropertyOptional({
+    enum: BULK_MOVE_MODES,
+    default: 'assign',
+    description:
+      'Used when action="move": "assign" replaces each bookmark’s collections; "union" adds collectionIds while preserving existing memberships',
+  })
+  @IsOptional()
+  @IsIn(BULK_MOVE_MODES)
+  mode?: BulkMoveMode;
+
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: MAX_TAGS_PER_BOOKMARK,
+    description: 'Required when action="addTags" or "removeTags": tag names',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_TAGS_PER_BOOKMARK)
+  @IsString({ each: true })
+  @MinLength(1, { each: true, message: 'tag names must not be empty' })
+  @MaxLength(MAX_TAG_NAME_LENGTH, { each: true })
+  tags?: string[];
+}
+
+export class BulkBookmarksResponseDto {
+  @ApiProperty({ enum: BULK_BOOKMARK_ACTIONS })
+  action!: BulkBookmarkAction;
+
+  @ApiProperty({ description: 'Number of bookmarks modified by the bulk operation' })
+  affected!: number;
+
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description: 'Unique bookmark IDs modified by the bulk operation',
+  })
+  ids!: string[];
 }
 
 export class ListBookmarksQueryDto {

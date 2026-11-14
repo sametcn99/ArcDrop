@@ -41,6 +41,7 @@ describe('loadConfig', () => {
       importPerMinute: 30,
       reindexPerMinute: 30,
       mcpToolsPerMinute: 300,
+      bulkPerMinute: 30,
     });
     expect(config.log.level).toBe('info');
   });

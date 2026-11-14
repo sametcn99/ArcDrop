@@ -37,6 +37,8 @@ import {
   BookmarkIdParamDto,
   BookmarkListDto,
   BookmarkStatsDto,
+  BulkBookmarksDto,
+  BulkBookmarksResponseDto,
   CreateBookmarkBodyDto,
   CreateBookmarkDto,
   CreateHighlightDto,
@@ -49,15 +51,17 @@ import {
   UpdateBookmarkDto,
 } from './bookmarks.dto';
 import { BookmarksService } from './bookmarks.service';
+import { BulkBookmarksService } from './bulk-bookmarks.service';
 import { HighlightsService } from './highlights.service';
 import { TagsService } from './tags.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 
 /**
- * Bookmark surface (plan M3, extended M10/M11/M12). All routes are bearer-authenticated
- * (global guard) and user-scoped; `GET /bookmarks/tags` and `PUT /bookmarks/{id}/tags`
- * expose tags, `GET/POST /bookmarks/{id}/highlights` expose highlights.
+ * Bookmark surface (plan M3, extended M10/M11/M12/M13). All routes are
+ * bearer-authenticated (global guard) and user-scoped; `GET /bookmarks/tags`
+ * and `PUT /bookmarks/{id}/tags` expose tags, `GET/POST /bookmarks/{id}/highlights`
+ * expose highlights, and `POST /bookmarks/bulk` executes transactional bulk ops.
  */
 @ApiTags('Bookmarks')
 @ApiBearerAuth()
@@ -65,6 +69,7 @@ import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 export class BookmarksController {
   constructor(
     private readonly bookmarks: BookmarksService,
+    private readonly bulk: BulkBookmarksService,
     private readonly tags: TagsService,
     private readonly highlights: HighlightsService,
     private readonly collections: CollectionsService,
@@ -108,7 +113,7 @@ export class BookmarksController {
     summary: 'Search / filter / page the caller’s bookmarks',
     description:
       'Searches and filters bookmarks. The `search` (or alias `q`) query parameter parses ' +
-      'the canonical M11/M12 Raindrop-compatible operator grammar: plain `word` / `"exact phrase"` ' +
+      'the canonical M11/M12 operator grammar: plain `word` / `"exact phrase"` ' +
       '(case-insensitive ILIKE across title, excerpt, note, url, and tag names), ' +
       '`-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
       'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable), ' +
@@ -147,6 +152,29 @@ export class BookmarksController {
   @ApiOkResponse({ type: [TagUsageDto] })
   listTags(@CurrentUser() user: RequestUser): Promise<TagUsageDto[]> {
     return this.tags.listUsage(user.id);
+  }
+
+  @Post('bulk')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('bulk')
+  @ApiOperation({
+    operationId: 'bulkBookmarks',
+    summary: 'Run a transactional bulk operation over bookmarks (max 500 ids)',
+    description:
+      'Executes `move` (`assign` | `union` collection memberships), `addTags`, ' +
+      '`removeTags`, `trash`, `restore`, or `delete` (hard delete strictly for ' +
+      'already-trashed ids, preserving M4 two-phase semantics) in a single ' +
+      'change-logged transaction. Any invalid/missing id or state conflict rolls ' +
+      'back the entire batch with zero partial writes or change events. ' +
+      'Per-user rate limit: 30/min (configurable).',
+  })
+  @ApiOkResponse({ type: BulkBookmarksResponseDto })
+  bulkOperate(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: BulkBookmarksDto,
+  ): Promise<BulkBookmarksResponseDto> {
+    return this.bulk.execute(user, dto);
   }
 
   @Get(':id')

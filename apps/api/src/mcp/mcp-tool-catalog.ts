@@ -4,6 +4,7 @@ import { BadRequestException, PayloadTooLargeException } from '@nestjs/common';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import {
   BookmarkIdParamDto,
+  BulkBookmarksDto,
   CreateBookmarkDto,
   CreateHighlightDto,
   HighlightIdParamDto,
@@ -15,12 +16,14 @@ import {
   UpdateHighlightDto,
 } from '@api/bookmarks/bookmarks.dto';
 import { BookmarksService } from '@api/bookmarks/bookmarks.service';
+import { BulkBookmarksService } from '@api/bookmarks/bulk-bookmarks.service';
 import { HighlightsService } from '@api/bookmarks/highlights.service';
 import { TagsService } from '@api/bookmarks/tags.service';
 import {
   CollectionIdParamDto,
   CreateCollectionDto,
   DeleteCollectionQueryDto,
+  MergeCollectionsDto,
   ReorderCollectionsDto,
   ReplaceBookmarkCollectionsDto,
   UpdateCollectionDto,
@@ -80,10 +83,10 @@ function define(
 /**
  * The ArcDrop MCP tool catalog (plan M7/D23) — one tool per REST operation
  * of the user-facing surface (bookmarks, highlights, collections, tags,
- * library health, sync, reindex). Names ARE the REST `operationId`s; input
- * schemas are generated from the same DTO classes the REST routes validate;
- * every call goes through the SAME services — identical validation, user
- * scoping and change-log semantics. An agent is just another client.
+ * library health, bulk operations, sync, reindex). Names ARE the REST
+ * `operationId`s; input schemas are generated from the same DTO classes the
+ * REST routes validate; every call goes through the SAME services — identical
+ * validation, user scoping and change-log semantics. An agent is just another client.
  *
  * NOT mirrored on purpose: `/auth/*` and `/admin/*` (unreachable via PAT),
  * `/me/tokens` (a PAT must not mint credentials), health/icons/metrics
@@ -91,6 +94,7 @@ function define(
  */
 export function buildToolCatalog(deps: {
   bookmarks: BookmarksService;
+  bulkBookmarks: BulkBookmarksService;
   highlights: HighlightsService;
   tags: TagsService;
   collections: CollectionsService;
@@ -102,6 +106,7 @@ export function buildToolCatalog(deps: {
 }): McpToolDefinition[] {
   const {
     bookmarks,
+    bulkBookmarks,
     highlights,
     tags,
     collections,
@@ -112,7 +117,7 @@ export function buildToolCatalog(deps: {
     portability,
   } = deps;
   return [
-    // -- bookmarks (M3/M6/M10/M11/M12) ---------------------------------------
+    // -- bookmarks (M3/M6/M10/M11/M12/M13) -----------------------------------
     define(
       'listBookmarks',
       'GET',
@@ -158,6 +163,13 @@ export function buildToolCatalog(deps: {
       'Restore a bookmark from the trash. Refuses bookmarks that are not in the trash.',
       [BookmarkIdParamDto],
       (user, [p]) => bookmarks.restore(user, (p as BookmarkIdParamDto).id),
+    ),
+    define(
+      'bulkBookmarks',
+      'POST',
+      'Run one transactional bulk operation over up to 500 bookmarks: move (collectionIds, mode assign|union), addTags, removeTags, trash, restore, or delete (hard delete strictly for already-trashed ids). Any invalid id or state conflict rolls back the entire batch with zero events. Returns { action, affected, ids }.',
+      [BulkBookmarksDto],
+      (user, [dto]) => bulkBookmarks.execute(user, dto as BulkBookmarksDto),
     ),
     define(
       'replaceBookmarkTags',
@@ -276,7 +288,7 @@ export function buildToolCatalog(deps: {
       },
     ),
 
-    // -- collections (M4) --------------------------------------------------
+    // -- collections (M4/M13) ----------------------------------------------
     define(
       'listCollections',
       'GET',
@@ -343,6 +355,27 @@ export function buildToolCatalog(deps: {
         await collections.reorder(user, dto as ReorderCollectionsDto);
         return undefined;
       },
+    ),
+    define(
+      'mergeCollections',
+      'POST',
+      'Merge active sourceIds into targetId in one change-logged transaction: moves direct children and all bookmark memberships into targetId and soft-trashes sourceIds. Refuses if targetId is a descendant of a source (409) or included in sourceIds (400). Returns { target, trashedIds, movedChildren, movedBookmarks }.',
+      [MergeCollectionsDto],
+      (user, [dto]) => collections.merge(user, dto as MergeCollectionsDto),
+    ),
+    define(
+      'sortCollectionsAlphabetical',
+      'POST',
+      'Reorder every sibling level (roots and all nested parents) alphabetically by title in one change-logged transaction. Returns { updated }.',
+      [],
+      (user) => collections.sortAlphabetical(user),
+    ),
+    define(
+      'deleteEmptyCollections',
+      'POST',
+      'Soft-trash every active collection whose active subtree contains zero non-trashed bookmarks in one change-logged transaction. Returns { trashed, kept }.',
+      [],
+      (user) => collections.deleteEmpty(user),
     ),
 
     // -- sync (M5) ---------------------------------------------------------

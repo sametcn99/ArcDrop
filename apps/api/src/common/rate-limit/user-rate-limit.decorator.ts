@@ -1,6 +1,6 @@
 import { SetMetadata } from '@nestjs/common';
 
-export type UserRateLimitBucket = 'import' | 'reindex' | 'mcpTools';
+export type UserRateLimitBucket = 'import' | 'reindex' | 'mcpTools' | 'bulk';
 
 export const USER_RATE_LIMIT_KEY = 'arcdrop:user_rate_limit';
 
@@ -11,7 +11,7 @@ export interface UserRateLimitMetadata {
 }
 
 /**
- * Applies a per-user fixed-window rate limit (M9) to an authenticated route.
+ * Applies a per-user fixed-window rate limit (M9/M13) to an authenticated route.
  * Runs after `JwtAuthGuard` + `PatScopeGuard` so `request.user.id` is set.
  */
 export const UserRateLimit = (

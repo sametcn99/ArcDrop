@@ -22,6 +22,8 @@ export const MAX_COLLECTION_COLOR_LENGTH = 32;
 export const MAX_COLLECTIONS_PER_BOOKMARK = 100;
 /** Cap for one reorder batch (`PATCH /collections/order`). */
 export const MAX_ORDER_ITEMS = 1000;
+/** Cap for one collection merge batch (`POST /collections/merge`). */
+export const MAX_BULK_COLLECTION_IDS = 500;
 
 export class CreateCollectionDto {
   @ApiProperty({ maxLength: MAX_COLLECTION_TITLE_LENGTH })
@@ -183,4 +185,54 @@ export class BookmarkCollectionRefDto {
 export class BookmarkCollectionsDto {
   @ApiProperty({ type: [BookmarkCollectionRefDto] })
   collections!: BookmarkCollectionRefDto[];
+}
+
+export class MergeCollectionsDto {
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    minItems: 1,
+    maxItems: MAX_BULK_COLLECTION_IDS,
+    description: `Active source collection IDs to merge into targetId (1–${MAX_BULK_COLLECTION_IDS})`,
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_BULK_COLLECTION_IDS)
+  @IsUUID(undefined, { each: true })
+  sourceIds!: string[];
+
+  @ApiProperty({ format: 'uuid', description: 'Active target collection ID' })
+  @IsUUID()
+  targetId!: string;
+}
+
+export class MergeCollectionsResponseDto {
+  @ApiProperty({ type: CollectionDto })
+  target!: CollectionDto;
+
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description: 'Merged source collection IDs moved to the trash',
+  })
+  trashedIds!: string[];
+
+  @ApiProperty({ description: 'Number of direct child collections reparented under target' })
+  movedChildren!: number;
+
+  @ApiProperty({ description: 'Number of distinct bookmarks whose memberships moved to target' })
+  movedBookmarks!: number;
+}
+
+export class SortCollectionsResponseDto {
+  @ApiProperty({ description: 'Number of active collections whose sibling order changed' })
+  updated!: number;
+}
+
+export class DeleteEmptyCollectionsResponseDto {
+  @ApiProperty({ description: 'Number of empty collections moved to the trash' })
+  trashed!: number;
+
+  @ApiProperty({ description: 'Number of active collections kept' })
+  kept!: number;
 }

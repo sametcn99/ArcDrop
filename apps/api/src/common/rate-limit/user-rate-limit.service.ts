@@ -38,6 +38,7 @@ const BUCKET_LABELS: Record<UserRateLimitBucket, string> = {
   import: 'Import rate limit exceeded (try again within a minute)',
   reindex: 'Metadata reindex rate limit exceeded (try again within a minute)',
   mcpTools: 'MCP tool-call rate limit exceeded (try again within a minute)',
+  bulk: 'Bulk operation rate limit exceeded (try again within a minute)',
 };
 
 @Injectable()
@@ -72,6 +73,8 @@ export class UserRateLimitService {
         return this.config.rateLimitReindexPerMinute;
       case 'mcpTools':
         return this.config.rateLimitMcpToolsPerMinute;
+      case 'bulk':
+        return this.config.rateLimitBulkPerMinute;
     }
   }
 }

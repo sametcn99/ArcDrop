@@ -11,6 +11,7 @@ import { MetadataModule } from '@api/metadata/metadata.module';
 import { SettingsModule } from '@api/settings/settings.module';
 import { BookmarksController } from './bookmarks.controller';
 import { BookmarksService } from './bookmarks.service';
+import { BulkBookmarksService } from './bulk-bookmarks.service';
 import { HighlightsController } from './highlights.controller';
 import { HighlightsService } from './highlights.service';
 import { TagsController } from './tags.controller';
@@ -20,8 +21,8 @@ import { TrashPurgeService } from './trash-purge.service';
 import { UrlDecompositionService } from './url-decomposition.service';
 
 /**
- * Bookmarks core (plan M3, enriched M10): CRUD + trash/restore, highlights,
- * tags, search/paging/stats, the trash-purge job and URL decomposition.
+ * Bookmarks core (plan M3, enriched M10/M13): CRUD + trash/restore + bulk,
+ * highlights, tags, search/paging/stats, the trash-purge job and URL decomposition.
  */
 @Module({
   imports: [
@@ -34,12 +35,19 @@ import { UrlDecompositionService } from './url-decomposition.service';
   controllers: [BookmarksController, HighlightsController, TagsController],
   providers: [
     BookmarksService,
+    BulkBookmarksService,
     HighlightsService,
     TagsService,
     UrlDecompositionService,
     TrashPurgeService,
     TrashPurgeJob,
   ],
-  exports: [BookmarksService, HighlightsService, TagsService, UrlDecompositionService],
+  exports: [
+    BookmarksService,
+    BulkBookmarksService,
+    HighlightsService,
+    TagsService,
+    UrlDecompositionService,
+  ],
 })
 export class BookmarksModule {}

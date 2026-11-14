@@ -19,6 +19,7 @@ import { UserRateLimitService } from '@api/common/rate-limit/user-rate-limit.ser
 import { flatValidationErrors } from '@api/common/validation';
 import { AuditService } from '@api/audit/audit.service';
 import { BookmarksService } from '@api/bookmarks/bookmarks.service';
+import { BulkBookmarksService } from '@api/bookmarks/bulk-bookmarks.service';
 import { HighlightsService } from '@api/bookmarks/highlights.service';
 import { TagsService } from '@api/bookmarks/tags.service';
 import { CollectionsService } from '@api/collections/collections.service';
@@ -63,6 +64,7 @@ export class McpService implements OnModuleDestroy {
 
   constructor(
     bookmarks: BookmarksService,
+    bulkBookmarks: BulkBookmarksService,
     highlights: HighlightsService,
     tags: TagsService,
     collections: CollectionsService,
@@ -76,6 +78,7 @@ export class McpService implements OnModuleDestroy {
   ) {
     this.tools = buildToolCatalog({
       bookmarks,
+      bulkBookmarks,
       highlights,
       tags,
       collections,
@@ -174,7 +177,7 @@ export class McpService implements OnModuleDestroy {
    * One tool call. Order of checks (each audited): unknown tool → protocol
    * error; read-only refusal → spec-compliant tool error result; argument
    * validation (same DTO pipeline as REST) → protocol error; expensive
-   * per-user tool budgets (import/reindex) + service call → domain failures
+   * per-user tool budgets (import/reindex/bulk) + service call → domain failures
    * (404/409/429…) are tool error results, unknown throws are protocol-level
    * internal errors.
    */
@@ -237,11 +240,18 @@ export class McpService implements OnModuleDestroy {
 
     try {
       // Share expensive per-user rate budgets with the REST endpoints so MCP
-      // callers cannot bypass import or reindex caps.
+      // callers cannot bypass import, reindex, or bulk caps.
       if (name === 'importData') {
         this.rateLimiter.assertWithinLimit('import', principal.id);
       } else if (name === 'reindexBookmark') {
         this.rateLimiter.assertWithinLimit('reindex', principal.id);
+      } else if (
+        name === 'bulkBookmarks' ||
+        name === 'mergeCollections' ||
+        name === 'sortCollectionsAlphabetical' ||
+        name === 'deleteEmptyCollections'
+      ) {
+        this.rateLimiter.assertWithinLimit('bulk', principal.id);
       }
       const result = await tool.run(principal, instances as object[]);
       this.audit.recordToolCall({ principal, tool: name, outcome: 'ok', args, requestId });

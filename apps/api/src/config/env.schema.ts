@@ -83,13 +83,14 @@ export const envSchema = z.strictObject({
   }),
   rateLimit: z.strictObject({
     /**
-     * M9 per-user rate budgets on expensive routes (fixed 60s window).
+     * M9/M13 per-user rate budgets on expensive routes (fixed 60s window).
      * Applied after authentication so multi-IP abuse of a single account
      * is bounded independently of the per-IP ThrottlerGuard.
      */
     importPerMinute: z.coerce.number().int().min(1).default(30),
     reindexPerMinute: z.coerce.number().int().min(1).default(30),
     mcpToolsPerMinute: z.coerce.number().int().min(1).default(300),
+    bulkPerMinute: z.coerce.number().int().min(1).default(30),
   }),
   log: z.strictObject({
     level: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
