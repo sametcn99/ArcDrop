@@ -14,6 +14,7 @@ import MenuIcon from '@mui/icons-material/Menu';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import StarBorderOutlinedIcon from '@mui/icons-material/StarBorderOutlined';
+import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
 import {
   DndContext,
   DragOverlay,
@@ -65,6 +66,7 @@ import { SearchBar } from '../shared/components/SearchBar';
 import { SyncStatusIndicator } from '../shared/components/SyncStatusIndicator';
 import { TagManagerDialog } from '../shared/components/TagManagerDialog';
 import { ThemeSwitcher } from '../shared/components/ThemeSwitcher';
+import { UploadFileDialog } from '../shared/components/UploadFileDialog';
 import { AppDndContext, type DragItemData, type DropTargetData } from '../shared/hooks/useAppDnd';
 import { getSiblingCollections } from '../shared/utils/collectionTree';
 import { useAuthStore } from '../stores/authStore';
@@ -119,6 +121,7 @@ export function AppLayout() {
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [quickAddDialogOpen, setQuickAddDialogOpen] = useState(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [activeDrag, setActiveDrag] = useState<DragItemData | null>(null);
   const [manualSortContext, setManualSortContext] = useState<{
     collectionId: string;
@@ -613,6 +616,28 @@ export function AppLayout() {
                   </IconButton>
                 </Tooltip>
 
+                <Button
+                  color="inherit"
+                  size="small"
+                  variant="outlined"
+                  startIcon={<UploadFileOutlinedIcon />}
+                  onClick={() => setUploadDialogOpen(true)}
+                  sx={{ display: { xs: 'none', sm: 'inline-flex' }, whiteSpace: 'nowrap' }}
+                >
+                  {APP_STRINGS.uploadFileLabel}
+                </Button>
+                <Tooltip title={APP_STRINGS.uploadFileLabel}>
+                  <IconButton
+                    color="inherit"
+                    size="small"
+                    aria-label={APP_STRINGS.uploadFileLabel}
+                    onClick={() => setUploadDialogOpen(true)}
+                    sx={{ display: { xs: 'inline-flex', sm: 'none' } }}
+                  >
+                    <UploadFileOutlinedIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+
                 <Tooltip title={APP_STRINGS.notificationsButtonLabel}>
                   <IconButton
                     color="inherit"
@@ -750,6 +775,11 @@ export function AppLayout() {
           open={effectiveQuickAddOpen}
           onClose={handleCloseQuickAdd}
           initialValues={quickAddInitialValues}
+        />
+        <UploadFileDialog
+          open={uploadDialogOpen}
+          onClose={() => setUploadDialogOpen(false)}
+          initialCollectionId={routeCollectionId}
         />
 
         <DragOverlay>

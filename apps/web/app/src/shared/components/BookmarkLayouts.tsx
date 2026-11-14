@@ -1,5 +1,7 @@
 import ArrowDownwardOutlinedIcon from '@mui/icons-material/ArrowDownwardOutlined';
 import ArrowUpwardOutlinedIcon from '@mui/icons-material/ArrowUpwardOutlined';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import DragIndicatorOutlinedIcon from '@mui/icons-material/DragIndicatorOutlined';
 import OpenInNewOutlinedIcon from '@mui/icons-material/OpenInNewOutlined';
 import { useDraggable } from '@dnd-kit/core';
@@ -14,6 +16,7 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Checkbox from '@mui/material/Checkbox';
+import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import Link from '@mui/material/Link';
@@ -27,8 +30,15 @@ import type { ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
 import type { Bookmark } from '../../api/schemas/bookmarks';
 import type { LibraryLayoutMode } from '../../stores/libraryStore';
+import { downloadBookmarkFileAction } from '../actions/bookmarkActions';
 import { buildBookmarkDragId, type DragItemData } from '../hooks/useAppDnd';
 import { SHARED_BOOKMARK_STRINGS } from '../strings';
+import {
+  formatBookmarkFileMeta,
+  isExtractableTextFileBookmark,
+  isImageFileBookmark,
+} from '../utils/fileFormat';
+import { AuthenticatedFilePreview } from './AuthenticatedFilePreview';
 import { BookmarkIconBadge } from './BookmarkIconBadge';
 import { ContentTypeChip } from './ContentTypeChip';
 import { FavoriteToggleButton } from './FavoriteToggleButton';
@@ -63,12 +73,32 @@ function resolveBookmarkTitle(bookmark: Bookmark): string {
 
 function resolveBookmarkSourceLabel(bookmark: Bookmark): string {
   if (bookmark.storageKind === 'file') {
-    return bookmark.fileName ?? SHARED_BOOKMARK_STRINGS.fileItemLabel;
+    return (
+      formatBookmarkFileMeta(bookmark) ??
+      bookmark.fileName ??
+      SHARED_BOOKMARK_STRINGS.fileItemLabel
+    );
   }
   return bookmark.urlParts?.host ?? bookmark.url ?? '';
 }
 
-function BookmarkExternalAction({ bookmark }: { bookmark: Bookmark }) {
+function BookmarkPrimaryAction({ bookmark }: { bookmark: Bookmark }) {
+  const title = resolveBookmarkTitle(bookmark);
+
+  if (bookmark.storageKind === 'file') {
+    return (
+      <Tooltip title={SHARED_BOOKMARK_STRINGS.downloadFileLabel}>
+        <IconButton
+          size="small"
+          aria-label={`${SHARED_BOOKMARK_STRINGS.downloadFileLabel}: ${title}`}
+          onClick={() => void downloadBookmarkFileAction(bookmark).catch(() => undefined)}
+        >
+          <DownloadOutlinedIcon fontSize="small" />
+        </IconButton>
+      </Tooltip>
+    );
+  }
+
   if (!bookmark.url) return null;
   return (
     <Tooltip title={bookmark.url}>
@@ -78,11 +108,26 @@ function BookmarkExternalAction({ bookmark }: { bookmark: Bookmark }) {
         target="_blank"
         rel="noopener noreferrer"
         size="small"
-        aria-label={`Open external URL for ${resolveBookmarkTitle(bookmark)}`}
+        aria-label={`Open external URL for ${title}`}
       >
         <OpenInNewOutlinedIcon fontSize="small" />
       </IconButton>
     </Tooltip>
+  );
+}
+
+function ArchiveTextChipLink({ bookmark }: { bookmark: Bookmark }) {
+  if (!isExtractableTextFileBookmark(bookmark)) return null;
+  return (
+    <Chip
+      component={RouterLink}
+      to={`/bookmarks/${bookmark.id}?tab=archive&view=text`}
+      clickable
+      size="small"
+      variant="outlined"
+      icon={<DescriptionOutlinedIcon fontSize="small" />}
+      label={SHARED_BOOKMARK_STRINGS.viewArchiveTextLabel}
+    />
   );
 }
 
@@ -294,6 +339,7 @@ function ListLayout({
         const title = resolveBookmarkTitle(bookmark);
         const sourceLabel = resolveBookmarkSourceLabel(bookmark);
         const checked = Boolean(selectedBookmarkIds[bookmark.id]);
+        const isImageFile = isImageFileBookmark(bookmark);
 
         return (
           <BookmarkItemWrapper
@@ -332,11 +378,20 @@ function ListLayout({
                       sx={{ mt: -0.5 }}
                     />
 
-                    <BookmarkIconBadge
-                      iconRef={bookmark.iconRef}
-                      contentType={bookmark.contentType}
-                      alt={title}
-                    />
+                    {isImageFile ? (
+                      <AuthenticatedFilePreview
+                        bookmarkId={bookmark.id}
+                        contentType={bookmark.contentType}
+                        alt={title}
+                        size={48}
+                      />
+                    ) : (
+                      <BookmarkIconBadge
+                        iconRef={bookmark.iconRef}
+                        contentType={bookmark.contentType}
+                        alt={title}
+                      />
+                    )}
 
                     <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                       <Link
@@ -370,6 +425,7 @@ function ListLayout({
                         sx={{ mt: 1.25, alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
                       >
                         <ContentTypeChip contentType={bookmark.contentType} />
+                        <ArchiveTextChipLink bookmark={bookmark} />
                         <ReminderBadge
                           reminderAt={bookmark.reminderAt}
                           remindedAt={bookmark.remindedAt}
@@ -398,7 +454,7 @@ function ListLayout({
                         itemLabel={title}
                         onToggle={() => onToggleFavorite(bookmark)}
                       />
-                      <BookmarkExternalAction bookmark={bookmark} />
+                      <BookmarkPrimaryAction bookmark={bookmark} />
                     </Stack>
                   </Stack>
                 </CardContent>
@@ -438,6 +494,7 @@ function GridLayout({
         const title = resolveBookmarkTitle(bookmark);
         const sourceLabel = resolveBookmarkSourceLabel(bookmark);
         const checked = Boolean(selectedBookmarkIds[bookmark.id]);
+        const isImageFile = isImageFileBookmark(bookmark);
 
         return (
           <BookmarkItemWrapper
@@ -504,9 +561,19 @@ function GridLayout({
                         itemLabel={title}
                         onToggle={() => onToggleFavorite(bookmark)}
                       />
-                      <BookmarkExternalAction bookmark={bookmark} />
+                      <BookmarkPrimaryAction bookmark={bookmark} />
                     </Stack>
                   </Stack>
+
+                  {isImageFile ? (
+                    <AuthenticatedFilePreview
+                      bookmarkId={bookmark.id}
+                      contentType={bookmark.contentType}
+                      alt={title}
+                      variant="banner"
+                      maxHeight={140}
+                    />
+                  ) : null}
 
                   <Link
                     component={RouterLink}
@@ -549,6 +616,7 @@ function GridLayout({
                     sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
                   >
                     <ContentTypeChip contentType={bookmark.contentType} />
+                    <ArchiveTextChipLink bookmark={bookmark} />
                     <ReminderBadge
                       reminderAt={bookmark.reminderAt}
                       remindedAt={bookmark.remindedAt}
@@ -581,6 +649,7 @@ function HeadlinesLayout({
           const title = resolveBookmarkTitle(bookmark);
           const sourceLabel = resolveBookmarkSourceLabel(bookmark);
           const checked = Boolean(selectedBookmarkIds[bookmark.id]);
+          const isImageFile = isImageFileBookmark(bookmark);
 
           return (
             <BookmarkItemWrapper
@@ -614,12 +683,21 @@ function HeadlinesLayout({
                       sx={{ p: 0.25 }}
                     />
 
-                    <BookmarkIconBadge
-                      iconRef={bookmark.iconRef}
-                      contentType={bookmark.contentType}
-                      alt={title}
-                      size={24}
-                    />
+                    {isImageFile ? (
+                      <AuthenticatedFilePreview
+                        bookmarkId={bookmark.id}
+                        contentType={bookmark.contentType}
+                        alt={title}
+                        size={24}
+                      />
+                    ) : (
+                      <BookmarkIconBadge
+                        iconRef={bookmark.iconRef}
+                        contentType={bookmark.contentType}
+                        alt={title}
+                        size={24}
+                      />
+                    )}
 
                     <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                       <Stack
@@ -652,6 +730,7 @@ function HeadlinesLayout({
                       sx={{ alignItems: 'center', flexShrink: 0 }}
                     >
                       <Box sx={{ display: { xs: 'none', md: 'inline-flex' }, gap: 0.75 }}>
+                        <ArchiveTextChipLink bookmark={bookmark} />
                         <ReminderBadge
                           reminderAt={bookmark.reminderAt}
                           remindedAt={bookmark.remindedAt}
@@ -673,7 +752,7 @@ function HeadlinesLayout({
                         itemLabel={title}
                         onToggle={() => onToggleFavorite(bookmark)}
                       />
-                      <BookmarkExternalAction bookmark={bookmark} />
+                      <BookmarkPrimaryAction bookmark={bookmark} />
                     </Stack>
                   </ListItem>
                 </Box>
@@ -708,6 +787,7 @@ function MoodboardLayout({
         const title = resolveBookmarkTitle(bookmark);
         const sourceLabel = resolveBookmarkSourceLabel(bookmark);
         const checked = Boolean(selectedBookmarkIds[bookmark.id]);
+        const isImageFile = isImageFileBookmark(bookmark);
 
         return (
           <BookmarkItemWrapper
@@ -786,11 +866,21 @@ function MoodboardLayout({
                       itemLabel={title}
                       onToggle={() => onToggleFavorite(bookmark)}
                     />
-                    <BookmarkExternalAction bookmark={bookmark} />
+                    <BookmarkPrimaryAction bookmark={bookmark} />
                   </Stack>
                 </Box>
 
                 <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                  {isImageFile ? (
+                    <AuthenticatedFilePreview
+                      bookmarkId={bookmark.id}
+                      contentType={bookmark.contentType}
+                      alt={title}
+                      variant="banner"
+                      maxHeight={180}
+                    />
+                  ) : null}
+
                   <Link
                     component={RouterLink}
                     to={`/bookmarks/${bookmark.id}`}
@@ -822,6 +912,7 @@ function MoodboardLayout({
                     sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
                   >
                     <ContentTypeChip contentType={bookmark.contentType} />
+                    <ArchiveTextChipLink bookmark={bookmark} />
                     <ReminderBadge
                       reminderAt={bookmark.reminderAt}
                       remindedAt={bookmark.remindedAt}

@@ -1,6 +1,12 @@
 import { http, HttpResponse } from 'msw';
 import type { AuthSession, Session, User } from '../../api/schemas/auth';
-import type { Bookmark, BookmarkStats, Highlight, TagUsage } from '../../api/schemas/bookmarks';
+import type {
+  Bookmark,
+  BookmarkArchive,
+  BookmarkStats,
+  Highlight,
+  TagUsage,
+} from '../../api/schemas/bookmarks';
 import type { Collection, CollectionNode } from '../../api/schemas/collections';
 import type { Notification } from '../../api/schemas/notifications';
 import type { ProblemDetails } from '../../api/schemas/problem';
@@ -90,6 +96,17 @@ export function makeMockBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     createdAt: '2026-11-14T00:00:00.000Z',
     updatedAt: '2026-11-14T00:10:00.000Z',
     deletedAt: null,
+    ...overrides,
+  };
+}
+
+export function makeMockBookmarkArchive(overrides: Partial<BookmarkArchive> = {}): BookmarkArchive {
+  return {
+    bookmarkId: overrides.bookmarkId ?? 'bm-1',
+    cacheStatus: overrides.cacheStatus ?? 'ready',
+    cacheCheckedAt: '2026-11-14T00:05:00.000Z',
+    html: '<article><h1>Archived Snapshot</h1><p>Readable archived copy.</p></article>',
+    text: 'Archived Snapshot\n\nReadable archived copy.',
     ...overrides,
   };
 }
@@ -397,6 +414,80 @@ export const libraryHandlers = [
     );
   }),
 
+  http.post('*/api/v1/bookmarks/file', async ({ request }) => {
+    const formData = await request.formData();
+    const file = formData.get('file');
+    const fileName = file instanceof File ? file.name : 'uploaded.bin';
+    const fileMime = file instanceof File && file.type ? file.type : 'application/octet-stream';
+    const fileSize = file instanceof File ? file.size : 128;
+    const rawTitle = formData.get('title');
+    const title =
+      typeof rawTitle === 'string' && rawTitle.trim()
+        ? rawTitle.trim()
+        : fileName.replace(/\.[^.]+$/, '');
+    const favorite = formData.get('favorite') === 'true';
+
+    const contentType = fileMime.startsWith('image/')
+      ? 'image'
+      : fileMime.startsWith('video/')
+        ? 'video'
+        : fileMime.startsWith('audio/')
+          ? 'audio'
+          : fileMime === 'application/epub+zip'
+            ? 'book'
+            : 'document';
+
+    return HttpResponse.json(
+      makeMockBookmark({
+        id: 'bm-file-uploaded',
+        storageKind: 'file',
+        url: null,
+        urlParts: null,
+        title,
+        favorite,
+        contentType,
+        fileRef: 'file-ref-uploaded',
+        fileName,
+        fileMime,
+        fileSize,
+        cacheStatus:
+          fileMime === 'application/pdf' ||
+          fileMime === 'text/plain' ||
+          fileMime === 'text/markdown' ||
+          fileMime === 'application/epub+zip'
+            ? 'ready'
+            : 'skipped',
+        tags: [],
+      }),
+      { status: 201 },
+    );
+  }),
+
+  http.get('*/api/v1/files/:id', ({ request, params }) => {
+    const auth = request.headers.get('authorization');
+    if (!auth || !auth.startsWith('Bearer ')) {
+      return problemJsonResponse(401, {
+        code: 'UNAUTHORIZED',
+        title: 'Unauthorized',
+        detail: 'Missing bearer token',
+      });
+    }
+    const url = new URL(request.url);
+    const isDownload = url.searchParams.get('download') === '1';
+    const id = String(params.id);
+    const disposition = isDownload
+      ? `attachment; filename="${id}.bin"; filename*=UTF-8''${encodeURIComponent(`${id}.bin`)}`
+      : `inline; filename="${id}.bin"`;
+
+    return new HttpResponse(new Uint8Array([1, 2, 3, 4]), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': disposition,
+      },
+    });
+  }),
+
   http.get('*/api/v1/bookmarks', ({ request }) => {
     const url = new URL(request.url);
     const page = Number(url.searchParams.get('page') ?? '1');
@@ -456,6 +547,16 @@ export const libraryHandlers = [
     const id = String(params.id);
     const match = makeDefaultBookmarkFixtures().find((item) => item.id === id);
     return HttpResponse.json(match ?? makeMockBookmark({ id }), { status: 200 });
+  }),
+
+  http.get('*/api/v1/bookmarks/:id/archive', ({ params }) => {
+    const id = String(params.id);
+    return HttpResponse.json(makeMockBookmarkArchive({ bookmarkId: id }), { status: 200 });
+  }),
+
+  http.post('*/api/v1/bookmarks/:id/reindex', ({ params }) => {
+    const id = String(params.id);
+    return HttpResponse.json({ id, status: 'scheduled' as const }, { status: 202 });
   }),
 
   http.put('*/api/v1/bookmarks/:id', async ({ params, request }) => {

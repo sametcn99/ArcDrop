@@ -5,6 +5,7 @@ export const APP_STRINGS = {
   closeNavigationLabel: 'Close navigation drawer',
   toggleDesktopSidebarLabel: 'Toggle sidebar',
   quickAddLabel: 'Quick add',
+  uploadFileLabel: 'Upload file',
   notificationsButtonLabel: 'Notifications',
   navAllBookmarks: 'All bookmarks',
   navFavorites: 'Favorites',

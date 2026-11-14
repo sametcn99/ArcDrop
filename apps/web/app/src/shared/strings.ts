@@ -1,13 +1,54 @@
+export const SHARED_CACHE_STATUS_STRINGS = {
+  ready: 'Archive: Ready',
+  pending: 'Archive: Pending',
+  failed: 'Archive: Failed',
+  'invalid-origin': 'Archive: Invalid origin',
+  skipped: 'Archive: Skipped',
+} as const;
+
 export const SHARED_BOOKMARK_STRINGS = {
   selectBookmarkLabel: 'Select bookmark',
   untitledBookmark: 'Untitled bookmark',
   fileItemLabel: 'Uploaded file',
   openDetailLabel: 'Open details',
+  downloadFileLabel: 'Download file',
+  viewArchiveTextLabel: 'Archive text',
   dragBookmarkLabel: 'Drag bookmark',
   moveBookmarkUpLabel: 'Move bookmark up',
   moveBookmarkDownLabel: 'Move bookmark down',
   reminderBadgePrefix: 'Reminder',
   reminderDueBadgeLabel: 'Reminder due',
+  toastFileDownloaded: 'File downloaded.',
+  toastReindexScheduled: 'Archive refresh scheduled.',
+} as const;
+
+export const SHARED_UPLOAD_STRINGS = {
+  dialogTitle: 'Upload file',
+  dialogDescription:
+    'Upload an image, video, audio file, PDF, EPUB, Markdown, or plain-text file as a first-class library item.',
+  dropzoneHeading: 'Drop a file here or browse from your device',
+  dropzoneActiveHeading: 'Drop file to attach',
+  dropzoneFormatsHint:
+    'Supported: JPEG, PNG, GIF, WebP, HEIC, MP4, MOV, WMV, WebM, MP3, WAV, AIFF, FLAC, EPUB, PDF, MD, TXT',
+  chooseFileLabel: 'Choose file',
+  changeFileLabel: 'Change file',
+  removeFileLabel: 'Clear file',
+  fileInputLabel: 'Select file to upload',
+  titleLabel: 'Title (optional)',
+  titlePlaceholder: 'Defaults to filename if omitted',
+  collectionLabel: 'Collection',
+  collectionNoneOption: 'None (Unassigned)',
+  tagsLabel: 'Tags',
+  favoriteLabel: 'Mark as favorite',
+  cancelLabel: 'Cancel',
+  submitLabel: 'Upload file',
+  submittingLabel: 'Uploading...',
+  uploadProgressLabel: 'Upload progress',
+  missingFileError: 'Please choose or drop a file to upload.',
+  quotaLimitPrefix: 'Limit',
+  quotaUsedPrefix: 'Used this month',
+  quotaResetPrefix: 'Resets at',
+  toastUploaded: 'File uploaded to library.',
 } as const;
 
 export const SHARED_COLLECTION_STRINGS = {

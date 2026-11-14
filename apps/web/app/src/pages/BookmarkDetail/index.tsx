@@ -7,8 +7,12 @@ import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
 import Typography from '@mui/material/Typography';
-import { useNavigate, useParams } from 'react-router';
+import { useEffect } from 'react';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { BookmarkArchivePanel } from './components/BookmarkArchivePanel';
 import { BookmarkDetailForm } from './components/BookmarkDetailForm';
 import { useBookmarkDetail } from './hooks/useBookmarkDetail';
 import { BOOKMARK_DETAIL_STRINGS } from './strings';
@@ -16,6 +20,11 @@ import { BOOKMARK_DETAIL_STRINGS } from './strings';
 export default function BookmarkDetailPage() {
   const { bookmarkId } = useParams<{ bookmarkId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const activeTab = searchParams.get('tab') === 'archive' ? 'archive' : 'details';
+  const archiveView = searchParams.get('view') === 'text' ? 'text' : 'html';
+
   const {
     bookmark,
     loading,
@@ -44,7 +53,59 @@ export default function BookmarkDetailPage() {
     toggleFavorite,
     trash,
     restore,
+    archive,
+    archiveLoading,
+    archiveError,
+    reindexing,
+    loadArchive,
+    refreshArchiveStatus,
+    reindex,
+    downloadFile,
   } = useBookmarkDetail(bookmarkId);
+
+  useEffect(() => {
+    if (
+      activeTab === 'archive' &&
+      bookmark &&
+      bookmark.cacheStatus === 'ready' &&
+      !archive &&
+      !archiveLoading &&
+      !archiveError
+    ) {
+      void loadArchive();
+    }
+  }, [activeTab, archive, archiveError, archiveLoading, bookmark, loadArchive]);
+
+  const handleTabChange = (nextTab: 'details' | 'archive', nextView?: 'html' | 'text') => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (nextTab === 'details') {
+          next.delete('tab');
+          next.delete('view');
+        } else {
+          next.set('tab', 'archive');
+          if (nextView) {
+            next.set('view', nextView);
+          }
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  const handleArchiveViewChange = (nextView: 'html' | 'text') => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('tab', 'archive');
+        next.set('view', nextView);
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   const handleClose = () => {
     navigate('/');
@@ -65,7 +126,7 @@ export default function BookmarkDetailPage() {
       slotProps={{
         paper: {
           sx: {
-            width: { xs: '100%', sm: 480 },
+            width: { xs: '100%', sm: 560, md: 640 },
             maxWidth: '100%',
           },
         },
@@ -91,6 +152,29 @@ export default function BookmarkDetailPage() {
 
         <Divider />
 
+        {bookmark ? (
+          <>
+            <Tabs
+              value={activeTab}
+              onChange={(_event, value: 'details' | 'archive') => handleTabChange(value)}
+              aria-label={BOOKMARK_DETAIL_STRINGS.title}
+              sx={{ px: 3, flexShrink: 0 }}
+            >
+              <Tab
+                value="details"
+                label={BOOKMARK_DETAIL_STRINGS.detailsTabLabel}
+                data-testid="bookmark-detail-tab-details"
+              />
+              <Tab
+                value="archive"
+                label={BOOKMARK_DETAIL_STRINGS.archiveTabLabel}
+                data-testid="bookmark-detail-tab-archive"
+              />
+            </Tabs>
+            <Divider />
+          </>
+        ) : null}
+
         <Box sx={{ p: 3, overflowY: 'auto', flexGrow: 1 }}>
           {loading && !bookmark ? (
             <Stack spacing={2} aria-label={BOOKMARK_DETAIL_STRINGS.loadingLabel}>
@@ -115,6 +199,18 @@ export default function BookmarkDetailPage() {
                 {BOOKMARK_DETAIL_STRINGS.backToLibraryLabel}
               </Button>
             </Stack>
+          ) : activeTab === 'archive' ? (
+            <BookmarkArchivePanel
+              bookmark={bookmark}
+              archive={archive}
+              archiveLoading={archiveLoading}
+              archiveError={archiveError}
+              viewMode={archiveView}
+              onViewModeChange={handleArchiveViewChange}
+              onRefresh={() => void refreshArchiveStatus()}
+              reindexing={reindexing}
+              onReindex={() => void reindex()}
+            />
           ) : (
             <BookmarkDetailForm
               bookmark={bookmark}
@@ -142,6 +238,8 @@ export default function BookmarkDetailPage() {
               onToggleFavorite={() => void toggleFavorite()}
               onTrash={() => void handleTrash()}
               onRestore={() => void restore()}
+              onDownloadFile={() => void downloadFile()}
+              onOpenArchiveText={() => handleTabChange('archive', 'text')}
             />
           )}
         </Box>

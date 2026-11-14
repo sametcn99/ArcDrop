@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { bookmarksApi } from '../../../api/endpoints/bookmarks';
 import {
   updateBookmarkRequestSchema,
   type Bookmark,
+  type BookmarkArchive,
   type CreateHighlightRequest,
   type UpdateBookmarkRequest,
   type UpdateHighlightRequest,
 } from '../../../api/schemas/bookmarks';
 import { toApiError } from '../../../api/schemas/problem';
 import {
+  downloadBookmarkFileAction,
+  reindexBookmarkAction,
   replaceBookmarkTagsAction,
   restoreBookmarkAction,
   toggleBookmarkFavoriteAction,
@@ -107,6 +110,14 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
     message: string;
   } | null>(null);
 
+  const [archiveState, setArchiveState] = useState<{
+    bookmarkId: string;
+    data: BookmarkArchive | null;
+    loading: boolean;
+    error: string | null;
+  } | null>(null);
+  const [reindexing, setReindexing] = useState(false);
+
   useEffect(() => {
     if (!bookmarkId || bookmark) {
       return;
@@ -181,6 +192,78 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
   const highlightsLoading = Boolean(
     bookmarkId && bookmark && !highlightsLoaded && !highlightsError,
   );
+
+  const currentArchiveState =
+    bookmarkId && archiveState?.bookmarkId === bookmarkId ? archiveState : null;
+  const archive = currentArchiveState?.data ?? null;
+  const archiveLoading = currentArchiveState?.loading ?? false;
+  const archiveError = currentArchiveState?.error ?? null;
+
+  const loadArchive = useCallback(async () => {
+    if (!bookmarkId) return;
+    setArchiveState((prev) => ({
+      bookmarkId,
+      data: prev?.bookmarkId === bookmarkId ? prev.data : null,
+      loading: true,
+      error: null,
+    }));
+    try {
+      const data = await bookmarksApi.getArchive(bookmarkId);
+      setArchiveState({ bookmarkId, data, loading: false, error: null });
+    } catch (err) {
+      setArchiveState((prev) => ({
+        bookmarkId,
+        data: prev?.bookmarkId === bookmarkId ? prev.data : null,
+        loading: false,
+        error: toApiError(err).detail,
+      }));
+    }
+  }, [bookmarkId]);
+
+  const refreshArchiveStatus = useCallback(async () => {
+    if (!bookmarkId) return;
+    setArchiveState((prev) => ({
+      bookmarkId,
+      data: prev?.bookmarkId === bookmarkId ? prev.data : null,
+      loading: true,
+      error: null,
+    }));
+    try {
+      const fresh = await bookmarksApi.get(bookmarkId);
+      upsertBookmark(fresh);
+      if (fresh.cacheStatus === 'ready') {
+        const data = await bookmarksApi.getArchive(bookmarkId);
+        setArchiveState({ bookmarkId, data, loading: false, error: null });
+      } else {
+        setArchiveState({ bookmarkId, data: null, loading: false, error: null });
+      }
+    } catch (err) {
+      setArchiveState((prev) => ({
+        bookmarkId,
+        data: prev?.bookmarkId === bookmarkId ? prev.data : null,
+        loading: false,
+        error: toApiError(err).detail,
+      }));
+    }
+  }, [bookmarkId, upsertBookmark]);
+
+  const reindex = async (): Promise<boolean> => {
+    if (!bookmark || !bookmarkId || reindexing) return false;
+    setReindexing(true);
+    try {
+      await reindexBookmarkAction(bookmark.id);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setReindexing(false);
+    }
+  };
+
+  const downloadFile = async (): Promise<void> => {
+    if (!bookmark || bookmark.storageKind !== 'file') return;
+    await downloadBookmarkFileAction(bookmark).catch(() => undefined);
+  };
 
   const setField = (field: keyof BookmarkFormValues, value: string) => {
     if (!bookmarkId) return;
@@ -400,5 +483,13 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
     toggleFavorite,
     trash,
     restore,
+    archive,
+    archiveLoading,
+    archiveError,
+    reindexing,
+    loadArchive,
+    refreshArchiveStatus,
+    reindex,
+    downloadFile,
   };
 }

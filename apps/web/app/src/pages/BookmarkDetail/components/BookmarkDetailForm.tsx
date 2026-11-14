@@ -1,10 +1,13 @@
 import DeleteOutlineOutlinedIcon from '@mui/icons-material/DeleteOutlineOutlined';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import OpenInNewOutlinedIcon from '@mui/icons-material/OpenInNewOutlined';
 import RestoreFromTrashOutlinedIcon from '@mui/icons-material/RestoreFromTrashOutlined';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
+import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -15,10 +18,17 @@ import type {
   Highlight,
   UpdateHighlightRequest,
 } from '../../../api/schemas/bookmarks';
+import { AuthenticatedFilePreview } from '../../../shared/components/AuthenticatedFilePreview';
 import { BookmarkIconBadge } from '../../../shared/components/BookmarkIconBadge';
+import { CacheStatusChip } from '../../../shared/components/CacheStatusChip';
 import { ContentTypeChip } from '../../../shared/components/ContentTypeChip';
 import { FavoriteToggleButton } from '../../../shared/components/FavoriteToggleButton';
 import { TagAutocompleteInput } from '../../../shared/components/TagAutocompleteInput';
+import {
+  formatFileSize,
+  isExtractableTextFileBookmark,
+  isImageFileBookmark,
+} from '../../../shared/utils/fileFormat';
 import type { BookmarkFormValues } from '../hooks/useBookmarkDetail';
 import { BOOKMARK_DETAIL_STRINGS } from '../strings';
 import { HighlightsSection } from './HighlightsSection';
@@ -51,6 +61,8 @@ export interface BookmarkDetailFormProps {
   onToggleFavorite: () => void;
   onTrash: () => void;
   onRestore: () => void;
+  onDownloadFile?: () => void;
+  onOpenArchiveText?: () => void;
 }
 
 export function BookmarkDetailForm({
@@ -79,9 +91,13 @@ export function BookmarkDetailForm({
   onToggleFavorite,
   onTrash,
   onRestore,
+  onDownloadFile,
+  onOpenArchiveText,
 }: BookmarkDetailFormProps) {
   const isTrashed = bookmark.deletedAt !== null;
   const isFile = bookmark.storageKind === 'file';
+  const isImageFile = isImageFileBookmark(bookmark);
+  const isExtractableText = isExtractableTextFileBookmark(bookmark);
 
   const currentTagNames = useMemo(() => bookmark.tags.map((tag) => tag.name), [bookmark.tags]);
   const tagSyncKey = `${bookmark.id}|${currentTagNames.join('\0')}`;
@@ -108,7 +124,7 @@ export function BookmarkDetailForm({
         <Stack
           direction="row"
           spacing={1.5}
-          sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+          sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}
         >
           <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', minWidth: 0 }}>
             <BookmarkIconBadge
@@ -118,7 +134,10 @@ export function BookmarkDetailForm({
               size={40}
             />
             <Box sx={{ minWidth: 0 }}>
-              <ContentTypeChip contentType={bookmark.contentType} />
+              <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                <ContentTypeChip contentType={bookmark.contentType} />
+                <CacheStatusChip status={bookmark.cacheStatus} />
+              </Stack>
               {bookmark.urlParts?.host ? (
                 <Typography
                   variant="caption"
@@ -149,7 +168,16 @@ export function BookmarkDetailForm({
               size="medium"
               onToggle={onToggleFavorite}
             />
-            {bookmark.url ? (
+            {isFile && onDownloadFile ? (
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<DownloadOutlinedIcon fontSize="small" />}
+                onClick={onDownloadFile}
+              >
+                {BOOKMARK_DETAIL_STRINGS.downloadFileLabel}
+              </Button>
+            ) : bookmark.url ? (
               <Button
                 component="a"
                 href={bookmark.url}
@@ -164,6 +192,61 @@ export function BookmarkDetailForm({
             ) : null}
           </Stack>
         </Stack>
+
+        {isFile ? (
+          <Paper
+            variant="outlined"
+            data-testid="bookmark-file-section"
+            sx={{ p: 2, bgcolor: 'background.default' }}
+          >
+            <Stack spacing={1.5}>
+              <Typography variant="subtitle2">
+                {BOOKMARK_DETAIL_STRINGS.fileSectionHeading}
+              </Typography>
+
+              {isImageFile ? (
+                <AuthenticatedFilePreview
+                  bookmarkId={bookmark.id}
+                  contentType={bookmark.contentType}
+                  alt={bookmark.title ?? bookmark.fileName ?? ''}
+                  variant="banner"
+                  maxHeight={240}
+                />
+              ) : null}
+
+              <Stack spacing={0.25}>
+                {bookmark.fileName ? (
+                  <Typography variant="caption" color="text.secondary">
+                    {`${BOOKMARK_DETAIL_STRINGS.fileNameLabel}: ${bookmark.fileName}`}
+                  </Typography>
+                ) : null}
+                {bookmark.fileMime ? (
+                  <Typography variant="caption" color="text.secondary">
+                    {`${BOOKMARK_DETAIL_STRINGS.fileMimeLabel}: ${bookmark.fileMime}`}
+                  </Typography>
+                ) : null}
+                {bookmark.fileSize !== null ? (
+                  <Typography variant="caption" color="text.secondary">
+                    {`${BOOKMARK_DETAIL_STRINGS.fileSizeLabel}: ${formatFileSize(bookmark.fileSize)}`}
+                  </Typography>
+                ) : null}
+              </Stack>
+
+              {isExtractableText && onOpenArchiveText ? (
+                <Box>
+                  <Button
+                    size="small"
+                    variant="text"
+                    startIcon={<DescriptionOutlinedIcon fontSize="small" />}
+                    onClick={onOpenArchiveText}
+                  >
+                    {BOOKMARK_DETAIL_STRINGS.readArchiveTextLabel}
+                  </Button>
+                </Box>
+              ) : null}
+            </Stack>
+          </Paper>
+        ) : null}
 
         {isTrashed ? (
           <Alert

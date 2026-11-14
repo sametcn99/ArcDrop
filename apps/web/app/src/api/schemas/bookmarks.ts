@@ -89,6 +89,19 @@ export const bookmarkStatsSchema = z.object({
   favorites: z.number().int().nonnegative(),
 });
 
+export const bookmarkArchiveSchema = z.object({
+  bookmarkId: z.string(),
+  cacheStatus: cacheStatusSchema,
+  cacheCheckedAt: z.string().nullable(),
+  html: z.string(),
+  text: z.string(),
+});
+
+export const reindexBookmarkResponseSchema = z.object({
+  id: z.string(),
+  status: z.literal('scheduled'),
+});
+
 export const httpUrlSchema = z
   .string()
   .trim()
@@ -195,6 +208,17 @@ export const bulkBookmarksResponseSchema = z.object({
   ids: z.array(z.string()),
 });
 
+export interface UploadBookmarkFileInput {
+  file: File;
+  title?: string;
+  excerpt?: string;
+  note?: string;
+  favorite?: boolean;
+  tags?: string[];
+  collectionIds?: string[];
+  reminderAt?: string | null;
+}
+
 export type BookmarkContentType = z.infer<typeof contentTypeSchema>;
 export type BookmarkCacheStatus = z.infer<typeof cacheStatusSchema>;
 export type BookmarkStorageKind = z.infer<typeof storageKindSchema>;
@@ -205,6 +229,8 @@ export type TagUsage = z.infer<typeof tagUsageSchema>;
 export type Bookmark = z.infer<typeof bookmarkSchema>;
 export type BookmarkListResponse = z.infer<typeof bookmarkListResponseSchema>;
 export type BookmarkStats = z.infer<typeof bookmarkStatsSchema>;
+export type BookmarkArchive = z.infer<typeof bookmarkArchiveSchema>;
+export type ReindexBookmarkResponse = z.infer<typeof reindexBookmarkResponseSchema>;
 export type CreateBookmarkRequest = z.infer<typeof createBookmarkRequestSchema>;
 export type UpdateBookmarkRequest = z.infer<typeof updateBookmarkRequestSchema>;
 export type ReplaceBookmarkTagsRequest = z.infer<typeof replaceBookmarkTagsRequestSchema>;
@@ -236,6 +262,10 @@ const _bookmarkListCheck: components['schemas']['BookmarkListDto'] | undefined =
   BookmarkListResponse | undefined;
 const _bookmarkStatsCheck: components['schemas']['BookmarkStatsDto'] | undefined = undefined as
   BookmarkStats | undefined;
+const _bookmarkArchiveCheck: components['schemas']['BookmarkArchiveDto'] | undefined = undefined as
+  BookmarkArchive | undefined;
+const _reindexBookmarkCheck: components['schemas']['ReindexBookmarkResponseDto'] | undefined =
+  undefined as ReindexBookmarkResponse | undefined;
 const _createBookmarkCheck: components['schemas']['CreateBookmarkBodyDto'] | undefined =
   undefined as CreateBookmarkRequest | undefined;
 const _updateBookmarkCheck: components['schemas']['UpdateBookmarkDto'] | undefined = undefined as
@@ -266,6 +296,8 @@ void _tagUsageCheck;
 void _bookmarkCheck;
 void _bookmarkListCheck;
 void _bookmarkStatsCheck;
+void _bookmarkArchiveCheck;
+void _reindexBookmarkCheck;
 void _createBookmarkCheck;
 void _updateBookmarkCheck;
 void _replaceTagsCheck;

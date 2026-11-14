@@ -5,12 +5,19 @@ import type {
   Bookmark,
   CreateBookmarkQuery,
   CreateBookmarkRequest,
+  ReindexBookmarkResponse,
   UpdateBookmarkRequest,
+  UploadBookmarkFileInput,
 } from '../../api/schemas/bookmarks';
 import { toApiError } from '../../api/schemas/problem';
 import { useLibraryStore } from '../../stores/libraryStore';
 import { useUiStore } from '../../stores/uiStore';
-import { SHARED_QUICK_ADD_STRINGS, SHARED_TAG_STRINGS } from '../strings';
+import {
+  SHARED_BOOKMARK_STRINGS,
+  SHARED_QUICK_ADD_STRINGS,
+  SHARED_TAG_STRINGS,
+  SHARED_UPLOAD_STRINGS,
+} from '../strings';
 
 export interface CreateBookmarkActionInput {
   body: CreateBookmarkRequest;
@@ -64,6 +71,110 @@ export async function createBookmarkAction(input: CreateBookmarkActionInput): Pr
     const apiErr = toApiError(err);
     useUiStore.getState().enqueueSnackbar({
       message: apiErr.detail || 'Could not create bookmark.',
+      severity: 'error',
+    });
+    throw apiErr;
+  }
+}
+
+export async function uploadBookmarkFileAction(input: UploadBookmarkFileInput): Promise<Bookmark> {
+  try {
+    const created = await bookmarksApi.uploadFile(input);
+
+    const store = useLibraryStore.getState();
+    store.upsertBookmark(created);
+
+    if (input.collectionIds && input.collectionIds.length > 0) {
+      for (const collectionId of input.collectionIds) {
+        store.addBookmarkToCollectionViews(collectionId, created);
+      }
+    }
+
+    void Promise.all([
+      bookmarksApi
+        .stats()
+        .then((stats) => useLibraryStore.getState().hydrateStats(stats))
+        .catch(() => undefined),
+      collectionsApi
+        .list()
+        .then((res) => useLibraryStore.getState().hydrateCollections(res.items))
+        .catch(() => undefined),
+      tagsApi
+        .list()
+        .then((tags) => useLibraryStore.getState().hydrateTags(tags))
+        .catch(() => undefined),
+    ]);
+
+    useUiStore.getState().enqueueSnackbar({
+      message: SHARED_UPLOAD_STRINGS.toastUploaded,
+      severity: 'success',
+    });
+    return created;
+  } catch (err) {
+    const apiErr = toApiError(err);
+    useUiStore.getState().enqueueSnackbar({
+      message: apiErr.detail || 'Could not upload file.',
+      severity: 'error',
+    });
+    throw apiErr;
+  }
+}
+
+export async function downloadBookmarkFileAction(bookmark: Bookmark): Promise<string> {
+  try {
+    const response = await bookmarksApi.getFileBlob(bookmark.id, { download: true });
+    const resolvedFilename = response.filename ?? bookmark.fileName ?? 'download';
+
+    if (typeof URL.createObjectURL === 'function' && typeof document !== 'undefined') {
+      const objectUrl = URL.createObjectURL(response.blob);
+      try {
+        const link = document.createElement('a');
+        link.href = objectUrl;
+        link.download = resolvedFilename;
+        link.rel = 'noopener noreferrer';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } finally {
+        URL.revokeObjectURL(objectUrl);
+      }
+    }
+
+    useUiStore.getState().enqueueSnackbar({
+      message: `${SHARED_BOOKMARK_STRINGS.toastFileDownloaded} (${resolvedFilename})`,
+      severity: 'success',
+    });
+    return resolvedFilename;
+  } catch (err) {
+    const apiErr = toApiError(err);
+    useUiStore.getState().enqueueSnackbar({
+      message: apiErr.detail || 'Could not download file.',
+      severity: 'error',
+    });
+    throw apiErr;
+  }
+}
+
+export async function reindexBookmarkAction(bookmarkId: string): Promise<ReindexBookmarkResponse> {
+  try {
+    const res = await bookmarksApi.reindex(bookmarkId);
+    const current = useLibraryStore.getState().bookmarksById[bookmarkId];
+    if (current) {
+      useLibraryStore.getState().upsertBookmark({
+        ...current,
+        cacheStatus: 'pending',
+      });
+    }
+    useUiStore.getState().enqueueSnackbar({
+      message: SHARED_BOOKMARK_STRINGS.toastReindexScheduled,
+      severity: 'info',
+    });
+    return res;
+  } catch (err) {
+    const apiErr = toApiError(err);
+    useUiStore.getState().enqueueSnackbar({
+      message: apiErr.detail || 'Could not schedule reindex.',
       severity: 'error',
     });
     throw apiErr;

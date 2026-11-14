@@ -27,8 +27,46 @@ export interface RequestOptions<T> {
   signal?: AbortSignal;
 }
 
+export interface BlobRequestOptions {
+  query?: Record<string, string | number | boolean | undefined | null>;
+  headers?: Record<string, string>;
+  skipAuth?: boolean;
+  signal?: AbortSignal;
+}
+
+export interface BlobResponse {
+  blob: Blob;
+  contentType: string;
+  contentDisposition: string | null;
+  filename: string | null;
+}
+
 interface InternalRequestOptions<T> extends RequestOptions<T> {
   _retried?: boolean;
+}
+
+interface InternalBlobRequestOptions extends BlobRequestOptions {
+  _retried?: boolean;
+}
+
+export function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+
+  // Prefer RFC 5987 filename*=UTF-8''... over legacy filename="..."
+  const starMatch = /filename\*\s*=\s*(?:UTF-8''|utf-8'')([^;\r\n]+)/i.exec(header);
+  if (starMatch?.[1]) {
+    const raw = starMatch[1].trim().replace(/^"(.*)"$/, '$1');
+    try {
+      const decoded = decodeURIComponent(raw).trim();
+      if (decoded) return decoded;
+    } catch {
+      if (raw) return raw;
+    }
+  }
+
+  const plainMatch = /filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;\r\n]+)/i.exec(header);
+  const candidate = (plainMatch?.[1] ?? plainMatch?.[2] ?? '').trim();
+  return candidate.length > 0 ? candidate : null;
 }
 
 function resolveDefaultBaseUrl(): string {
@@ -211,7 +249,10 @@ export function createApiClient(config: ApiClientConfig = {}) {
     }
 
     let bodyInit: BodyInit | undefined;
-    if (options.body !== undefined) {
+    if (options.body instanceof FormData) {
+      // Let fetch / the browser assign the multipart boundary Content-Type automatically.
+      bodyInit = options.body;
+    } else if (options.body !== undefined) {
       headers['Content-Type'] = 'application/json';
       bodyInit = JSON.stringify(options.body);
     }
@@ -229,9 +270,6 @@ export function createApiClient(config: ApiClientConfig = {}) {
     }
 
     if (response.status === 401 && !options.skipAuth && !options._retried && tokens?.refreshToken) {
-      // If another in-flight refresh already rotated the access token after this
-      // request was dispatched, retry directly with the fresh token; otherwise
-      // join or start the single-flight refresh.
       if (tokens.accessToken === usedAccessToken) {
         await executeRefreshSingleFlight();
       }
@@ -264,6 +302,56 @@ export function createApiClient(config: ApiClientConfig = {}) {
     return json as T;
   }
 
+  async function getBlobInternal(
+    path: string,
+    options: InternalBlobRequestOptions = {},
+  ): Promise<BlobResponse> {
+    const url = buildApiUrl(baseUrl, path, options.query);
+    const headers: Record<string, string> = {
+      Accept: '*/*',
+      ...options.headers,
+    };
+
+    const usedAccessToken = !options.skipAuth ? (tokens?.accessToken ?? null) : null;
+    if (usedAccessToken) {
+      headers['Authorization'] = `Bearer ${usedAccessToken}`;
+    }
+
+    let response: Response;
+    try {
+      response = await fetchImpl(url, {
+        method: 'GET',
+        headers,
+        signal: options.signal,
+      });
+    } catch (error) {
+      throw toApiError(error);
+    }
+
+    if (response.status === 401 && !options.skipAuth && !options._retried && tokens?.refreshToken) {
+      if (tokens.accessToken === usedAccessToken) {
+        await executeRefreshSingleFlight();
+      }
+      return getBlobInternal(path, { ...options, _retried: true });
+    }
+
+    if (!response.ok) {
+      throw await parseErrorResponse(response);
+    }
+
+    const blob = await response.blob();
+    const contentDisposition = response.headers.get('content-disposition');
+    const contentType = response.headers.get('content-type') ?? blob.type ?? 'application/octet-stream';
+    const filename = parseContentDispositionFilename(contentDisposition);
+
+    return {
+      blob,
+      contentType,
+      contentDisposition,
+      filename,
+    };
+  }
+
   return {
     setHooks,
     setBaseUrl,
@@ -275,6 +363,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
     getRefreshToken,
     refreshSession: executeRefreshSingleFlight,
     request: <T>(path: string, options?: RequestOptions<T>) => requestInternal<T>(path, options),
+    getBlob: (path: string, options?: BlobRequestOptions) => getBlobInternal(path, options),
     get: <T>(path: string, options?: Omit<RequestOptions<T>, 'method' | 'body'>) =>
       requestInternal<T>(path, { ...options, method: 'GET' }),
     post: <T>(path: string, body?: unknown, options?: Omit<RequestOptions<T>, 'method' | 'body'>) =>

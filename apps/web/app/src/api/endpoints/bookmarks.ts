@@ -1,12 +1,15 @@
-import { apiClient, type ApiClient } from '../client';
+import { apiClient, type ApiClient, type BlobResponse } from '../client';
 import {
+  bookmarkArchiveSchema,
   bookmarkCollectionsResponseSchema,
   bookmarkListResponseSchema,
   bookmarkSchema,
   bookmarkStatsSchema,
   bulkBookmarksResponseSchema,
+  reindexBookmarkResponseSchema,
   tagUsageListSchema,
   type Bookmark,
+  type BookmarkArchive,
   type BookmarkCollectionsResponse,
   type BookmarkListQuery,
   type BookmarkListResponse,
@@ -15,8 +18,10 @@ import {
   type BulkBookmarksResponse,
   type CreateBookmarkQuery,
   type CreateBookmarkRequest,
+  type ReindexBookmarkResponse,
   type TagUsage,
   type UpdateBookmarkRequest,
+  type UploadBookmarkFileInput,
 } from '../schemas/bookmarks';
 
 export function createBookmarksApi(client: ApiClient = apiClient) {
@@ -65,6 +70,64 @@ export function createBookmarksApi(client: ApiClient = apiClient) {
             }
           : undefined,
         schema: bookmarkSchema,
+      });
+    },
+
+    async uploadFile(
+      input: UploadBookmarkFileInput,
+      options?: { signal?: AbortSignal },
+    ): Promise<Bookmark> {
+      const formData = new FormData();
+      formData.append('file', input.file, input.file.name);
+
+      if (input.title !== undefined && input.title.trim() !== '') {
+        formData.append('title', input.title.trim());
+      }
+      if (input.excerpt !== undefined && input.excerpt.trim() !== '') {
+        formData.append('excerpt', input.excerpt.trim());
+      }
+      if (input.note !== undefined && input.note.trim() !== '') {
+        formData.append('note', input.note.trim());
+      }
+      if (input.favorite !== undefined) {
+        formData.append('favorite', String(input.favorite));
+      }
+      if (input.tags && input.tags.length > 0) {
+        formData.append('tags', JSON.stringify(input.tags));
+      }
+      if (input.collectionIds && input.collectionIds.length > 0) {
+        formData.append('collectionIds', JSON.stringify(input.collectionIds));
+      }
+      if (input.reminderAt) {
+        formData.append('reminderAt', input.reminderAt);
+      }
+
+      return client.post('/bookmarks/file', formData, {
+        schema: bookmarkSchema,
+        signal: options?.signal,
+      });
+    },
+
+    async getFileBlob(
+      idOrRef: string,
+      options?: { download?: boolean; signal?: AbortSignal },
+    ): Promise<BlobResponse> {
+      return client.getBlob(`/files/${encodeURIComponent(idOrRef)}`, {
+        query: options?.download ? { download: 1 } : undefined,
+        signal: options?.signal,
+      });
+    },
+
+    async getArchive(id: string, options?: { signal?: AbortSignal }): Promise<BookmarkArchive> {
+      return client.get(`/bookmarks/${encodeURIComponent(id)}/archive`, {
+        schema: bookmarkArchiveSchema,
+        signal: options?.signal,
+      });
+    },
+
+    async reindex(id: string): Promise<ReindexBookmarkResponse> {
+      return client.post(`/bookmarks/${encodeURIComponent(id)}/reindex`, undefined, {
+        schema: reindexBookmarkResponseSchema,
       });
     },
 
