@@ -8,6 +8,7 @@ import { M12LibraryHealth1794629705566 } from './1794629705566-M12LibraryHealth'
 import { M14RemindersNotifications1794632472998 } from './1794632472998-M14RemindersNotifications';
 import { M15TwoFactorAuth1794633718696 } from './1794633718696-M15TwoFactorAuth';
 import { M16ManualOrdering1794634989570 } from './1794634989570-M16ManualOrdering';
+import { M17ArchiveFullTextSearch1794636418427 } from './1794636418427-M17ArchiveFullTextSearch';
 
 /**
  * Migration registry — EXPLICIT list, same rule as `entities`: no globs
@@ -24,4 +25,5 @@ export const migrations = [
   M14RemindersNotifications1794632472998,
   M15TwoFactorAuth1794633718696,
   M16ManualOrdering1794634989570,
+  M17ArchiveFullTextSearch1794636418427,
 ];

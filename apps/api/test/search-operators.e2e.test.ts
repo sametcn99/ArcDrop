@@ -573,7 +573,7 @@ describe('Search operators M11 (e2e)', () => {
         inputSchema: { properties?: Record<string, unknown> };
       }>
     ).find((t) => t.name === 'listBookmarks');
-    expect(listTool?.description).toContain('M11/M12/M14 operator grammar');
+    expect(listTool?.description).toContain('M11/M12/M14/M17 operator grammar');
     expect(listTool?.inputSchema.properties?.['q']).toBeDefined();
 
     const ok = await mcpPost(

@@ -287,10 +287,11 @@ async function waitFor(
   throw new Error('expected change notification did not arrive within the deadline');
 }
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering, M17 archive. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
+  'getBookmarkArchive',
   'createBookmark',
   'updateBookmark',
   'deleteBookmark',
@@ -761,7 +762,7 @@ describe('MCP server (e2e)', () => {
         }
       ).tools;
       const mutationTools = toolList.filter((t) => t.annotations.readOnlyHint === false);
-      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 13); // 13 read tools
+      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 14); // 14 read tools
 
       let checked = 0;
       for (const tool of mutationTools) {

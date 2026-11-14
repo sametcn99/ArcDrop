@@ -33,6 +33,7 @@ import {
   ReplaceBookmarkCollectionsDto,
 } from '@api/collections/collections.dto';
 import {
+  BookmarkArchiveDto,
   BookmarkDto,
   BookmarkIdParamDto,
   BookmarkListDto,
@@ -58,10 +59,12 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 
 /**
- * Bookmark surface (plan M3, extended M10/M11/M12/M13/M14/M16). All routes are
- * bearer-authenticated (global guard) and user-scoped; `GET /bookmarks/tags`
- * and `PUT /bookmarks/{id}/tags` expose tags, `GET/POST /bookmarks/{id}/highlights`
- * expose highlights, and `POST /bookmarks/bulk` executes transactional bulk ops.
+ * Bookmark surface (plan M3, extended M10/M11/M12/M13/M14/M16/M17). All
+ * routes are bearer-authenticated (global guard) and user-scoped;
+ * `GET /bookmarks/tags` and `PUT /bookmarks/{id}/tags` expose tags,
+ * `GET/POST /bookmarks/{id}/highlights` expose highlights,
+ * `GET /bookmarks/{id}/archive` serves extracted permanent archive copies, and
+ * `POST /bookmarks/bulk` executes transactional bulk ops.
  */
 @ApiTags('Bookmarks')
 @ApiBearerAuth()
@@ -84,7 +87,7 @@ export class BookmarksController {
       'Stores the URL verbatim and derives the filterable URL parts server-side ' +
       '(plan D12). Saving the same URL twice creates two bookmarks (plan D13). ' +
       'Supports quick-add query params (`?url=…&title=…&collection=…`) for RSS readers ' +
-      'and share sheets using the same validation and metadata pipeline. ' +
+      'and share sheets using the same validation and metadata/archive pipeline. ' +
       'When `collection` is supplied, the new membership appends at `MAX(order) + 1`. ' +
       'Optional `reminderAt` is stored in UTC (clients render local time).',
   })
@@ -116,15 +119,16 @@ export class BookmarksController {
     summary: 'Search / filter / page the caller’s bookmarks',
     description:
       'Searches and filters bookmarks. The `search` (or alias `q`) query parameter parses ' +
-      'the canonical M11/M12/M14 operator grammar: plain `word` / `"exact phrase"` ' +
-      '(case-insensitive ILIKE across title, excerpt, note, url, and tag names), ' +
+      'the canonical M11/M12/M14/M17 operator grammar: plain `word` / `"exact phrase"` ' +
+      '(hybrid PostgreSQL `simple`-config FTS across title, excerpt, note, extracted page/PDF archive content, and highlights, plus prefix `:*` and ILIKE fallback for URLs, tag names, and short/punctuation tokens), ' +
       '`-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
       'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable), ' +
-      '`type:<article|image|video|audio|document|book|link>`, `favorite:true|false`, `notag:true|false`, ' +
+      '`type:<article|image|video|audio|document|book|link>`, `cache.status:<pending|ready|failed|invalid-origin|skipped>`, ' +
+      '`favorite:true|false`, `notag:true|false`, ' +
       '`broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` ' +
       '(OR positive terms; exclusions stay ANDed). Reserved operators (`file:`) ' +
       'and unknown operators return `400 BAD_REQUEST` with character position. ' +
-      'Composes with `collectionId` (membership is membership), `tag`, `domain`, `favorite`, `broken`, `reminder`, `type`, ' +
+      'Composes with `collectionId` (membership is membership), `tag`, `domain`, `favorite`, `broken`, `reminder`, `type`, `cacheStatus`, ' +
       '`unassignedOnly`, `trashed`, and `updatedSince` via AND. ' +
       '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc (default), `createdAt` desc, `title` asc, ' +
       'or `manual` (membership `order` asc NULLS LAST; requires `collectionId` because manual order is membership-scoped per collection per D21 — returns `400 BAD_REQUEST` without `collectionId`).',
@@ -191,12 +195,29 @@ export class BookmarksController {
     return this.bookmarks.get(user, params.id);
   }
 
+  @Get(':id/archive')
+  @ApiOperation({
+    operationId: 'getBookmarkArchive',
+    summary:
+      'Fetch the permanent archived copy (sanitized HTML + plain text) of one bookmark (M17)',
+    description:
+      'Returns the extracted readable HTML and indexed plain text stored on the archive volume ' +
+      'when `cacheStatus` is `ready`. Returns `404 NOT_FOUND` if the bookmark does not exist or has no ready archive.',
+  })
+  @ApiOkResponse({ type: BookmarkArchiveDto })
+  getArchive(
+    @CurrentUser() user: RequestUser,
+    @Param() params: BookmarkIdParamDto,
+  ): Promise<BookmarkArchiveDto> {
+    return this.bookmarks.getArchive(user, params.id);
+  }
+
   @Put(':id')
   @ApiOperation({
     operationId: 'updateBookmark',
     summary: 'Update a bookmark (PUT: provided fields replace, null clears)',
     description:
-      'Changing `url` re-runs the URL decomposition (plan D12) and clears any broken-link flag (M12). ' +
+      'Changing `url` re-runs the URL decomposition (plan D12), clears any broken-link flag (M12), and resets archive state to pending (M17). ' +
       'Setting `reminderAt` schedules a one-time reminder in UTC (clients render local time; explicit `null` cancels it). ' +
       'Refuses trashed bookmarks.',
   })
@@ -216,7 +237,7 @@ export class BookmarksController {
     summary: 'Move a bookmark to the trash (soft delete)',
     description:
       'Soft-deletes the bookmark (`deletedAt` set) while preserving its collection memberships and manual `order` slots ' +
-      '(restoring returns it to the same slots). Hard deletion (purge) happens in the daily retention sweep (plan D17) or bulk delete and removes membership rows and slots via cascade.',
+      '(restoring returns it to the same slots). Hard deletion (purge) happens in the daily retention sweep (plan D17) or bulk delete and removes membership rows, slots, and archived bytes.',
   })
   @ApiNoContentResponse({ description: 'Moved to trash' })
   async delete(
@@ -315,11 +336,12 @@ export class BookmarksController {
   @UserRateLimit('reindex')
   @ApiOperation({
     operationId: 'reindexBookmark',
-    summary: 'Re-run the metadata/icon pipeline for one bookmark (plan M6)',
+    summary:
+      'Re-run the metadata, icon, and permanent archive pipeline for one bookmark (plan M6/M17)',
     description:
-      'Schedules an SSRF-hardened re-scrape in `refresh` mode: coverRef/iconRef ' +
-      'and contentType are updated from the target on success; title/excerpt are only filled while ' +
-      'still null (client data is never overwritten — clear a field with an ' +
+      'Schedules an SSRF-hardened re-scrape in `refresh` mode: coverRef/iconRef, ' +
+      'contentType, and the archived HTML/plain-text copy + FTS text are re-extracted from the target on success; ' +
+      'title/excerpt are only filled while still null (client data is never overwritten — clear a field with an ' +
       'explicit null first to have it re-filled). The bookmark is updated ' +
       'asynchronously; completion records a `bookmark:update` change event so ' +
       'devices refetch. Refuses unknown and trashed bookmarks (404). The response ' +

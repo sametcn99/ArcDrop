@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
 import { Highlight } from '@api/database/entities/highlight.entity';
 import { ChangeLogService } from '@api/change-log/change-log.service';
+import { ArchiveStorageService } from '@api/metadata/archive-storage.service';
 import { IconEvictionService } from '@api/metadata/icon-eviction.service';
 import { SettingsService } from '@api/settings/settings.service';
 import { In, LessThan, type Repository } from 'typeorm';
@@ -15,12 +16,13 @@ export interface PurgeSummary {
 const MS_PER_DAY = 86_400_000;
 
 /**
- * Trash retention sweep (plan D17, extended M10): hard-deletes bookmarks that
- * have been in the trash longer than `trashRetentionDays` (default 30, D16).
+ * Trash retention sweep (plan D17, extended M10/M17): hard-deletes bookmarks
+ * that have been in the trash longer than `trashRetentionDays` (default 30, D16).
  *
  * The purge emits ChangeEvents like any mutation: one `bookmark:delete`
  * tombstone per purged row, one `highlight:delete` tombstone per cascaded
  * highlight row, plus `tag:delete` for tags whose last membership vanished.
+ * On-disk archives and orphaned icons are evicted after commit.
  */
 @Injectable()
 export class TrashPurgeService {
@@ -30,6 +32,7 @@ export class TrashPurgeService {
     private readonly tags: TagsService,
     private readonly changeLog: ChangeLogService,
     private readonly iconEviction: IconEvictionService,
+    private readonly archives: ArchiveStorageService,
   ) {}
 
   async purgeExpired(now: Date = new Date()): Promise<PurgeSummary> {
@@ -76,6 +79,8 @@ export class TrashPurgeService {
 
     // M6 ride-along: hard-deleted rows may orphan icon files.
     void this.iconEviction.evictOrphaned().catch(() => {});
+    // M17: purge deletes archive bytes on disk.
+    void this.archives.removeMany(expiredIds).catch(() => {});
 
     return summary;
   }

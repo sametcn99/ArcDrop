@@ -58,6 +58,7 @@ interface SettingsView {
   trashRetentionDays: number;
   changeLogRetentionDays: number;
   brokenLinkCheckMode: 'off' | 'basic' | 'default' | 'strict';
+  archiveMaxBytes: number;
 }
 
 interface CallResult<T> {
@@ -189,6 +190,7 @@ describe('Auth & users (e2e)', () => {
         trashRetentionDays: 30,
         changeLogRetentionDays: 90,
         brokenLinkCheckMode: 'default',
+        archiveMaxBytes: 70 * 1024 * 1024,
       });
     });
 

@@ -17,6 +17,7 @@ import { Collection } from '@api/database/entities/collection.entity';
 import { Highlight } from '@api/database/entities/highlight.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import { queryRows } from '@api/database/query-rows';
+import { ArchiveStorageService } from '@api/metadata/archive-storage.service';
 import { IconEvictionService } from '@api/metadata/icon-eviction.service';
 import { In, IsNull, Not, type EntityManager } from 'typeorm';
 import type { BulkBookmarksDto, BulkBookmarksResponseDto } from './bookmarks.dto';
@@ -38,6 +39,7 @@ export class BulkBookmarksService {
     private readonly changeLog: ChangeLogService,
     private readonly tags: TagsService,
     private readonly iconEviction: IconEvictionService,
+    private readonly archives: ArchiveStorageService,
   ) {}
 
   async execute(user: RequestUser, dto: BulkBookmarksDto): Promise<BulkBookmarksResponseDto> {
@@ -78,6 +80,8 @@ export class BulkBookmarksService {
     if (dto.action === 'delete' && result.affected > 0) {
       // M6 ride-along: hard-deleted rows may orphan icon files.
       void this.iconEviction.evictOrphaned().catch(() => {});
+      // M17: purge deletes archive bytes on disk.
+      void this.archives.removeMany(result.ids).catch(() => {});
     }
 
     return result;

@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M16 — Manual ordering (**Wave 2: M0–M16**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (40 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`); plus M15 TOTP 2FA with single-use recovery codes, two-step login (`TOTP_REQUIRED`), password-confirmed `POST /me/reset-data` & `DELETE /me`, and documented export→import account transfer; plus M16 membership-scoped manual bookmark ordering (`bookmark_collections.order`, `PATCH /collections/{id}/bookmarks/order`, `GET /bookmarks?sort=manual&collectionId=`). **Next:** Wave 2 — M17 (archive & full-text search).
+**Status:** M17 — Archive & full-text search (**Wave 2: M0–M17**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (41 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`); plus M15 TOTP 2FA with single-use recovery codes, two-step login (`TOTP_REQUIRED`), password-confirmed `POST /me/reset-data` & `DELETE /me`, and documented export→import account transfer; plus M16 membership-scoped manual bookmark ordering (`bookmark_collections.order`, `PATCH /collections/{id}/bookmarks/order`, `GET /bookmarks?sort=manual&collectionId=`); plus M17 automatic permanent archiving (Readability + linkedom HTML extraction, `unpdf` PDF extraction, `ARCDROP__DATA_DIR/archives/{id}/`, XSS sanitization, `cacheStatus` lifecycle with exponential backoff, `GET /bookmarks/{id}/archive`) and PostgreSQL `'simple'` full-text search + GIN indexes across titles, excerpts, notes, extracted bodies, and highlights (`cacheStatus=` filter & `cache.status:` operator). **Next:** Wave 2 — M18 (file uploads).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -40,7 +40,7 @@ automatically.
 | `ARCDROP__JWT__SECRET`                       | yes      | —           | JWT signing secret & TOTP secret encryption key seed, min 32 chars (M2; M15 AES-256-GCM)                                 |
 | `ARCDROP__PORT`                              | no       | `3000`      | HTTP port                                                                                                                |
 | `ARCDROP__CORS__ORIGINS`                     | no       | empty       | Comma-separated browser origins; empty = CORS off                                                                        |
-| `ARCDROP__DATA_DIR`                          | no       | `/data`     | Data volume root (icons live in `…/icons` since M6); must be writable                                                    |
+| `ARCDROP__DATA_DIR`                          | no       | `/data`     | Data volume root (icons live in `…/icons` since M6; archives in `…/archives` since M17); must be writable                |
 | `ARCDROP__METRICS__ENABLED`                  | no       | `false`     | Serve Prometheus metrics at `/metrics`                                                                                   |
 | `ARCDROP__METADATA__ENABLED`                 | no       | `true`      | M6 outbound metadata/icon fetch pipeline master switch                                                                   |
 | `ARCDROP__METADATA__ALLOW_PRIVATE`           | no       | `false`     | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
@@ -129,8 +129,14 @@ generated migrations.
   `IX_bookmarks_reminder_due`, `notification_outbox`, and `notification_type` enum),
   `M15TwoFactorAuth1794633718696` (`tfa_recovery_codes`, `users.totp_enabled`,
   `users.totp_secret`, and `'tfa_challenge'` on `one_time_token_type`),
-  and `M16ManualOrdering1794634989570` (`bookmark_collections.order` nullable
-  integer `DEFAULT 0` + `IX_bookmark_collections_collection_order`).
+  `M16ManualOrdering1794634989570` (`bookmark_collections.order` nullable
+  integer `DEFAULT 0` + `IX_bookmark_collections_collection_order`),
+  and `M17ArchiveFullTextSearch1794636418427` (`bookmark_cache_status` enum,
+  `bookmarks.cache_status`/`cache_checked_at`/`cache_retry_count`/`cache_next_retry_at`/
+  `cache_error`/`archive_text`, `bookmarks.search_vector` STORED `'simple'` tsvector +
+  GIN `IX_bookmarks_search_vector`, `IX_bookmarks_user_cache_status`,
+  `IX_bookmarks_cache_retry`, and `highlights.search_vector` STORED `'simple'`
+  tsvector + GIN `IX_highlights_search_vector`).
   M5/M6/M8/M9/M11/M13 needed NO schema work.
 
 ### Migration workflow
@@ -214,7 +220,8 @@ Compose is hardened for self-hosting (M9): resource limits/reservations (`api`: 
   tag names with LIKE metacharacters escaped), composing via `AND` with
   `tag` (exact, case-insensitive), `domain` (exact registrable domain,
   case-insensitive), `favorite` (`true`/`false`), `type` (`ContentType`),
-  `unassignedOnly`, `trashed`, `sort` (updated-desc default | created-desc |
+  `cacheStatus` (`pending|ready|failed|invalid-origin|skipped`), `unassignedOnly`,
+  `trashed`, `sort` (updated-desc default | created-desc |
   title-asc | manual-asc (M16, requires `collectionId`)), `page` (≥1), `pageSize` (≥1, CLAMPED to 200 — a bigger value
   never 400s), `updatedSince` (ISO-8601, `updatedAt >`), and `collectionId`
   (uuid; membership filter, ACTIVE since M4 — see the collections section).
@@ -508,8 +515,8 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 + M10–M16 catalog (40 tools):** bookmarks `listBookmarks` (incl. M11/M12/M14
-  `search`/`q` operator grammar, `favorite`, `type`, `broken`, and `reminder` filters + broken/reminder fields), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
+- **v1 + M10–M17 catalog (41 tools):** bookmarks `listBookmarks` (incl. M11/M12/M14/M17
+  `search`/`q` operator grammar with content/highlight FTS, `favorite`, `type`, `broken`, `reminder`, and `cacheStatus` filters + archive status fields), `getBookmark`, `getBookmarkArchive` (M17), `createBookmark`, `updateBookmark` (incl.
   `favorite` toggle & `reminderAt`), `deleteBookmark` (trash), `restoreBookmark`,
   `bulkBookmarks` (M13: move/addTags/removeTags/trash/restore/delete),
   `replaceBookmarkTags`, `replaceBookmarkCollections` (membership sync),
@@ -1016,9 +1023,12 @@ src/
                            re-validation, redirect/deadline/size/content-type caps);
                            html-metadata.ts (pure parser); IconCacheService (unguessable
                            refs on the data volume); /icons/{id} PUBLIC serve route (D18);
-                           MetadataFetchService (async fill/refresh pipeline + reindex);
-                           IconEvictionService + daily 05:00 job; private-ip.ts (pure
-                           blocklist math)
+                           content-extractor.ts (M17 Readability+linkedom HTML, unpdf PDF,
+                           XSS sanitizer, block-aware text, paywall/login detector);
+                           ArchiveStorageService (`ARCDROP__DATA_DIR/archives/{id}/`);
+                           MetadataFetchService (async fill/refresh pipeline, reindex,
+                           & backoff retry); ArchiveRetryJob; IconEvictionService +
+                           daily 05:00 job; private-ip.ts (pure blocklist math)
   scripts/                 backfill-metadata.ts — CLI entry point (bundled to
                            dist/scripts/backfill-metadata.js; container workflow)
   sync/                    /sync/state + /sync/changes cursor deltas (snapshots at
@@ -1075,6 +1085,12 @@ test/
                                 pre-import cursor, 409 import lock, MCP import/
                                 export tools incl. read-only refusals, import caps
                                 413 (isolated boot))
+  archive-fts.e2e.test.ts      M17 suite (non-blocking HTML/PDF archival, disk bytes & XSS
+                               sanitization, GET /bookmarks/:id/archive, body/Turkish/highlight
+                               FTS & prefix search, retry backoff recovery, login/paywall
+                               invalid-origin, archiveMaxBytes cap, reindex/URL refresh,
+                               bulk-delete/purge/reset-data cleanup, MCP parity, >=1000-row
+                               EXPLAIN GIN proof)
   search-operators.e2e.test.ts M11 suite (all search operators, quoting/escapes,
                                 NULL-safe negations, match:OR vs default AND, `q` alias +
                                 conflict 400, REST filter composability, reserved/unknown
@@ -1462,11 +1478,33 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 - **Preserving `bookmarks.updatedAt` on manual reorder:** Reordering a bookmark inside a collection updates `bookmark_collections.order` and writes `bookmark:update` to `change_events`, but deliberately does **not** touch `bookmarks.updated_at` so drag-and-drop in one collection never changes `sort=updated` positions or `updatedSince` filters for unrelated collections.
 - **Keeping `order` nullable with `DEFAULT 0`:** Existing pre-M16 rows safely start at slot `0` (before newly appended `1, 2, ...` memberships), while keeping the column nullable guarantees `ORDER BY bc_sort.order ASC NULLS LAST` honors both pre-migration `0` rows and any null rows.
 
-## Wave-2 Handoff (for M17+)
+## Archive & full-text search (M17 — D7, D19, Raindrop parity G16)
 
-M0–M16 are complete and green (**325 unit / 207 e2e tests across 55 test files**). Next is **M17 (Archive & full-text search — D7, D19)**:
+- **Bun extractor & PDF parser verification (M1-gate discipline):**
+  - **HTML readability (`@mozilla/readability@0.6.0` + `linkedom@0.18.15`):** Verified on Bun `1.4.2` directly and via `bun build --target bun`. Linkedom parses fragments into a lightweight DOM without native bindings, Readability extracts clean article markup (with sanitized body fallback on minimal pages), `sanitizeExtractedHtml` strips executable tags (`<script>`, `<iframe>`, `<form>`, `<svg>`, event handlers, `javascript:`/`data:text/html` URIs), and `extractBlockTextFromHtml` walks block boundaries (`</p><p>` → newline) so adjacent paragraphs never concatenate.
+  - **PDF extraction (`unpdf@2.1.0`):** Verified on Bun `1.4.2` directly and inside the `dist/main.js` bundle (`buildSimplePdf` smoke check + e2e PDF route). Note: `unpdf` returns a document proxy whose cleanup handle sits on `pdf.loadingTask.destroy()` rather than `pdf.destroy()`, handled in `extractPdfContent`.
+- **Permanent archive storage & lifecycle:**
+  - Volume storage under `ARCDROP__DATA_DIR/archives/{bookmarkId}/` writes `content.html` (sanitized readable HTML) and `content.txt` (full plain text), served at `GET /api/v1/bookmarks/{id}/archive` (`operationId: getBookmarkArchive`, mirrored in MCP).
+  - `Bookmark.cacheStatus` (`pending | ready | failed | invalid-origin | skipped`) + `cacheCheckedAt`: `POST /bookmarks` responds immediately (`pending`) and runs enrichment + archival asynchronously over `SsrfSafeFetchService`. HTTP 401/402/403/407 or login/paywall HTML mark `invalid-origin`; size cap (`SettingsDto.archiveMaxBytes`, default 70 MiB) or SSRF refusals mark `skipped`; transient errors mark `failed` with exponential backoff (`30s → 2m → 10m → 1h → 6h`, max 5 retries, swept every 2 minutes by `ArchiveRetryJob`).
+  - Trashed bookmarks are never archived or reindexed; `PUT` URL changes, `bulkBookmarks` hard delete, `TrashPurgeService`, `POST /me/reset-data`, and `DELETE /me` remove archived bytes from disk after commit. `POST /bookmarks/{id}/reindex` re-extracts metadata, icons, and the archive snapshot.
+- **PostgreSQL FTS (`'simple'` config) & GIN query shape:**
+  - `bookmarks.archive_text` stores extracted plain text truncated at a word boundary (`MAX_ARCHIVE_TEXT_CHARS = 500_000`) to stay safely beneath PostgreSQL's 1 MiB `tsvector` limit while the full text stays on disk.
+  - `bookmarks.search_vector` (`STORED GENERATED`) indexes weighted `title` (`A`), `excerpt` + `note` (`B`), and `archive_text` (`C`) with PostgreSQL text-search config `'simple'`; `highlights.search_vector` (`STORED GENERATED`) indexes `text` (`A`) and `note` (`B`) with `'simple'`. Both carry GIN indexes (`IX_bookmarks_search_vector`, `IX_highlights_search_vector`).
+  - **Language trade-off:** Using `'simple'` preserves accented characters, technical tokens, and multilingual libraries (proven e2e with Turkish fixtures `İstanbul boğazı`, `geliştirici`, `özgünlük ölçütü`) without English stemming corrupting non-English terms, at the cost of no morphological stemming — partially compensated by appending `to_tsquery('simple', '<token>:*')` prefix matching on words ≥ 2 chars.
+  - **Hybrid compiler & planner proof:** `compileSearchQuery(..., { fts: { userId } })` compiles plain words/phrases into `b.id IN (SELECT b2.id FROM bookmarks b2 WHERE b2.user_id = :sqUserId AND b2.search_vector @@ ... UNION SELECT h.bookmark_id FROM highlights h WHERE h.user_id = :sqUserId AND h.search_vector @@ ... UNION ...)` rather than `OR EXISTS(...)` so PostgreSQL chooses `Bitmap Index Scan` on both GIN indexes (verified via `EXPLAIN ANALYZE` on ≥ 1,000 seeded rows). Clean words < 3 chars, punctuation tokens, URLs, and tags retain `ILIKE` fallback.
+- **Grammar & MCP parity:** Activates `cache.status:` (`-cache.status:`) in `search-query.parser.ts` (only `file:` remains reserved for M18) and `GET /bookmarks?cacheStatus=`. Adds `getBookmarkArchive` to `src/mcp/mcp-tool-catalog.ts` (**41 tools total: 14 reads, 27 mutations**).
 
-- **Per-user full-text & archival search (`D7`):** Only `file:` remains reserved in `src/bookmarks/search-query.parser.ts` (for M18). M17 introduces permanent bookmark archive snapshots (HTML/reader content capture) and PostgreSQL full-text search integration.
+## Decisions recorded (M17)
+
+- **Self-contained pure-JS extractors over headless browsers:** `@mozilla/readability` + `linkedom` and `unpdf` execute deterministically in Bun (`1.4.2`) inside the lightweight container with zero Chromium/native-addon surface.
+- **`'simple'` FTS dictionary + `UNION` subquery form:** Multilingual tokenization + `:*` prefix search + `b.id IN (... UNION ...)` delivers GIN Bitmap Index Scans across both `bookmarks` and `highlights` without breaking non-English inflection or URL/short-token `ILIKE` fallback.
+
+## Wave-2 Handoff (for M18+)
+
+M0–M17 are complete and green (**335 unit / 215 e2e tests across 58 test files**). Next is **M18 (File uploads — D19, Raindrop parity G17)**:
+
+- **Extraction pipeline reuse:** Uploaded text, Markdown, and PDF files in M18 can invoke `extractPlainTextContent` / `extractPdfContent` (`src/metadata/content-extractor.ts`), persist rendered previews/text via `ArchiveStorageService` (`ARCDROP__DATA_DIR/archives/{id}/`), and populate `bookmarks.archive_text` (`cacheStatus: 'ready'`) so uploaded files become immediately searchable via M17's PostgreSQL FTS + GIN indexes.
+- **Grammar activation:** Activate `file:` (`file:true|false` / `file:<mime|ext>`) in `src/bookmarks/search-query.parser.ts` (the sole remaining entry in `RESERVED_OPERATORS`) and `src/bookmarks/search-query.compiler.ts`.
 - **Standing conventions:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), maintain global lock order (`users` row lock first inside `ChangeLogService.transact`), use `queryRows()` for raw `RETURNING` SQL, mirror any new authenticated non-admin REST endpoints in `src/mcp/mcp-tool-catalog.ts`, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
 
 ## Decisions recorded (M4)

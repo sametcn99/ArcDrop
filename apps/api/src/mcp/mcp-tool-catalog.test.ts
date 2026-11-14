@@ -28,10 +28,11 @@ const stubs = {} as {
   portability: PortabilityService;
 };
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering, M17 archive. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
+  'getBookmarkArchive',
   'createBookmark',
   'updateBookmark',
   'deleteBookmark',
@@ -72,7 +73,7 @@ const EXPECTED_TOOLS = [
   'exportBookmarkHighlights',
 ] as const;
 
-describe('MCP tool catalog (M7/M12/M13/M14/M16)', () => {
+describe('MCP tool catalog (M7/M12/M13/M14/M16/M17)', () => {
   const catalog = buildToolCatalog(stubs);
   const byName = new Map(catalog.map((tool) => [tool.name, tool]));
 
@@ -93,6 +94,7 @@ describe('MCP tool catalog (M7/M12/M13/M14/M16)', () => {
       [
         'listBookmarks',
         'getBookmark',
+        'getBookmarkArchive',
         'getBookmarkStats',
         'listBookmarkTags',
         'findDuplicates',

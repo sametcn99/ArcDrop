@@ -31,13 +31,17 @@ export interface ProbeResult {
  * The failure vocabulary for refused/failed fetches. The metadata pipeline
  * treats EVERY error here as "silent failure" — the bookmark keeps its
  * client-provided data — so the reasons exist for debug logs, not for the
- * wire.
+ * wire (and for M17 archive status classification).
  */
 export class MetadataFetchError extends Error {
   constructor(
     /** Stable machine reason, e.g. `private-address-blocked`, `timeout`. */
     readonly reason: string,
     message: string = reason,
+    /** HTTP status when `reason === 'http-status'` (M17 distinguishes 401/402/403 paywall/login vs 5xx retryable). */
+    readonly httpStatus?: number,
+    /** Final resolved hop URL on HTTP status failures (e.g. redirect to /login). */
+    readonly finalUrl?: string,
   ) {
     super(message);
     this.name = 'MetadataFetchError';
@@ -59,11 +63,15 @@ export interface SecureFetchOptions {
   imageOnly?: boolean;
   /** Read body ONLY if content-type is in `HTML_CONTENT_TYPES`; otherwise cancel body and return empty bytes. */
   htmlBodyOnly?: boolean;
+  /** Override response size cap (default `MAX_RESPONSE_BYTES` = 2 MiB; M17 uses `archiveMaxBytes`). */
+  maxBytes?: number;
+  /** Optional predicate deciding whether to read the response body (M17: HTML / PDF / plain text). */
+  readBodyWhen?: (contentType: string) => boolean;
 }
 
 /**
  * SSRF-hardened document fetcher (plan M6, ticket M6 — hard requirement;
- * reused by M12 broken-links checker):
+ * reused by M12 broken-links checker and extended by M17 archive extraction):
  *
  * - **DNS is resolved BEFORE connecting** and every resolved address
  *   (IPv4 + IPv6) must be public. Unresolvable or unclassifiable hostnames
@@ -72,16 +80,10 @@ export interface SecureFetchOptions {
  *   `metadata.allowPrivate` test/dev affordance applies ONLY to the
  *   initial url, never to a hop (a redirect target is attacker-chosen).
  * - Redirects capped at 5, one shared ~10 s deadline across the whole
- *   walk, ~2 MB body cap (header AND streamed-read enforced).
+ *   walk, ~2 MB body cap by default (configurable up to `archiveMaxBytes`
+ *   for M17 archive extraction; header AND streamed-read enforced).
  * - Content-type is checked BEFORE the body is downloaded: HTML for
- *   metadata, `image/*` for icons.
- *
- * The transport (`fetch`) and the resolver (`dns.lookup`) are injectable —
- * that is what makes the private-range and redirect-to-private refusals
- * unit-testable without any real network. Known limitation (documented in
- * the README): the OS resolves the hostname a second time for the actual
- * TCP connection, so there is a theoretical DNS-rebinding window; v1
- * accepts it (resolve-then-connect is exactly the ticketed design).
+ *   metadata, `image/*` for icons, HTML/PDF/text for M17 archiving.
  */
 @Injectable()
 export class SsrfSafeFetchService {
@@ -115,6 +117,15 @@ export class SsrfSafeFetchService {
    */
   fetchResource(url: string, opts: SecureFetchOptions = {}): Promise<FetchedDocument> {
     return this.secureFetch(url, { ...opts, htmlBodyOnly: true });
+  }
+
+  /**
+   * Fetches an HTTP(S) resource for M17 archiving + metadata enrichment using
+   * the exact same SSRF hop validation, streaming body bytes only when
+   * `readBodyWhen(contentType)` returns true (default: HTML), capped at `maxBytes`.
+   */
+  fetchArchiveResource(url: string, opts: SecureFetchOptions = {}): Promise<FetchedDocument> {
+    return this.secureFetch(url, opts);
   }
 
   /** Fetches an image (cover / favicon → icon cache). */
@@ -203,7 +214,14 @@ export class SsrfSafeFetchService {
    * private addresses → fetch (manual redirects) → next hop or body.
    */
   private async secureFetch(url: string, opts: SecureFetchOptions): Promise<FetchedDocument> {
-    const { deadlineMs = FETCH_DEADLINE_MS, allowedContentTypes, imageOnly, htmlBodyOnly } = opts;
+    const {
+      deadlineMs = FETCH_DEADLINE_MS,
+      allowedContentTypes,
+      imageOnly,
+      htmlBodyOnly,
+      maxBytes = MAX_RESPONSE_BYTES,
+      readBodyWhen,
+    } = opts;
     const deadline = Date.now() + deadlineMs;
 
     let current = this.validatedUrl(url);
@@ -260,12 +278,16 @@ export class SsrfSafeFetchService {
           throw new MetadataFetchError(
             'http-status',
             `unusable status ${response.status} from ${current.href}`,
+            response.status,
+            current.href,
           );
         }
         return await this.readBody(response, current, {
           allowedContentTypes,
           imageOnly,
           htmlBodyOnly,
+          maxBytes,
+          readBodyWhen,
         });
       } finally {
         clearTimeout(timer);
@@ -332,6 +354,8 @@ export class SsrfSafeFetchService {
       allowedContentTypes?: ReadonlySet<string>;
       imageOnly?: boolean;
       htmlBodyOnly?: boolean;
+      maxBytes: number;
+      readBodyWhen?: (contentType: string) => boolean;
     },
   ): Promise<FetchedDocument> {
     const contentType =
@@ -350,13 +374,18 @@ export class SsrfSafeFetchService {
         `content-type not an image: ${contentType || '(none)'}`,
       );
     }
-    if (opts.htmlBodyOnly && !HTML_CONTENT_TYPES.has(contentType)) {
-      void response.body?.cancel().catch(() => {}); // headers are enough to classify non-HTML targets
+    const shouldReadBody = opts.readBodyWhen
+      ? opts.readBodyWhen(contentType)
+      : opts.htmlBodyOnly
+        ? HTML_CONTENT_TYPES.has(contentType)
+        : true;
+    if (!shouldReadBody) {
+      void response.body?.cancel().catch(() => {}); // headers are enough to classify non-archivable targets
       return { status: response.status, contentType, bytes: new Uint8Array(0), finalUrl: url.href };
     }
 
     const contentLength = Number(response.headers.get('content-length'));
-    if (Number.isInteger(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
+    if (Number.isInteger(contentLength) && contentLength > opts.maxBytes) {
       void response.body?.cancel().catch(() => {}); // same
       throw new MetadataFetchError(
         'response-too-large',
@@ -377,10 +406,10 @@ export class SsrfSafeFetchService {
         if (done) break;
         if (!value) continue;
         total += value.byteLength;
-        if (total > MAX_RESPONSE_BYTES) {
+        if (total > opts.maxBytes) {
           throw new MetadataFetchError(
             'response-too-large',
-            `body exceeded ${MAX_RESPONSE_BYTES} bytes while streaming`,
+            `body exceeded ${opts.maxBytes} bytes while streaming`,
           );
         }
         chunks.push(value);

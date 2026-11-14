@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { CONTENT_TYPES } from '@api/database/entities/bookmark.entity';
+import { CACHE_STATUSES, CONTENT_TYPES } from '@api/database/entities/bookmark.entity';
 import {
   DEFAULT_TEXT_SEARCH_FIELDS,
   SearchQueryParseError,
@@ -250,14 +250,21 @@ describe('SearchQueryParser', () => {
     ]);
   });
 
-  it('parses type:, favorite:, notag:, broken:, and reminder: including negations and case-insensitivity', () => {
+  it('parses type:, cache.status:, favorite:, notag:, broken:, and reminder: including negations and case-insensitivity', () => {
     for (const type of CONTENT_TYPES) {
       const parsed = parseSearchQuery(`type:${type.toUpperCase()}`);
       expect(parsed.clauses).toEqual([{ kind: 'type', value: type, negated: false, position: 0 }]);
     }
 
+    for (const status of CACHE_STATUSES) {
+      const parsed = parseSearchQuery(`cache.status:${status.toUpperCase()}`);
+      expect(parsed.clauses).toEqual([
+        { kind: 'cacheStatus', value: status, negated: false, position: 0 },
+      ]);
+    }
+
     const combined = parseSearchQuery(
-      '-type:video favorite:true -favorite:FALSE notag:true -notag:false broken:true -broken:FALSE reminder:true -reminder:FALSE',
+      '-type:video favorite:true -favorite:FALSE notag:true -notag:false broken:true -broken:FALSE reminder:true -reminder:FALSE -cache.status:failed cache.status:INVALID-ORIGIN',
     );
     expect(combined.clauses).toEqual([
       { kind: 'type', value: 'video', negated: true, position: 0 },
@@ -269,9 +276,21 @@ describe('SearchQueryParser', () => {
       { kind: 'broken', value: false, negated: true, position: 78 },
       { kind: 'reminder', value: true, negated: false, position: 92 },
       { kind: 'reminder', value: false, negated: true, position: 106 },
+      { kind: 'cacheStatus', value: 'failed', negated: true, position: 122 },
+      { kind: 'cacheStatus', value: 'invalid-origin', negated: false, position: 143 },
     ]);
 
     expectParseError('type:podcast', { code: 'INVALID_VALUE', position: 5, operator: 'type' });
+    expectParseError('cache.status:archived', {
+      code: 'INVALID_VALUE',
+      position: 13,
+      operator: 'cache.status',
+    });
+    expectParseError('cache.status:', {
+      code: 'MISSING_VALUE',
+      position: 13,
+      operator: 'cache.status',
+    });
     expectParseError('favorite:yes', {
       code: 'INVALID_VALUE',
       position: 9,

@@ -1,9 +1,14 @@
-import { CONTENT_TYPES, type ContentType } from '@api/database/entities/bookmark.entity';
+import {
+  CACHE_STATUSES,
+  CONTENT_TYPES,
+  type CacheStatus,
+  type ContentType,
+} from '@api/database/entities/bookmark.entity';
 
 /**
  * Default bookmark fields matched by unqualified words and `"exact phrases"`
- * (plan M11 / D19). M17 extends this list (e.g. adding `content` /
- * `highlights`) without rewriting the parser.
+ * (plan M11 / D19). M17 extends this list (`content`, `highlights`) without
+ * rewriting the parser.
  */
 export const DEFAULT_TEXT_SEARCH_FIELDS = ['title', 'excerpt', 'note', 'url', 'tags'] as const;
 export type SearchTextField = (typeof DEFAULT_TEXT_SEARCH_FIELDS)[number];
@@ -22,7 +27,7 @@ export type ScopedBookmarkField = (typeof FIELD_SCOPE_MAP)[FieldScopeOperator];
  * Operators reserved for upcoming Wave-2 milestones. Parsed explicitly so
  * clients receive an honest 400 ("operator not available yet") rather than
  * silent fallback to plain-text matching. (`broken:` activated in M12;
- * `reminder:` activated in M14.)
+ * `reminder:` activated in M14; `cache.status:` activated in M17.)
  */
 export const RESERVED_OPERATORS = {
   file: 'M18',
@@ -58,6 +63,12 @@ export type SearchClause =
   | {
       kind: 'type';
       value: ContentType;
+      negated: boolean;
+      position: number;
+    }
+  | {
+      kind: 'cacheStatus';
+      value: CacheStatus;
       negated: boolean;
       position: number;
     }
@@ -129,7 +140,8 @@ export class SearchQueryParseError extends Error {
 }
 
 const CONTENT_TYPE_SET: ReadonlySet<string> = new Set(CONTENT_TYPES);
-const OPERATOR_PREFIX_RE = /^([a-zA-Z][a-zA-Z0-9_]*):/;
+const CACHE_STATUS_SET: ReadonlySet<string> = new Set(CACHE_STATUSES);
+const OPERATOR_PREFIX_RE = /^([a-zA-Z][a-zA-Z0-9_.]*):/;
 const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
 const DATE_VALUE_RE = /^(<=|>=|<|>)?(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?$/;
 
@@ -137,7 +149,7 @@ const isWhitespace = (ch: string): boolean => /\s/.test(ch);
 
 /**
  * Pure parser for ArcDrop's Raindrop-compatible search operator grammar
- * (plan M11, D19, parity G9; extended M12, M14).
+ * (plan M11, D19, parity G9; extended M12, M14, M17).
  *
  * Grammar summary:
  * - Bare `word` or `"exact phrase"` (supports `\"` and `\\` escapes)
@@ -145,8 +157,8 @@ const isWhitespace = (ch: string): boolean => /\s/.test(ch);
  * - `#tag` and `#"multi word tag"` (and `-#tag` / `-#"multi word tag"`)
  * - `match:OR` / `match:AND` (default `AND`)
  * - Field-scoped: `title:`, `excerpt:`, `note:`, `link:`
- * - Metadata: `type:<contentType>`, `favorite:true|false`, `notag:true|false`,
- *   `broken:true|false`, `reminder:true|false`
+ * - Metadata: `type:<contentType>`, `cache.status:<cacheStatus>`, `favorite:true|false`,
+ *   `notag:true|false`, `broken:true|false`, `reminder:true|false`
  * - Dates: `created:` and `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]`
  * - Reserved (fail with 400 until implemented): `file:`
  */
@@ -423,6 +435,26 @@ export function parseSearchQuery(
         clauses.push({
           kind: 'type',
           value: lower as ContentType,
+          negated,
+          position: termPos,
+        });
+        continue;
+      }
+
+      if (opKey === 'cache.status') {
+        const { value } = readValue(valuePos, rawName);
+        const lower = value.toLowerCase();
+        if (!CACHE_STATUS_SET.has(lower)) {
+          throw new SearchQueryParseError(
+            'INVALID_VALUE',
+            valuePos,
+            `Invalid value "${value}" for operator "cache.status" at position ${valuePos}; expected one of: ${CACHE_STATUSES.join(', ')}`,
+            'cache.status',
+          );
+        }
+        clauses.push({
+          kind: 'cacheStatus',
+          value: lower as CacheStatus,
           negated,
           position: termPos,
         });

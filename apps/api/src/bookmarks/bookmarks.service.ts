@@ -12,7 +12,10 @@ import { In, IsNull, Not } from 'typeorm';
 import { ChangeLogService } from '@api/change-log/change-log.service';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import { nextMembershipOrder } from '@api/collections/membership-order';
+import { ArchiveStorageService } from '@api/metadata/archive-storage.service';
+import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import {
+  BookmarkArchiveDto,
   BookmarkDto,
   BookmarkListDto,
   BookmarkStatsDto,
@@ -23,18 +26,17 @@ import {
   type TagDto,
   type UpdateBookmarkDto,
 } from './bookmarks.dto';
-import { compileSearchQuery } from './search-query.compiler';
+import { compileSearchQuery, FTS_TEXT_SEARCH_FIELDS } from './search-query.compiler';
 import { parseSearchQuery, SearchQueryParseError } from './search-query.parser';
 import { TagsService } from './tags.service';
 import { UrlDecompositionService } from './url-decomposition.service';
-import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 
 /**
- * Bookmark CRUD, trash/restore, server-side search + paging and stats
- * (plan M3, D10/D12/D13/D17; enriched M10; operator grammar M11;
- * broken-link state M12; reminders M14; manual collection sort M16/D21).
- * Every route is user-scoped — a row another user owns simply does not exist
- * (404, never 403: existence is not leaked).
+ * Bookmark CRUD, trash/restore, server-side FTS search + paging, archive
+ * retrieval, and stats (plan M3, D10/D12/D13/D17; enriched M10; operator
+ * grammar M11; broken-link state M12; reminders M14; manual collection sort
+ * M16/D21; archive & FTS M17). Every route is user-scoped — a row another user
+ * owns simply does not exist (404, never 403: existence is not leaked).
  *
  * Every mutation runs through `ChangeLogService.transact` so the ChangeEvent
  * is appended in the mutation's own transaction with a gapless per-user seq,
@@ -52,6 +54,7 @@ export class BookmarksService {
     private readonly tags: TagsService,
     private readonly changeLog: ChangeLogService,
     private readonly metadata: MetadataFetchService,
+    private readonly archives: ArchiveStorageService,
   ) {}
 
   // -- Reads -----------------------------------------------------------------
@@ -64,11 +67,31 @@ export class BookmarksService {
     return toBookmarkDto(row, tags.get(row.id) ?? []);
   }
 
+  /** Permanent-copy archive (extracted HTML + plain text) for one owned bookmark (M17). */
+  async getArchive(user: RequestUser, id: string): Promise<BookmarkArchiveDto> {
+    const row = await this.bookmarks.findOneBy({ id, userId: user.id });
+    if (!row) throw new NotFoundException('Bookmark not found');
+    if (row.cacheStatus !== 'ready') {
+      throw new NotFoundException('Archived copy is not available for this bookmark');
+    }
+    const stored = await this.archives.read(row.id);
+    if (!stored) {
+      throw new NotFoundException('Archived copy is not available for this bookmark');
+    }
+    return {
+      bookmarkId: row.id,
+      cacheStatus: row.cacheStatus,
+      cacheCheckedAt: row.cacheCheckedAt ?? null,
+      html: stored.html,
+      text: stored.text,
+    };
+  }
+
   /**
-   * Search + filters + paging (plan D10, M10, M11, M12, M14, M16). Defaults:
-   * active set (trashed excluded), sort by `updatedAt` desc, pageSize 20
-   * clamped to 200. `sort=manual` requires `collectionId` (D21: manual order
-   * is membership-scoped per collection) and orders `order ASC NULLS LAST`.
+   * Search + filters + paging (plan D10, M10, M11, M12, M14, M16, M17).
+   * Defaults: active set (trashed excluded), sort by `updatedAt` desc,
+   * pageSize 20 clamped to 200. `sort=manual` requires `collectionId` (D21)
+   * and orders `order ASC NULLS LAST`.
    */
   async list(user: RequestUser, query: ListBookmarksQueryDto): Promise<BookmarkListDto> {
     if (query.search !== undefined && query.q !== undefined) {
@@ -97,14 +120,14 @@ export class BookmarksService {
     if (rawSearch !== undefined && rawSearch.trim() !== '') {
       let parsed;
       try {
-        parsed = parseSearchQuery(rawSearch);
+        parsed = parseSearchQuery(rawSearch, { defaultTextFields: FTS_TEXT_SEARCH_FIELDS });
       } catch (error) {
         if (error instanceof SearchQueryParseError) {
           throw new BadRequestException(error.message);
         }
         throw error;
       }
-      const compiled = compileSearchQuery(parsed);
+      const compiled = compileSearchQuery(parsed, { fts: { userId: user.id } });
       if (compiled !== null) {
         qb.andWhere(compiled.sql, compiled.params);
       }
@@ -142,6 +165,10 @@ export class BookmarksService {
 
     if (query.type !== undefined) {
       qb.andWhere('b.contentType = :contentType', { contentType: query.type });
+    }
+
+    if (query.cacheStatus !== undefined) {
+      qb.andWhere('b.cacheStatus = :cacheStatus', { cacheStatus: query.cacheStatus });
     }
 
     if (query.unassignedOnly) {
@@ -243,8 +270,9 @@ export class BookmarksService {
    * active owned collection by UUID or title and attaches the bookmark to it
    * at `MAX(order) + 1` in the same transaction.
    *
-   * After the commit, the M6/M10 metadata pipeline is scheduled fire-and-forget:
-   * the response below never waits for the fetch, and failures are silent.
+   * After the commit, the M6/M10/M17 metadata & archive pipeline is scheduled
+   * fire-and-forget: the response below never waits for the fetch, and
+   * failures are silent.
    */
   async create(
     user: RequestUser,
@@ -288,6 +316,8 @@ export class BookmarksService {
         brokenAt: null,
         reminderAt,
         remindedAt: null,
+        cacheStatus: 'pending',
+        cacheCheckedAt: null,
         ...parts,
         createdAt: now,
         updatedAt: now,
@@ -320,17 +350,17 @@ export class BookmarksService {
 
   /**
    * PUT semantics: provided fields replace (explicit null clears), absent
-   * fields stay. A url change re-runs the decomposition (D12) and clears any
-   * broken-link flag (`brokenAt`, `brokenReason`, `lastCheckedAt` = null, M12).
+   * fields stay. A url change re-runs the decomposition (D12), clears any
+   * broken-link flag (M12), and resets archive status to `'pending'` (M17).
    * Setting `reminderAt` to a new instant resets `remindedAt` to null; setting
    * `reminderAt` to null clears both `reminderAt` and `remindedAt`; resending
    * the unchanged `reminderAt` preserves `remindedAt` so already-fired
    * reminders never re-arm idempotently. Refuses trashed bookmarks (404 among
    * the active set).
    *
-   * A url change also schedules the M6 pipeline in `refresh` mode after the
-   * commit: coverRef/iconRef/contentType belong to the page THE URL pointed at,
-   * so they are re-fetched for the new one.
+   * A url change also schedules the M6/M17 pipeline in `refresh` mode after
+   * commit: coverRef/iconRef/contentType and the permanent archive copy belong
+   * to the page THE URL pointed at, so they are re-fetched for the new one.
    */
   async update(user: RequestUser, id: string, dto: UpdateBookmarkDto): Promise<BookmarkDto> {
     let urlChangedTo: string | null = null;
@@ -350,6 +380,12 @@ export class BookmarksService {
           patch.brokenAt = null;
           patch.brokenReason = null;
           patch.lastCheckedAt = null;
+          patch.cacheStatus = 'pending';
+          patch.cacheCheckedAt = null;
+          patch.cacheRetryCount = 0;
+          patch.cacheNextRetryAt = null;
+          patch.cacheError = null;
+          patch.archiveText = null;
         }
       }
       if (dto.title !== undefined) patch.title = dto.title;
@@ -380,6 +416,7 @@ export class BookmarksService {
     });
 
     if (urlChangedTo !== null) {
+      void this.archives.remove(id).catch(() => {});
       this.metadata.scheduleEnrichment(user.id, id, urlChangedTo, 'refresh');
     }
     return result;
@@ -561,6 +598,8 @@ export function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
     brokenAt: row.brokenAt ?? null,
     reminderAt: row.reminderAt ?? null,
     remindedAt: row.remindedAt ?? null,
+    cacheStatus: row.cacheStatus ?? 'pending',
+    cacheCheckedAt: row.cacheCheckedAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null, // in-memory entities may carry undefined

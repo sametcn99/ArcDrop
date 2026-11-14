@@ -24,6 +24,18 @@ export const CONTENT_TYPES = [
 export type ContentType = (typeof CONTENT_TYPES)[number];
 
 /**
+ * Permanent-copy archive status for a bookmark (plan M17 / D19, parity G16).
+ * - `pending`: queued / not yet attempted (default on create)
+ * - `ready`: extracted HTML + plain text written to volume & `archiveText` indexed
+ * - `failed`: transient error (5xx / network / timeout); scheduled for backoff retry
+ * - `invalid-origin`: paywalled, login-walled, or auth-blocked origin (401/402/403/login form)
+ * - `skipped`: non-archivable (media binary, oversized > archiveMaxBytes, SSRF refusal, trashed)
+ */
+export const CACHE_STATUSES = ['pending', 'ready', 'failed', 'invalid-origin', 'skipped'] as const;
+
+export type CacheStatus = (typeof CACHE_STATUSES)[number];
+
+/**
  * The seven derived URL parts (plan D12). `domain` is the Public Suffix List
  * registrable domain (lowercased); `host` is the hostname WITHOUT port; the
  * port/query/fragment columns are `null` when absent. `null` fields are real
@@ -41,7 +53,7 @@ export interface UrlParts {
 
 /**
  * A user's bookmark (plan M3, D12/D13; enriched M10; library health M12;
- * reminders M14).
+ * reminders M14; archive & FTS M17).
  *
  * - `url` is stored VERBATIM — never rewritten, never client-writable derived
  *   columns. The `urlParts` columns are derived on every url write via
@@ -59,6 +71,8 @@ export interface UrlParts {
 @Index('IX_bookmarks_user_broken_at', ['userId', 'brokenAt'])
 @Index('IX_bookmarks_user_reminder_at', ['userId', 'reminderAt'])
 @Index('IX_bookmarks_reminder_due', ['reminderAt', 'remindedAt', 'deletedAt'])
+@Index('IX_bookmarks_user_cache_status', ['userId', 'cacheStatus'])
+@Index('IX_bookmarks_cache_retry', ['cacheStatus', 'cacheNextRetryAt', 'deletedAt'])
 export class Bookmark {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -155,6 +169,44 @@ export class Bookmark {
   /** When the current `reminderAt` fired; prevents refiring on subsequent sweeps. */
   @Column({ type: 'timestamptz', name: 'reminded_at', nullable: true })
   remindedAt!: Date | null;
+
+  // -- Archive & Full-Text Search (M17 / D19 / G16) ------------------------
+
+  @Column({
+    type: 'enum',
+    enum: CACHE_STATUSES,
+    enumName: 'bookmark_cache_status',
+    name: 'cache_status',
+    default: 'pending',
+  })
+  cacheStatus!: CacheStatus;
+
+  @Column({ type: 'timestamptz', name: 'cache_checked_at', nullable: true })
+  cacheCheckedAt!: Date | null;
+
+  @Column({ type: 'integer', name: 'cache_retry_count', default: 0, select: false })
+  cacheRetryCount!: number;
+
+  @Column({ type: 'timestamptz', name: 'cache_next_retry_at', nullable: true, select: false })
+  cacheNextRetryAt!: Date | null;
+
+  @Column({ type: 'text', name: 'cache_error', nullable: true, select: false })
+  cacheError!: string | null;
+
+  /** Truncated plain text extracted from HTML/PDF archive (FTS source). */
+  @Column({ type: 'text', name: 'archive_text', nullable: true, select: false })
+  archiveText!: string | null;
+
+  /** Postgres STORED generated tsvector (`simple` config) indexed by GIN. */
+  @Column({
+    type: 'tsvector',
+    name: 'search_vector',
+    select: false,
+    insert: false,
+    update: false,
+    nullable: true,
+  })
+  searchVector?: string | null;
 
   // -- Lifecycle ------------------------------------------------------------
 

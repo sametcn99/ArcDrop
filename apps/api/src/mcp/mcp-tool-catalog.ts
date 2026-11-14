@@ -88,10 +88,10 @@ function define(
 
 /**
  * The ArcDrop MCP tool catalog (plan M7/D23) — one tool per REST operation
- * of the user-facing surface (bookmarks, highlights, collections, tags,
- * library health, bulk operations, sync, notifications, reindex). Names ARE
- * the REST `operationId`s; input schemas are generated from the same DTO classes
- * the REST routes validate; every call goes through the SAME services —
+ * of the user-facing surface (bookmarks, archive, highlights, collections,
+ * tags, library health, bulk operations, sync, notifications, reindex). Names
+ * ARE the REST `operationId`s; input schemas are generated from the same DTO
+ * classes the REST routes validate; every call goes through the SAME services —
  * identical validation, user scoping and change-log semantics. An agent is
  * just another client.
  *
@@ -126,11 +126,11 @@ export function buildToolCatalog(deps: {
     portability,
   } = deps;
   return [
-    // -- bookmarks (M3/M6/M10/M11/M12/M13/M14/M16) ----------------------------
+    // -- bookmarks (M3/M6/M10/M11/M12/M13/M14/M16/M17) -----------------------
     define(
       'listBookmarks',
       'GET',
-      'Search / filter / page bookmarks (including broken-link fields lastCheckedAt/brokenReason/brokenAt and reminder fields reminderAt/remindedAt). `search` (or alias `q`) parses the canonical M11/M12/M14 operator grammar: `word`, `"exact phrase"` (across title/excerpt/note/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`file:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, reminder, type, updatedSince; sorted by updated-desc (default), created-desc, title-asc, or manual (membership order asc NULLS LAST; requires collectionId per D21); pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
+      'Search / filter / page bookmarks (including broken-link fields lastCheckedAt/brokenReason/brokenAt, reminder fields reminderAt/remindedAt, and archive fields cacheStatus/cacheCheckedAt). `search` (or alias `q`) parses the canonical M11/M12/M14/M17 operator grammar: `word`, `"exact phrase"` (hybrid Postgres `simple` FTS + prefix `:*` + ILIKE fallback across title/excerpt/note/archived content/highlights/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `cache.status:` (`pending|ready|failed|invalid-origin|skipped`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`file:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, reminder, type, cacheStatus, updatedSince; sorted by updated-desc (default), created-desc, title-asc, or manual (membership order asc NULLS LAST; requires collectionId per D21); pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
       [ListBookmarksQueryDto],
       (user, [query]) => bookmarks.list(user, query as ListBookmarksQueryDto),
     ),
@@ -142,16 +142,23 @@ export function buildToolCatalog(deps: {
       (user, [p]) => bookmarks.get(user, (p as BookmarkIdParamDto).id),
     ),
     define(
+      'getBookmarkArchive',
+      'GET',
+      'Fetch the stored permanent-copy readable HTML and extracted plain text for one bookmark (404 if bookmark is missing or archive has not been captured yet).',
+      [BookmarkIdParamDto],
+      (user, [p]) => bookmarks.getArchive(user, (p as BookmarkIdParamDto).id),
+    ),
+    define(
       'createBookmark',
       'POST',
-      'Create a bookmark from a url (stored verbatim) plus optional title/excerpt/note/favorite/reminderAt (UTC ISO-8601; clients render local time). Duplicates of the same URL are allowed. Missing title/excerpt and contentType are filled asynchronously from the page (never overwriting provided values). Returns the full bookmark.',
+      'Create a bookmark from a url (stored verbatim) plus optional title/excerpt/note/favorite/reminderAt (UTC ISO-8601; clients render local time). Duplicates of the same URL are allowed. Missing title/excerpt, contentType, and permanent-copy archive are filled asynchronously from the page (never overwriting provided values). Returns the full bookmark.',
       [CreateBookmarkDto],
       (user, [dto]) => bookmarks.create(user, dto as CreateBookmarkDto),
     ),
     define(
       'updateBookmark',
       'PUT',
-      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle and reminderAt UTC ISO-8601 timestamp), explicit null clears (including clearing a pending reminder), absent fields stay; a url change re-runs URL decomposition, clears any broken-link flag, and refreshes cover/icon/contentType from the new page. Refuses trashed bookmarks.',
+      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle and reminderAt UTC ISO-8601 timestamp), explicit null clears (including clearing a pending reminder), absent fields stay; a url change re-runs URL decomposition, clears any broken-link flag, resets/evicts the old archive, and refreshes cover/icon/contentType/archive from the new page. Refuses trashed bookmarks.',
       [BookmarkIdParamDto, UpdateBookmarkDto],
       (user, [p, dto]) =>
         bookmarks.update(user, (p as BookmarkIdParamDto).id, dto as UpdateBookmarkDto),
@@ -207,7 +214,7 @@ export function buildToolCatalog(deps: {
     define(
       'reindexBookmark',
       'POST',
-      'Re-run the metadata/icon/content-type pipeline for one bookmark (202-style immediate "scheduled" answer; completion lands as a change event). Cover/icon/contentType are re-evaluated, text only fills while still null.',
+      'Re-run the metadata, icon, content-type, and permanent-copy archive extraction pipeline for one bookmark (202-style immediate "scheduled" answer; completion lands as a change event). Cover/icon/contentType and archived copy are re-evaluated, text only fills while still null.',
       [BookmarkIdParamDto],
       (user, [p]) => metadata.reindex(user.id, (p as BookmarkIdParamDto).id),
     ),

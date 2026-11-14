@@ -4,14 +4,18 @@ import { loadConfig } from '@api/config/load-config';
 import { ChangeEventBus } from '@api/change-log/change-event.bus';
 import { ChangeLogService } from '@api/change-log/change-log.service';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
+import { Setting } from '@api/database/entities/setting.entity';
 import { createDataSource } from '@api/database/data-source';
+import { ArchiveStorageService } from '@api/metadata/archive-storage.service';
 import { IconCacheService } from '@api/metadata/icon-cache.service';
 import { MetadataFetchService, type EnrichmentOutcome } from '@api/metadata/metadata-fetch.service';
 import { SsrfSafeFetchService } from '@api/metadata/ssrf-fetch.service';
+import { SettingsService } from '@api/settings/settings.service';
 
 /**
- * Metadata backfill (ticket M6) — one-shot CLI for bookmarks created BEFORE
- * M6 (coverRef/iconRef/title/excerpt still null). Runs the SAME pipeline
+ * Metadata & archive backfill (ticket M6, extended M17) — one-shot CLI for
+ * bookmarks created BEFORE M6/M17 (coverRef/iconRef/title/excerpt still null
+ * or `cacheStatus = 'pending'`). Runs the SAME pipeline
  * (`MetadataFetchService.enrich`, `fill` mode: only null fields are filled,
  * SSRF rules fully enforced) over active bookmarks in stable id order.
  *
@@ -69,6 +73,8 @@ async function main(): Promise<void> {
     const bus = new ChangeEventBus();
     const changeLog = new ChangeLogService(dataSource, bus);
     const icons = new IconCacheService(config);
+    const archives = new ArchiveStorageService(config);
+    const settings = new SettingsService(dataSource.getRepository(Setting));
     const fetcher = new SsrfSafeFetchService(configService);
     const metadata = new MetadataFetchService(
       dataSource.getRepository(Bookmark),
@@ -76,6 +82,8 @@ async function main(): Promise<void> {
       icons,
       fetcher,
       configService,
+      archives,
+      settings,
     );
 
     const tally: Record<EnrichmentOutcome, number> = { updated: 0, noop: 0, skipped: 0, failed: 0 };
@@ -90,7 +98,7 @@ async function main(): Promise<void> {
         .where('b.id > :cursorId', { cursorId })
         .andWhere('b.deletedAt IS NULL')
         .andWhere(
-          '(b.coverRef IS NULL OR b.iconRef IS NULL OR b.title IS NULL OR b.excerpt IS NULL)',
+          "(b.coverRef IS NULL OR b.iconRef IS NULL OR b.title IS NULL OR b.excerpt IS NULL OR b.cacheStatus = 'pending')",
         );
       if (userId) batch = batch.andWhere('b.userId = :userId', { userId });
       const rows = await batch.orderBy('b.id', 'ASC').take(BATCH_SIZE).getMany();

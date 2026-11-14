@@ -12,7 +12,7 @@ import { Bookmark } from './bookmark.entity';
 import { User } from './user.entity';
 
 /**
- * A text highlight on a bookmark (plan D6, M10).
+ * A text highlight on a bookmark (plan D6, M10; FTS indexed M17).
  *
  * Scoped to its owning user (denormalized `userId` alongside `bookmarkId` for
  * direct indexed sync/CRUD queries) and cascades on bookmark hard-delete /
@@ -44,6 +44,17 @@ export class Highlight {
 
   @Column({ type: 'text', nullable: true })
   color!: string | null;
+
+  /** Postgres STORED generated tsvector (`simple` config) over text + note, GIN indexed. */
+  @Column({
+    type: 'tsvector',
+    name: 'search_vector',
+    select: false,
+    insert: false,
+    update: false,
+    nullable: true,
+  })
+  searchVector?: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

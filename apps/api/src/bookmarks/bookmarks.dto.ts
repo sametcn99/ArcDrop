@@ -16,7 +16,12 @@ import {
   MinLength,
 } from 'class-validator';
 import { MAX_COLLECTIONS_PER_BOOKMARK } from '@api/collections/collections.dto';
-import { CONTENT_TYPES, type ContentType } from '@api/database/entities/bookmark.entity';
+import {
+  CACHE_STATUSES,
+  CONTENT_TYPES,
+  type CacheStatus,
+  type ContentType,
+} from '@api/database/entities/bookmark.entity';
 
 export const MAX_PAGE_SIZE = 200;
 export const DEFAULT_PAGE_SIZE = 20;
@@ -315,19 +320,21 @@ export class BulkBookmarksResponseDto {
 
 export class ListBookmarksQueryDto {
   /**
-   * Search query using the M11/M12/M14 operator grammar (D10/D19). Plain terms
-   * remain the degenerate case (case-insensitive ILIKE across title, excerpt,
-   * note, url, and tag names).
+   * Search query using the M11/M12/M14/M17 operator grammar (D10/D19). Plain
+   * terms run hybrid PostgreSQL FTS (`simple` config across title, excerpt,
+   * note, extracted page/PDF archive content, and highlights) plus prefix `:*`
+   * and ILIKE fallback for URLs, tags, and short/punctuation tokens.
    */
   @ApiPropertyOptional({
     maxLength: 500,
     description:
       'Search query supporting Raindrop-compatible operators: ' +
-      'bare `word` / `"exact phrase"` (matches title, excerpt, note, url, tags; supports `\\"` and `\\\\` escapes), ' +
+      'bare `word` / `"exact phrase"` (full-text search across title, excerpt, note, archived content, highlights, url, tags; supports `\\"` and `\\\\` escapes), ' +
       '`-word` / `-"phrase"` exclusions, ' +
       '`#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
       'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable with `-`), ' +
       '`type:<article|image|video|audio|document|book|link>`, ' +
+      '`cache.status:<pending|ready|failed|invalid-origin|skipped>`, ' +
       '`favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, ' +
       '`created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), ' +
       'and `match:OR` (OR positive terms; exclusions stay ANDed); ' +
@@ -342,7 +349,7 @@ export class ListBookmarksQueryDto {
   @ApiPropertyOptional({
     maxLength: 500,
     description:
-      'Alias for `search` — accepts the same M11/M12/M14 search operator grammar. ' +
+      'Alias for `search` — accepts the same M11/M12/M14/M17 search operator grammar. ' +
       'Provide either `search` or `q`, not both.',
   })
   @IsOptional()
@@ -401,6 +408,14 @@ export class ListBookmarksQueryDto {
   @IsOptional()
   @IsIn(CONTENT_TYPES)
   type?: ContentType;
+
+  @ApiPropertyOptional({
+    enum: CACHE_STATUSES,
+    description: 'Filter by permanent-copy archive status (M17)',
+  })
+  @IsOptional()
+  @IsIn(CACHE_STATUSES)
+  cacheStatus?: CacheStatus;
 
   @ApiPropertyOptional({ description: 'Exact registrable domain match, case-insensitive' })
   @IsOptional()
@@ -638,6 +653,19 @@ export class BookmarkDto {
   })
   remindedAt!: Date | null;
 
+  @ApiProperty({
+    enum: CACHE_STATUSES,
+    description: 'Permanent-copy archive status (M17)',
+  })
+  cacheStatus!: CacheStatus;
+
+  @ApiProperty({
+    nullable: true,
+    format: 'date-time',
+    description: 'Timestamp of the last archive extraction attempt (M17)',
+  })
+  cacheCheckedAt!: Date | null;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;
 
@@ -646,6 +674,23 @@ export class BookmarkDto {
 
   @ApiProperty({ nullable: true, description: 'Set while the bookmark is in the trash (D17)' })
   deletedAt!: Date | null;
+}
+
+export class BookmarkArchiveDto {
+  @ApiProperty({ format: 'uuid' })
+  bookmarkId!: string;
+
+  @ApiProperty({ enum: CACHE_STATUSES })
+  cacheStatus!: CacheStatus;
+
+  @ApiProperty({ nullable: true, format: 'date-time' })
+  cacheCheckedAt!: Date | null;
+
+  @ApiProperty({ description: 'Sanitized readable HTML extracted from the saved resource' })
+  html!: string;
+
+  @ApiProperty({ description: 'Extracted plain text indexed for full-text search' })
+  text!: string;
 }
 
 export class BookmarkListDto {

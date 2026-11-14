@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { compileSearchQuery } from './search-query.compiler';
+import { FTS_TEXT_SEARCH_FIELDS, compileSearchQuery } from './search-query.compiler';
 import { DEFAULT_TEXT_SEARCH_FIELDS, parseSearchQuery } from './search-query.parser';
 
 describe('compileSearchQuery', () => {
@@ -49,10 +49,10 @@ describe('compileSearchQuery', () => {
     expect(compiled!.sql).not.toContain(' OR (EXISTS');
   });
 
-  it('compiles field, tag, type, favorite, notag, broken, reminder, and date operators', () => {
+  it('compiles field, tag, type, cache.status, favorite, notag, broken, reminder, and date operators', () => {
     const compiled = compileSearchQuery(
       parseSearchQuery(
-        'note:"key idea" link:docs.rs #Reading -favorite:true notag:false broken:true -broken:false reminder:true -reminder:false created:2025-05 lastUpdate:<=2025-06-01',
+        'note:"key idea" link:docs.rs #Reading -favorite:true notag:false broken:true -broken:false reminder:true -reminder:false cache.status:ready -cache.status:failed created:2025-05 lastUpdate:<=2025-06-01',
       ),
     );
     expect(compiled).not.toBeNull();
@@ -65,16 +65,20 @@ describe('compileSearchQuery', () => {
     );
     expect(compiled!.sql).toContain('(b.brokenAt IS NOT NULL)');
     expect(compiled!.sql).toContain('(b.reminderAt IS NOT NULL)');
-    expect(compiled!.sql).toContain('(b.createdAt >= :sq4 AND b.createdAt < :sq5)');
-    expect(compiled!.sql).toContain('b.updatedAt < :sq6');
+    expect(compiled!.sql).toContain('(b.cacheStatus = :sq4)');
+    expect(compiled!.sql).toContain('(b.cacheStatus != :sq5)');
+    expect(compiled!.sql).toContain('(b.createdAt >= :sq6 AND b.createdAt < :sq7)');
+    expect(compiled!.sql).toContain('b.updatedAt < :sq8');
     expect(compiled!.params).toEqual({
       sq0: '%key idea%',
       sq1: '%docs.rs%',
       sq2: 'reading',
       sq3: false,
-      sq4: new Date('2025-05-01T00:00:00.000Z'),
-      sq5: new Date('2025-06-01T00:00:00.000Z'),
-      sq6: new Date('2025-06-02T00:00:00.000Z'),
+      sq4: 'ready',
+      sq5: 'failed',
+      sq6: new Date('2025-05-01T00:00:00.000Z'),
+      sq7: new Date('2025-06-01T00:00:00.000Z'),
+      sq8: new Date('2025-06-02T00:00:00.000Z'),
     });
   });
 
@@ -107,5 +111,40 @@ describe('compileSearchQuery', () => {
     expect(() => compileSearchQuery(parsed)).toThrow(
       'No search SQL builder registered for field "content"',
     );
+  });
+
+  it('compiles M17 hybrid GIN FTS queries for bare words, prefix stems, exact phrases, short tokens, URLs, and negations', () => {
+    const userId = '00000000-0000-4000-8000-000000000001';
+    const parsed = parseSearchQuery('geliştirici "zero copy" go -spam', {
+      defaultTextFields: FTS_TEXT_SEARCH_FIELDS,
+    });
+    const compiled = compileSearchQuery(parsed, { fts: { userId } })!;
+    expect(compiled.params.sqUserId).toBe(userId);
+
+    // Word >= 3 chars uses GIN tsvector + prefix :* across bookmarks & highlights, plus tags/url ILIKE (no archive_text ILIKE)
+    expect(compiled.sql).toContain(
+      "b2.search_vector @@ (websearch_to_tsquery('simple', :sq1) || to_tsquery('simple', :sq2))",
+    );
+    expect(compiled.sql).toContain(
+      "h.search_vector @@ (websearch_to_tsquery('simple', :sq1) || to_tsquery('simple', :sq2))",
+    );
+    expect(compiled.params.sq1).toBe('geliştirici');
+    expect(compiled.params.sq2).toBe('geliştirici:*');
+
+    // Clean phrase uses phraseto_tsquery('simple', ...)
+    expect(compiled.sql).toContain("b2.search_vector @@ phraseto_tsquery('simple', :sq4)");
+    expect(compiled.sql).toContain("h.search_vector @@ phraseto_tsquery('simple', :sq4)");
+    expect(compiled.params.sq4).toBe('zero copy');
+
+    // Short 2-char token `go` retains ILIKE fallback + prefix tsquery
+    expect(compiled.params.sq6).toBe('go');
+    expect(compiled.params.sq7).toBe('go:*');
+    expect(compiled.sql).toContain("COALESCE(b2.archive_text, '') ILIKE :sq5");
+    expect(compiled.sql).toContain('h.text ILIKE :sq5');
+
+    // Negation wraps the UNION subquery cleanly
+    expect(compiled.sql).toContain('NOT (b.id IN (');
+    expect(compiled.params.sq9).toBe('spam');
+    expect(compiled.params.sq10).toBe('spam:*');
   });
 });

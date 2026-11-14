@@ -30,7 +30,8 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
  * M7 — MCP server + personal access tokens + audit, M8 — portability,
  * M9 — hardening & ops, M10 — enrichment, M11 — search operators,
  * M12 — library health, M13 — bulk ops, M14 — reminders & notifications,
- * M15 — 2FA & account lifecycle).
+ * M15 — 2FA & account lifecycle, M16 — manual ordering,
+ * M17 — archive & full-text search).
  *
  * Import order matters for DI resolution: config first, then logging (so the
  * pino-backed Nest logger exists before anything logs), then infrastructure
