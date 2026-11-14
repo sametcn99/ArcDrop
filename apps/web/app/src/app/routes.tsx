@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from 'react';
 import { type RouteObject } from 'react-router';
 import { AppLayout } from './AppLayout';
+import { PublicOnly, RequireAdmin, RequireAuth } from './guards';
 import { NotFoundPage, RouteLoader } from './RouteFallbacks';
 
 const LoginPage = lazy(() => import('../pages/LoginPage'));
@@ -22,60 +23,75 @@ function withSuspense(node: ReactNode): ReactNode {
 
 export const appRoutes: RouteObject[] = [
   {
-    path: '/login',
-    element: withSuspense(<LoginPage />),
-  },
-  {
-    path: '/bootstrap',
-    element: withSuspense(<BootstrapPage />),
-  },
-  {
-    path: '/claim',
-    element: withSuspense(<ClaimPage />),
+    element: <PublicOnly />,
+    children: [
+      {
+        path: '/login',
+        element: withSuspense(<LoginPage />),
+      },
+      {
+        path: '/bootstrap',
+        element: withSuspense(<BootstrapPage />),
+      },
+      {
+        path: '/claim',
+        element: withSuspense(<ClaimPage />),
+      },
+    ],
   },
   {
     path: '/s/:token',
     element: withSuspense(<PublicSharePage />),
   },
   {
-    path: '/',
-    element: <AppLayout />,
+    element: <RequireAuth />,
     children: [
       {
-        index: true,
-        element: withSuspense(<LibraryPage />),
-      },
-      {
-        path: 'collections/:collectionId',
-        element: withSuspense(<CollectionPage />),
-      },
-      {
-        path: 'bookmarks/:bookmarkId',
-        element: withSuspense(<BookmarkDetailPage />),
-      },
-      {
-        path: 'trash',
-        element: withSuspense(<TrashPage />),
-      },
-      {
-        path: 'health',
-        element: withSuspense(<HealthPage />),
-      },
-      {
-        path: 'portability',
-        element: withSuspense(<PortabilityPage />),
-      },
-      {
-        path: 'settings',
-        element: withSuspense(<SettingsPage />),
-      },
-      {
-        path: 'admin',
-        element: withSuspense(<AdminPage />),
-      },
-      {
-        path: '*',
-        element: <NotFoundPage />,
+        path: '/',
+        element: <AppLayout />,
+        children: [
+          {
+            index: true,
+            element: withSuspense(<LibraryPage />),
+          },
+          {
+            path: 'collections/:collectionId',
+            element: withSuspense(<CollectionPage />),
+          },
+          {
+            path: 'bookmarks/:bookmarkId',
+            element: withSuspense(<BookmarkDetailPage />),
+          },
+          {
+            path: 'trash',
+            element: withSuspense(<TrashPage />),
+          },
+          {
+            path: 'health',
+            element: withSuspense(<HealthPage />),
+          },
+          {
+            path: 'portability',
+            element: withSuspense(<PortabilityPage />),
+          },
+          {
+            path: 'settings',
+            element: withSuspense(<SettingsPage />),
+          },
+          {
+            element: <RequireAdmin />,
+            children: [
+              {
+                path: 'admin',
+                element: withSuspense(<AdminPage />),
+              },
+            ],
+          },
+          {
+            path: '*',
+            element: <NotFoundPage />,
+          },
+        ],
       },
     ],
   },

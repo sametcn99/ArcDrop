@@ -1,4 +1,5 @@
 import { createBrowserRouter, RouterProvider } from 'react-router';
+import { SnackbarHost } from '../shared/components/SnackbarHost';
 import { ThemeController } from '../theme/ThemeController';
 import { appRoutes } from './routes';
 
@@ -8,6 +9,7 @@ export function AppProviders() {
   return (
     <ThemeController>
       <RouterProvider router={router} />
+      <SnackbarHost />
     </ThemeController>
   );
 }

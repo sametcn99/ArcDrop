@@ -6,6 +6,8 @@ export const APP_STRINGS = {
   drawerEmptyHeading: 'Collections',
   drawerEmptyHint: 'Collection tree and navigation arrive in W2–W3.',
   themeSwitcherLabel: 'Switch theme',
+  signOutLabel: 'Sign out',
+  signedOutMessage: 'Signed out.',
   loadingRouteLabel: 'Loading view',
   notFoundTitle: 'Page not found',
   notFoundDescription: 'The requested route does not exist in this workspace.',

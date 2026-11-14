@@ -1,7 +1,9 @@
 import BookmarksOutlinedIcon from '@mui/icons-material/BookmarksOutlined';
+import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import MenuIcon from '@mui/icons-material/Menu';
 import AppBar from '@mui/material/AppBar';
 import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
@@ -9,14 +11,21 @@ import Stack from '@mui/material/Stack';
 import Toolbar from '@mui/material/Toolbar';
 import Typography from '@mui/material/Typography';
 import { useState } from 'react';
-import { Outlet } from 'react-router';
+import { Outlet, useNavigate } from 'react-router';
 import { ThemeSwitcher } from '../shared/components/ThemeSwitcher';
+import { useAuthStore } from '../stores/authStore';
+import { useUiStore } from '../stores/uiStore';
 import { APP_STRINGS } from './strings';
 
 const DRAWER_WIDTH = 260;
 
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+  const enqueueSnackbar = useUiStore((s) => s.enqueueSnackbar);
+  const navigate = useNavigate();
 
   const handleToggleDrawer = () => {
     setMobileOpen((prev) => !prev);
@@ -24,6 +33,18 @@ export function AppLayout() {
 
   const handleCloseDrawer = () => {
     setMobileOpen(false);
+  };
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await logout();
+      enqueueSnackbar({ message: APP_STRINGS.signedOutMessage, severity: 'info' });
+      navigate('/login', { replace: true });
+    } finally {
+      setSigningOut(false);
+    }
   };
 
   const drawerContent = (
@@ -72,7 +93,27 @@ export function AppLayout() {
           <Typography variant="h6" component="span" noWrap sx={{ flexGrow: 1 }}>
             {APP_STRINGS.brand}
           </Typography>
-          <ThemeSwitcher label={APP_STRINGS.themeSwitcherLabel} />
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            {user ? (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ display: { xs: 'none', sm: 'inline' } }}
+              >
+                {user.email}
+              </Typography>
+            ) : null}
+            <ThemeSwitcher label={APP_STRINGS.themeSwitcherLabel} />
+            <Button
+              color="inherit"
+              size="small"
+              startIcon={<LogoutOutlinedIcon />}
+              onClick={() => void handleSignOut()}
+              disabled={signingOut}
+            >
+              {APP_STRINGS.signOutLabel}
+            </Button>
+          </Stack>
         </Toolbar>
       </AppBar>
 
