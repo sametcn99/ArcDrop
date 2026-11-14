@@ -6,7 +6,7 @@ import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { toggleBookmarkFavoriteAction } from '../../shared/actions/bookmarkActions';
-import { BookmarkLayouts } from './components/BookmarkLayouts';
+import { BookmarkLayouts } from '../../shared/components/BookmarkLayouts';
 import { LibraryToolbar } from './components/LibraryToolbar';
 import { useLibraryView } from './hooks/useLibraryView';
 import { LIBRARY_PAGE_STRINGS } from './strings';

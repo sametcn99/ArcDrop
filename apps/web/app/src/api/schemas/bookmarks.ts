@@ -113,6 +113,44 @@ export const updateBookmarkRequestSchema = z.object({
   reminderAt: z.string().nullable().optional(),
 });
 
+export const replaceBookmarkCollectionsRequestSchema = z.object({
+  collectionIds: z.array(z.string()),
+});
+
+export const bookmarkCollectionRefSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+});
+
+export const bookmarkCollectionsResponseSchema = z.object({
+  collections: z.array(bookmarkCollectionRefSchema),
+});
+
+export const bulkBookmarkActionSchema = z.enum([
+  'move',
+  'addTags',
+  'removeTags',
+  'trash',
+  'restore',
+  'delete',
+]);
+
+export const bulkMoveModeSchema = z.enum(['assign', 'union']);
+
+export const bulkBookmarksRequestSchema = z.object({
+  action: bulkBookmarkActionSchema,
+  ids: z.array(z.string()).min(1),
+  mode: bulkMoveModeSchema,
+  collectionIds: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export const bulkBookmarksResponseSchema = z.object({
+  action: bulkBookmarkActionSchema,
+  affected: z.number().int().nonnegative(),
+  ids: z.array(z.string()),
+});
+
 export type BookmarkContentType = z.infer<typeof contentTypeSchema>;
 export type BookmarkCacheStatus = z.infer<typeof cacheStatusSchema>;
 export type BookmarkStorageKind = z.infer<typeof storageKindSchema>;
@@ -124,6 +162,13 @@ export type Bookmark = z.infer<typeof bookmarkSchema>;
 export type BookmarkListResponse = z.infer<typeof bookmarkListResponseSchema>;
 export type BookmarkStats = z.infer<typeof bookmarkStatsSchema>;
 export type UpdateBookmarkRequest = z.infer<typeof updateBookmarkRequestSchema>;
+export type ReplaceBookmarkCollectionsRequest = z.infer<
+  typeof replaceBookmarkCollectionsRequestSchema
+>;
+export type BookmarkCollectionRef = z.infer<typeof bookmarkCollectionRefSchema>;
+export type BookmarkCollectionsResponse = z.infer<typeof bookmarkCollectionsResponseSchema>;
+export type BulkBookmarksRequest = z.infer<typeof bulkBookmarksRequestSchema>;
+export type BulkBookmarksResponse = z.infer<typeof bulkBookmarksResponseSchema>;
 
 export type BookmarkListQuery = NonNullable<operations['listBookmarks']['parameters']['query']>;
 
@@ -141,6 +186,14 @@ const _bookmarkStatsCheck: components['schemas']['BookmarkStatsDto'] | undefined
   BookmarkStats | undefined;
 const _updateBookmarkCheck: components['schemas']['UpdateBookmarkDto'] | undefined = undefined as
   UpdateBookmarkRequest | undefined;
+const _replaceCollectionsCheck: components['schemas']['ReplaceBookmarkCollectionsDto'] | undefined =
+  undefined as ReplaceBookmarkCollectionsRequest | undefined;
+const _bookmarkCollectionsCheck: components['schemas']['BookmarkCollectionsDto'] | undefined =
+  undefined as BookmarkCollectionsResponse | undefined;
+const _bulkBookmarksCheck: components['schemas']['BulkBookmarksDto'] | undefined = undefined as
+  BulkBookmarksRequest | undefined;
+const _bulkBookmarksResponseCheck: components['schemas']['BulkBookmarksResponseDto'] | undefined =
+  undefined as BulkBookmarksResponse | undefined;
 void _urlPartsCheck;
 void _tagCheck;
 void _tagUsageCheck;
@@ -148,3 +201,7 @@ void _bookmarkCheck;
 void _bookmarkListCheck;
 void _bookmarkStatsCheck;
 void _updateBookmarkCheck;
+void _replaceCollectionsCheck;
+void _bookmarkCollectionsCheck;
+void _bulkBookmarksCheck;
+void _bulkBookmarksResponseCheck;

@@ -15,8 +15,6 @@ export const APP_STRINGS = {
   navSettings: 'Settings',
   navAdmin: 'Administration',
   drawerCollectionsHeading: 'Collections',
-  drawerCollectionsHint: 'Interactive collection tree arrives in W3.',
-  drawerCollectionsCountSuffix: 'synced',
   themeSwitcherLabel: 'Switch theme',
   accountMenuLabel: 'Account menu',
   accountSettingsItem: 'Settings',

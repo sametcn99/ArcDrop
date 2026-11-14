@@ -118,14 +118,14 @@ describe('AppLayout and router shell', () => {
   });
 
   it.each([
-    ['/collections/col-1', 'Collection'],
+    ['/collections/col-1', 'Reading List'],
     ['/bookmarks/bm-1', 'Bookmark detail'],
     ['/trash', 'Trash'],
     ['/health', 'Library health'],
     ['/portability', 'Import & export'],
     ['/settings', 'Settings'],
     ['/admin', 'Administration'],
-  ])('renders authenticated lazy placeholder route %s with heading %s', async (path, heading) => {
+  ])('renders authenticated lazy route %s with heading %s', async (path, heading) => {
     useAuthStore.getState().setSession(
       makeMockSession({
         user: { role: 'admin', email: 'admin@arcdrop.test' },

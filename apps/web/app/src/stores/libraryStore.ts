@@ -12,6 +12,8 @@ import type { HighlightSnapshot, SyncChange, TagSnapshot } from '../api/schemas/
 export type LibraryLayoutMode = 'list' | 'grid' | 'headlines' | 'moodboard';
 export type LibraryScope = 'all' | 'favorites' | 'unassigned';
 
+export const TREE_EXPANDED_STORAGE_KEY = 'arcdrop.collectionTree.expanded';
+
 export interface LibraryViewState {
   ids: string[];
   totalCount: number;
@@ -34,6 +36,8 @@ export interface LibraryState {
   layoutMode: LibraryLayoutMode;
   selectedBookmarkIds: Record<string, true>;
   pendingOptimistic: Record<string, Bookmark>;
+  expandedCollectionIds: Record<string, boolean>;
+  collectionsLoaded: boolean;
   setLayoutMode: (mode: LibraryLayoutMode) => void;
   setActiveViewKey: (viewKey: string) => void;
   setViewLoading: (viewKey: string, loading: boolean, append?: boolean) => void;
@@ -46,6 +50,17 @@ export interface LibraryState {
   beginOptimisticBookmark: (id: string, patch: Partial<Bookmark>) => void;
   commitOptimisticBookmark: (id: string, confirmed: Bookmark) => void;
   rollbackOptimisticBookmark: (id: string) => void;
+  upsertCollection: (collection: Collection) => void;
+  removeCollections: (ids: string[]) => void;
+  applyCollectionOrder: (items: { id: string; order: number }[]) => Record<string, Collection>;
+  restoreCollectionsSnapshot: (snapshot: Record<string, Collection>) => void;
+  setCollectionShareState: (collectionId: string, share: Collection['share']) => void;
+  adjustCollectionBookmarkCount: (collectionId: string, delta: number) => void;
+  addBookmarkToCollectionViews: (collectionId: string, bookmark: Bookmark) => void;
+  reorderViewIds: (viewKey: string, orderedIds: string[]) => string[] | null;
+  toggleCollectionExpanded: (id: string) => void;
+  setCollectionExpanded: (id: string, expanded: boolean) => void;
+  syncExpandedFromStorage: () => void;
   applySyncChanges: (changes: SyncChange[]) => void;
   toggleBookmarkSelection: (id: string) => void;
   selectBookmarks: (ids: string[]) => void;
@@ -54,9 +69,69 @@ export interface LibraryState {
 }
 
 export const DEFAULT_LIBRARY_PAGE_SIZE = 24;
+export const COLLECTION_VIEW_PREFIX = 'collection:';
 
 export function buildLibraryViewKey(scope: LibraryScope, sort: BookmarkSort): string {
   return `${scope}|${sort}`;
+}
+
+export function buildCollectionViewKey(collectionId: string, sort: BookmarkSort): string {
+  return `${COLLECTION_VIEW_PREFIX}${collectionId}|${sort}`;
+}
+
+export function parseViewKey(
+  viewKey: string,
+):
+  | { kind: 'collection'; collectionId: string; sort: BookmarkSort }
+  | { kind: 'library'; scope: LibraryScope; sort: BookmarkSort } {
+  const [rawScope = 'all', rawSort = 'updated'] = viewKey.split('|');
+  const sort: BookmarkSort =
+    rawSort === 'created' || rawSort === 'title' || rawSort === 'manual' ? rawSort : 'updated';
+
+  if (rawScope.startsWith(COLLECTION_VIEW_PREFIX)) {
+    const collectionId = rawScope.slice(COLLECTION_VIEW_PREFIX.length);
+    if (collectionId) {
+      return { kind: 'collection', collectionId, sort };
+    }
+  }
+
+  const scope: LibraryScope =
+    rawScope === 'favorites' || rawScope === 'unassigned' ? rawScope : 'all';
+  return { kind: 'library', scope, sort: sort === 'manual' ? 'updated' : sort };
+}
+
+function readPersistedExpandedIds(): Record<string, boolean> {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(TREE_EXPANDED_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    const result: Record<string, boolean> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'boolean') {
+        result[key] = value;
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedExpandedIds(expanded: Record<string, boolean>): void {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(TREE_EXPANDED_STORAGE_KEY, JSON.stringify(expanded));
+  } catch {
+    // Ignore storage quota or security errors.
+  }
 }
 
 function createEmptyView(): LibraryViewState {
@@ -98,13 +173,16 @@ function viewMatchesBookmark(viewKey: string, bookmark: Bookmark): boolean {
   if (bookmark.deletedAt !== null) {
     return false;
   }
-  const [scope] = viewKey.split('|');
-  if (scope === 'favorites') {
+  const parsed = parseViewKey(viewKey);
+  if (parsed.kind === 'collection') {
+    // BookmarkDto does not include collectionIds; keep explicit collection fetches authoritative.
+    return false;
+  }
+  if (parsed.scope === 'favorites') {
     return bookmark.favorite;
   }
   // We cannot determine unassigned status solely from BookmarkDto because collection memberships live on collections.
-  // For 'unassigned', keep existing membership or let explicit list fetches govern inclusion unless removed.
-  if (scope === 'unassigned') {
+  if (parsed.scope === 'unassigned') {
     return false;
   }
   return true;
@@ -136,6 +214,7 @@ function insertBookmarkIntoViews(
   let changed = false;
 
   for (const [key, view] of Object.entries(views)) {
+    const parsed = parseViewKey(key);
     const matches = viewMatchesBookmark(key, bookmark);
     const alreadyInView = view.ids.includes(bookmark.id);
 
@@ -147,9 +226,9 @@ function insertBookmarkIntoViews(
         totalCount: view.totalCount + 1,
       };
     } else if (!matches && alreadyInView) {
-      const [scope] = key.split('|');
-      // Only evict from 'unassigned' if the bookmark itself was trashed.
-      if (scope !== 'unassigned' || bookmark.deletedAt !== null) {
+      // Only evict from 'unassigned' or 'collection:' views if the bookmark itself was trashed.
+      const keepUnlessTrashed = parsed.kind === 'collection' || parsed.scope === 'unassigned';
+      if (!keepUnlessTrashed || bookmark.deletedAt !== null) {
         changed = true;
         nextViews[key] = {
           ...view,
@@ -182,6 +261,8 @@ function createInitialLibraryState() {
     layoutMode: 'list' as LibraryLayoutMode,
     selectedBookmarkIds: {} as Record<string, true>,
     pendingOptimistic: {} as Record<string, Bookmark>,
+    expandedCollectionIds: {} as Record<string, boolean>,
+    collectionsLoaded: false,
   };
 }
 
@@ -274,7 +355,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     for (const col of collections) {
       next[col.id] = col;
     }
-    set({ collectionsById: next });
+    set({ collectionsById: next, collectionsLoaded: true });
   },
 
   hydrateTags(tags) {
@@ -386,6 +467,170 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         pendingOptimistic: nextPending,
       };
     });
+  },
+
+  upsertCollection(collection) {
+    set((state) => ({
+      collectionsById: {
+        ...state.collectionsById,
+        [collection.id]: collection,
+      },
+      collectionsLoaded: true,
+    }));
+  },
+
+  removeCollections(ids) {
+    if (ids.length === 0) return;
+    const removeSet = new Set(ids);
+    set((state) => {
+      const nextCollections = { ...state.collectionsById };
+      for (const id of ids) {
+        delete nextCollections[id];
+      }
+      const nextViews: Record<string, LibraryViewState> = {};
+      for (const [key, view] of Object.entries(state.views)) {
+        const parsed = parseViewKey(key);
+        if (parsed.kind === 'collection' && removeSet.has(parsed.collectionId)) {
+          continue;
+        }
+        nextViews[key] = view;
+      }
+      return {
+        collectionsById: nextCollections,
+        views: nextViews,
+      };
+    });
+  },
+
+  applyCollectionOrder(items) {
+    const previous = get().collectionsById;
+    set((state) => {
+      const nextCollections = { ...state.collectionsById };
+      for (const item of items) {
+        const existing = nextCollections[item.id];
+        if (existing) {
+          nextCollections[item.id] = {
+            ...existing,
+            order: item.order,
+          };
+        }
+      }
+      return { collectionsById: nextCollections };
+    });
+    return previous;
+  },
+
+  restoreCollectionsSnapshot(snapshot) {
+    set({ collectionsById: snapshot });
+  },
+
+  setCollectionShareState(collectionId, share) {
+    set((state) => {
+      const existing = state.collectionsById[collectionId];
+      if (!existing) return state;
+      return {
+        collectionsById: {
+          ...state.collectionsById,
+          [collectionId]: {
+            ...existing,
+            share,
+          },
+        },
+      };
+    });
+  },
+
+  adjustCollectionBookmarkCount(collectionId, delta) {
+    if (delta === 0) return;
+    set((state) => {
+      const existing = state.collectionsById[collectionId];
+      if (!existing) return state;
+      return {
+        collectionsById: {
+          ...state.collectionsById,
+          [collectionId]: {
+            ...existing,
+            bookmarkCount: Math.max(0, existing.bookmarkCount + delta),
+          },
+        },
+      };
+    });
+  },
+
+  addBookmarkToCollectionViews(collectionId, bookmark) {
+    if (bookmark.deletedAt !== null) return;
+    set((state) => {
+      const prefix = `${COLLECTION_VIEW_PREFIX}${collectionId}|`;
+      let changed = false;
+      const nextViews = { ...state.views };
+      for (const [key, view] of Object.entries(state.views)) {
+        if (!key.startsWith(prefix)) continue;
+        if (view.ids.includes(bookmark.id)) continue;
+        changed = true;
+        nextViews[key] = {
+          ...view,
+          ids: [...view.ids, bookmark.id],
+          totalCount: view.totalCount + 1,
+        };
+      }
+      return changed ? { views: nextViews } : state;
+    });
+  },
+
+  reorderViewIds(viewKey, orderedIds) {
+    const currentView = get().views[viewKey];
+    if (!currentView) return null;
+    const previousIds = currentView.ids;
+    set((state) => {
+      const view = state.views[viewKey];
+      if (!view) return state;
+      return {
+        views: {
+          ...state.views,
+          [viewKey]: {
+            ...view,
+            ids: orderedIds,
+          },
+        },
+      };
+    });
+    return previousIds;
+  },
+
+  toggleCollectionExpanded(id) {
+    set((state) => {
+      const next = {
+        ...state.expandedCollectionIds,
+        [id]: !state.expandedCollectionIds[id],
+      };
+      writePersistedExpandedIds(next);
+      return { expandedCollectionIds: next };
+    });
+  },
+
+  setCollectionExpanded(id, expanded) {
+    set((state) => {
+      if (Boolean(state.expandedCollectionIds[id]) === expanded) {
+        return state;
+      }
+      const next = {
+        ...state.expandedCollectionIds,
+        [id]: expanded,
+      };
+      writePersistedExpandedIds(next);
+      return { expandedCollectionIds: next };
+    });
+  },
+
+  syncExpandedFromStorage() {
+    const persisted = readPersistedExpandedIds();
+    if (Object.keys(persisted).length === 0) return;
+    set((state) => ({
+      expandedCollectionIds: {
+        ...persisted,
+        ...state.expandedCollectionIds,
+      },
+    }));
   },
 
   applySyncChanges(changes) {
@@ -576,12 +821,14 @@ export function selectViewBookmarks(state: LibraryState, viewKey: string): Bookm
   return result;
 }
 
+export function compareCollections(a: Collection, b: Collection): number {
+  if (a.order !== b.order) return a.order - b.order;
+  if (a.createdAt !== b.createdAt) return a.createdAt.localeCompare(b.createdAt);
+  return a.id.localeCompare(b.id);
+}
+
 export function selectSortedCollections(state: LibraryState): Collection[] {
-  return Object.values(state.collectionsById).sort((a, b) => {
-    if (a.order !== b.order) return a.order - b.order;
-    if (a.createdAt !== b.createdAt) return a.createdAt.localeCompare(b.createdAt);
-    return a.id.localeCompare(b.id);
-  });
+  return Object.values(state.collectionsById).sort(compareCollections);
 }
 
 export function selectSortedTags(state: LibraryState): TagUsage[] {

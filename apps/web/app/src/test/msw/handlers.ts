@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type { AuthSession, Session, User } from '../../api/schemas/auth';
 import type { Bookmark, BookmarkStats, TagUsage } from '../../api/schemas/bookmarks';
-import type { Collection } from '../../api/schemas/collections';
+import type { Collection, CollectionNode } from '../../api/schemas/collections';
 import type { ProblemDetails } from '../../api/schemas/problem';
 
 export function makeMockUser(overrides: Partial<User> = {}): User {
@@ -179,6 +179,25 @@ export function problemJsonResponse(
   });
 }
 
+function buildDefaultTree(items: Collection[]): CollectionNode[] {
+  const byId = new Map<string, CollectionNode>();
+  for (const col of items) {
+    byId.set(col.id, { ...col, children: [] });
+  }
+  const roots: CollectionNode[] = [];
+  for (const col of items) {
+    const node = byId.get(col.id);
+    if (!node) continue;
+    const parent = col.parentId ? byId.get(col.parentId) : undefined;
+    if (parent && parent.id !== node.id) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}
+
 export const authHandlers = [
   http.post('*/api/v1/auth/bootstrap', async ({ request }) => {
     const body = (await request.json()) as { email: string };
@@ -316,6 +335,21 @@ export const libraryHandlers = [
     );
   }),
 
+  http.post('*/api/v1/bookmarks/bulk', async ({ request }) => {
+    const body = (await request.json()) as {
+      action: 'move' | 'addTags' | 'removeTags' | 'trash' | 'restore' | 'delete';
+      ids: string[];
+    };
+    return HttpResponse.json(
+      {
+        action: body.action,
+        affected: body.ids.length,
+        ids: body.ids,
+      },
+      { status: 200 },
+    );
+  }),
+
   http.get('*/api/v1/bookmarks', ({ request }) => {
     const url = new URL(request.url);
     const page = Number(url.searchParams.get('page') ?? '1');
@@ -363,6 +397,15 @@ export const libraryHandlers = [
     );
   }),
 
+  http.put('*/api/v1/bookmarks/:id/collections', async ({ request }) => {
+    const body = (await request.json()) as { collectionIds: string[] };
+    const collections = body.collectionIds.map((id) => ({
+      id,
+      title: id === 'col-1' ? 'Reading List' : `Collection ${id}`,
+    }));
+    return HttpResponse.json({ collections }, { status: 200 });
+  }),
+
   http.delete('*/api/v1/bookmarks/:id', () => {
     return new HttpResponse(null, { status: 204 });
   }),
@@ -379,13 +422,112 @@ export const libraryHandlers = [
     );
   }),
 
-  http.get('*/api/v1/collections', () => {
+  http.get('*/api/v1/collections', ({ request }) => {
+    const url = new URL(request.url);
+    const shared = url.searchParams.get('shared');
+    let items = [makeMockCollection()];
+    if (shared === 'true') {
+      items = items.filter((item) => item.share.enabled);
+    } else if (shared === 'false') {
+      items = items.filter((item) => !item.share.enabled);
+    }
+    return HttpResponse.json({ items }, { status: 200 });
+  }),
+
+  http.get('*/api/v1/collections/tree', () => {
+    return HttpResponse.json(buildDefaultTree([makeMockCollection()]), { status: 200 });
+  }),
+
+  http.post('*/api/v1/collections', async ({ request }) => {
+    const body = (await request.json()) as {
+      title: string;
+      icon?: string;
+      color?: string;
+      parentId?: string | null;
+    };
+    return HttpResponse.json(
+      makeMockCollection({
+        id: 'col-created',
+        title: body.title,
+        icon: body.icon ?? null,
+        color: body.color ?? null,
+        parentId: body.parentId ?? null,
+        bookmarkCount: 0,
+      }),
+      { status: 201 },
+    );
+  }),
+
+  http.patch('*/api/v1/collections/order', () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post('*/api/v1/collections/merge', async ({ request }) => {
+    const body = (await request.json()) as { sourceIds: string[]; targetId: string };
     return HttpResponse.json(
       {
-        items: [makeMockCollection()],
+        target: makeMockCollection({ id: body.targetId }),
+        trashedIds: body.sourceIds,
+        movedChildren: 0,
+        movedBookmarks: 1,
       },
       { status: 200 },
     );
+  }),
+
+  http.post('*/api/v1/collections/sort-alphabetical', () => {
+    return HttpResponse.json({ updated: 0 }, { status: 200 });
+  }),
+
+  http.post('*/api/v1/collections/delete-empty', () => {
+    return HttpResponse.json({ trashed: 0, kept: 1 }, { status: 200 });
+  }),
+
+  http.get('*/api/v1/collections/:id', ({ params }) => {
+    const id = String(params.id);
+    return HttpResponse.json(makeMockCollection({ id }), { status: 200 });
+  }),
+
+  http.put('*/api/v1/collections/:id', async ({ params, request }) => {
+    const id = String(params.id);
+    const body = (await request.json()) as Partial<Collection>;
+    return HttpResponse.json(
+      makeMockCollection({
+        id,
+        ...body,
+        updatedAt: '2026-11-14T03:10:00.000Z',
+      }),
+      { status: 200 },
+    );
+  }),
+
+  http.put('*/api/v1/collections/:id/share', async ({ params, request }) => {
+    const id = String(params.id);
+    const body = (await request.json()) as { enabled: boolean };
+    const shareToken = body.enabled ? `share-token-${id}` : null;
+    return HttpResponse.json(
+      {
+        collectionId: id,
+        enabled: body.enabled,
+        shareToken,
+        publicPath: shareToken ? `/api/v1/public/collections/${shareToken}` : null,
+        rssPath: shareToken ? `/api/v1/public/collections/${shareToken}/rss` : null,
+      },
+      { status: 200 },
+    );
+  }),
+
+  http.patch('*/api/v1/collections/:id/bookmarks/order', () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete('*/api/v1/collections/:id', () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post('*/api/v1/collections/:id/restore', ({ params }) => {
+    const id = String(params.id);
+    return HttpResponse.json(makeMockCollection({ id }), { status: 200 });
   }),
 ];
 

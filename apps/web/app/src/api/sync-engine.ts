@@ -6,10 +6,11 @@ import type { BookmarkListQuery } from './schemas/bookmarks';
 import { toApiError } from './schemas/problem';
 import { syncWsFrameSchema } from './schemas/sync';
 import {
+  buildCollectionViewKey,
   buildLibraryViewKey,
   DEFAULT_LIBRARY_PAGE_SIZE,
+  parseViewKey,
   useLibraryStore,
-  type LibraryScope,
 } from '../stores/libraryStore';
 import { useSyncStore } from '../stores/syncStore';
 import { useUiStore } from '../stores/uiStore';
@@ -137,24 +138,33 @@ export function createSyncEngine(deps: SyncEngineDeps = {}) {
 
   function resolveActiveListQuery(): { viewKey: string; query: BookmarkListQuery } {
     const activeKey = useLibraryStore.getState().activeViewKey;
-    const [rawScope, rawSort] = activeKey.split('|');
-    const scope: LibraryScope =
-      rawScope === 'favorites' || rawScope === 'unassigned' ? rawScope : 'all';
-    const sort =
-      rawSort === 'created' || rawSort === 'title' || rawSort === 'manual' ? rawSort : 'updated';
+    const parsed = parseViewKey(activeKey);
+
+    if (parsed.kind === 'collection') {
+      return {
+        viewKey: buildCollectionViewKey(parsed.collectionId, parsed.sort),
+        query: {
+          page: 1,
+          pageSize: DEFAULT_LIBRARY_PAGE_SIZE,
+          sort: parsed.sort,
+          collectionId: parsed.collectionId,
+          trashed: false,
+        },
+      };
+    }
 
     const query: BookmarkListQuery = {
       page: 1,
       pageSize: DEFAULT_LIBRARY_PAGE_SIZE,
-      sort,
+      sort: parsed.sort,
       trashed: false,
     };
-    if (scope === 'favorites') {
+    if (parsed.scope === 'favorites') {
       query.favorite = true;
-    } else if (scope === 'unassigned') {
+    } else if (parsed.scope === 'unassigned') {
       query.unassignedOnly = true;
     }
-    return { viewKey: buildLibraryViewKey(scope, sort), query };
+    return { viewKey: buildLibraryViewKey(parsed.scope, parsed.sort), query };
   }
 
   async function performFullResync(token: number, adoptedCursor?: string): Promise<void> {

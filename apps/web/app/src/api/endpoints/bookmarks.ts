@@ -1,13 +1,18 @@
 import { apiClient, type ApiClient } from '../client';
 import {
+  bookmarkCollectionsResponseSchema,
   bookmarkListResponseSchema,
   bookmarkSchema,
   bookmarkStatsSchema,
+  bulkBookmarksResponseSchema,
   tagUsageListSchema,
   type Bookmark,
+  type BookmarkCollectionsResponse,
   type BookmarkListQuery,
   type BookmarkListResponse,
   type BookmarkStats,
+  type BulkBookmarksRequest,
+  type BulkBookmarksResponse,
   type TagUsage,
   type UpdateBookmarkRequest,
 } from '../schemas/bookmarks';
@@ -48,6 +53,25 @@ export function createBookmarksApi(client: ApiClient = apiClient) {
     async update(id: string, input: UpdateBookmarkRequest): Promise<Bookmark> {
       return client.put(`/bookmarks/${encodeURIComponent(id)}`, input, {
         schema: bookmarkSchema,
+      });
+    },
+
+    async replaceCollections(
+      id: string,
+      collectionIds: string[],
+    ): Promise<BookmarkCollectionsResponse> {
+      return client.put(
+        `/bookmarks/${encodeURIComponent(id)}/collections`,
+        { collectionIds },
+        {
+          schema: bookmarkCollectionsResponseSchema,
+        },
+      );
+    },
+
+    async bulk(input: BulkBookmarksRequest): Promise<BulkBookmarksResponse> {
+      return client.post('/bookmarks/bulk', input, {
+        schema: bulkBookmarksResponseSchema,
       });
     },
 
