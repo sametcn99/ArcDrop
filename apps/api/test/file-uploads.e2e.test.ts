@@ -876,13 +876,17 @@ describe('File uploads M18 (e2e)', () => {
     expect(existsSync(archiveDirOf(upB.body.id))).toBeFalse();
     expect(existsSync(pathC)).toBeTrue(); // untouched
 
-    // Orphaned file matching valid ref pattern is swept by FileEvictionService; referenced file untouched
+    // Orphaned file matching valid ref pattern is swept; referenced & non-ref files stay untouched.
+    // purgeExpired() also triggers the FileEvictionService ride-along fire-and-forget, so this
+    // explicit sweep may split work with it — assert the deterministic filesystem outcome, not count.
     const orphanRef = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.txt';
     const orphanPath = join(filesDir(), orphanRef);
+    const foreignPath = join(filesDir(), 'README.txt');
     writeFileSync(orphanPath, 'stray-orphan');
-    const eviction = await app.get(FileEvictionService).evictOrphaned();
-    expect(eviction.evicted).toBeGreaterThanOrEqual(1);
+    writeFileSync(foreignPath, 'keep-me');
+    await app.get(FileEvictionService).evictOrphaned();
     expect(existsSync(orphanPath)).toBeFalse();
+    expect(existsSync(foreignPath)).toBeTrue();
     expect(existsSync(pathC)).toBeTrue();
 
     // Account data reset deletes dave's remaining file bytes & archive, while preserving upload_usage
