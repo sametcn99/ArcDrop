@@ -31,6 +31,31 @@ jobs:
       - name: Unit tests
         run: bun run test:unit
 
+  web:
+    name: Web (lint, typecheck, build & unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun --cwd=apps/web/app run lint
+
+      - name: Typecheck
+        run: bun --cwd=apps/web/app run typecheck
+
+      - name: Build
+        run: bun --cwd=apps/web/app run build
+
+      - name: Unit tests
+        run: bun --cwd=apps/web/app run test
+
   e2e:
     name: E2E (Postgres service)
     runs-on: ubuntu-latest

@@ -4,6 +4,9 @@
     "@eslint/js": "^9.20.0",
     "eslint": "^9.20.0",
     "eslint-config-prettier": "^10.0.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
     "prettier": "^3.5.0",
     "typescript-eslint": "^8.24.0"
   },
@@ -19,9 +22,15 @@
     "test:unit": "bun --cwd=apps/api test src",
     "test:e2e": "bun --cwd=apps/api test e2e",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "web:dev": "bun --cwd=apps/web/app run dev",
+    "web:build": "bun --cwd=apps/web/app run build",
+    "web:lint": "bun --cwd=apps/web/app run lint",
+    "web:typecheck": "bun --cwd=apps/web/app run typecheck",
+    "web:test": "bun --cwd=apps/web/app run test"
   },
   "workspaces": [
-    "apps/*"
+    "apps/*",
+    "apps/web/*"
   ]
 }

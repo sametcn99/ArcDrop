@@ -1,0 +1,13 @@
+export const APP_STRINGS = {
+  brand: 'ArcDrop',
+  navigationDrawerLabel: 'Navigation sidebar',
+  openNavigationLabel: 'Open navigation drawer',
+  closeNavigationLabel: 'Close navigation drawer',
+  drawerEmptyHeading: 'Collections',
+  drawerEmptyHint: 'Collection tree and navigation arrive in W2–W3.',
+  themeSwitcherLabel: 'Switch theme',
+  loadingRouteLabel: 'Loading view',
+  notFoundTitle: 'Page not found',
+  notFoundDescription: 'The requested route does not exist in this workspace.',
+  notFoundAction: 'Go to library',
+} as const;
