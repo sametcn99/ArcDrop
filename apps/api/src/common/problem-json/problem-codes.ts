@@ -20,6 +20,10 @@ export interface ProblemDetails {
   requestId?: string;
   /** Field-level details; present for validation failures. */
   errors?: Array<{ field: string; messages: string[] }>;
+  /** Short-lived 2FA login challenge token (present when `code === 'TOTP_REQUIRED'`). */
+  challenge?: string;
+  /** ISO-8601 expiry timestamp for `challenge` (present when `code === 'TOTP_REQUIRED'`). */
+  expiresAt?: string;
 }
 
 interface StatusProblem {

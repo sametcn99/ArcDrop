@@ -16,6 +16,8 @@ interface MappedProblem {
   code: string;
   detail: string;
   errors?: Array<{ field: string; messages: string[] }>;
+  challenge?: string;
+  expiresAt?: string;
 }
 
 /**
@@ -46,6 +48,8 @@ export class ProblemJsonFilter implements ExceptionFilter {
       instance: request.originalUrl ?? request.url,
       requestId,
       ...(mapped.errors ? { errors: mapped.errors } : {}),
+      ...(mapped.challenge !== undefined ? { challenge: mapped.challenge } : {}),
+      ...(mapped.expiresAt !== undefined ? { expiresAt: mapped.expiresAt } : {}),
     };
 
     if (mapped.status >= 500) {
@@ -68,6 +72,9 @@ export class ProblemJsonFilter implements ExceptionFilter {
       const { code, title } = problemForStatus(status);
       let detail = exception.message;
       let errors: MappedProblem['errors'];
+      let customCode: string | undefined;
+      let challenge: string | undefined;
+      let expiresAt: string | undefined;
 
       const payload = exception.getResponse();
       if (typeof payload === 'object' && payload !== null) {
@@ -80,15 +87,27 @@ export class ProblemJsonFilter implements ExceptionFilter {
         if (Array.isArray(record['errors'])) {
           errors = record['errors'] as Array<{ field: string; messages: string[] }>;
         }
+        if (typeof record['code'] === 'string' && record['code'].length > 0) {
+          customCode = record['code'];
+        }
+        if (typeof record['challenge'] === 'string' && record['challenge'].length > 0) {
+          challenge = record['challenge'];
+        }
+        if (typeof record['expiresAt'] === 'string' && record['expiresAt'].length > 0) {
+          expiresAt = record['expiresAt'];
+        }
       }
 
       return {
         status,
         title,
-        // Validation payloads carry field details — give them a precise code.
-        code: errors ? 'VALIDATION_FAILED' : code,
+        // Validation payloads carry field details — give them a precise code;
+        // exceptions carrying a bespoke code (e.g. TOTP_REQUIRED) preserve it.
+        code: errors ? 'VALIDATION_FAILED' : (customCode ?? code),
         detail: detail || `${title} (${request.method} ${request.url})`,
         errors,
+        challenge,
+        expiresAt,
       };
     }
 

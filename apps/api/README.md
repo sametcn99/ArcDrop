@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M14 — reminders & notifications (**Wave 2: M0–M14**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (39 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`). **Next:** Wave 2 — M15 (2FA & account lifecycle).
+**Status:** M15 — 2FA & account lifecycle (**Wave 2: M0–M15**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (39 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`); plus M15 TOTP 2FA with single-use recovery codes, two-step login (`TOTP_REQUIRED`), password-confirmed `POST /me/reset-data` & `DELETE /me`, and documented export→import account transfer. **Next:** Wave 2 — M16 (manual ordering).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -37,7 +37,7 @@ automatically.
 | Variable                                     | Required | Default     | Meaning                                                                                                                  |
 | -------------------------------------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `ARCDROP__DATABASE__URL`                     | yes      | —           | PostgreSQL connection URL (`postgres://…`)                                                                               |
-| `ARCDROP__JWT__SECRET`                       | yes      | —           | JWT signing secret, min 32 chars (used from M2)                                                                          |
+| `ARCDROP__JWT__SECRET`                       | yes      | —           | JWT signing secret & TOTP secret encryption key seed, min 32 chars (M2; M15 AES-256-GCM)                                 |
 | `ARCDROP__PORT`                              | no       | `3000`      | HTTP port                                                                                                                |
 | `ARCDROP__CORS__ORIGINS`                     | no       | empty       | Comma-separated browser origins; empty = CORS off                                                                        |
 | `ARCDROP__DATA_DIR`                          | no       | `/data`     | Data volume root (icons live in `…/icons` since M6); must be writable                                                    |
@@ -110,7 +110,8 @@ generated migrations.
   `User`, `RefreshToken`, `OneTimeToken`, `PersonalAccessToken` (M7 agent auth),
   `Setting` (D16 runtime settings), `AuditLogEntry` (M7 tool-call audit),
   `Bookmark`, `Highlight` (M10 / D6), `Tag`, `BookmarkTag`, `BookmarkCollection`,
-  `Collection`, `ChangeEvent` (M3/M4/M10), `NotificationOutbox` (M14 / D20).
+  `Collection`, `ChangeEvent` (M3/M4/M10), `NotificationOutbox` (M14 / D20),
+  `TfaRecoveryCode` (M15 single-use 2FA recovery codes).
 - `src/database/migrations/` — explicit migration list + the no-op
   `InitialSetup1763000000000` pipeline proof, `M2AuthUsers1794606603617`
   (users/refresh_tokens/one_time_tokens/settings + the three enum types),
@@ -123,9 +124,11 @@ generated migrations.
   `bookmark_content_type` enum + `bookmarks.content_type`, and `'highlight'` on
   `change_entity`), `M12LibraryHealth1794629705566` (`bookmarks.last_checked_at`,
   `bookmarks.broken_reason`, `bookmarks.broken_at`, and `IX_bookmarks_user_broken_at`),
-  and `M14RemindersNotifications1794632472998` (`bookmarks.reminder_at`,
+  `M14RemindersNotifications1794632472998` (`bookmarks.reminder_at`,
   `bookmarks.reminded_at`, `IX_bookmarks_user_reminder_at`,
-  `IX_bookmarks_reminder_due`, `notification_outbox`, and `notification_type` enum).
+  `IX_bookmarks_reminder_due`, `notification_outbox`, and `notification_type` enum),
+  and `M15TwoFactorAuth1794633718696` (`tfa_recovery_codes`, `users.totp_enabled`,
+  `users.totp_secret`, and `'tfa_challenge'` on `one_time_token_type`).
   M5/M6/M8/M9/M11/M13 needed NO schema work.
 
 ### Migration workflow
@@ -958,13 +961,15 @@ exact continuity boundary); clients behind it get `resyncRequired`.
   sets the password, revokes the user's existing sessions and starts a new one.
 - **Password change:** `POST /auth/password` revokes all OTHER families (the caller's
   survives via its `fam` claim).
-- **Throttling:** `@nestjs/throttler` — global default 100 req/min per IP; every
-  `/auth/*` route is capped at 10 req/min (the e2e suite proves a 429 problem+json on
-  the 11th login in an isolated boot).
+- **Throttling:** `@nestjs/throttler` — global default 100 req/min per IP; `/auth/*`
+  and `/me/*` routes are capped at 10 req/min, and all 2FA endpoints (`/auth/tfa/*`
+  and `/auth/login/tfa`) enforce an even stricter **5 req/min** per IP (the e2e
+  suites prove 429 problem+json responses on excess).
 - **Guards (order matters):** `ThrottlerGuard` → `JwtAuthGuard` (global; `@Public()`
   opts out — health probes and the public auth routes use it; accepts an
   access JWT **or** a personal access token since M7) → `PatScopeGuard`
-  (M7: PAT-only surface rules — auth/admin refusal, read-only method rule,
+  (M7/M15: PAT-only surface rules — refuses PATs with 403 on `/auth/*`,
+  `/admin/*`, and `/me/*`, enforces read-only HTTP methods, and applies the
   per-PAT rate budget) → `RolesGuard` (`@Roles('admin')` on `/admin/*`).
 - **Instance settings (D16):** `settings` table, typed via `SettingsService` —
   `registrationOpen` (default false), `trashRetentionDays` (30), `changeLogRetentionDays`
@@ -985,10 +990,11 @@ src/
                            CLI datasource
   health/                  GET /api/v1/healthz (process), GET /api/v1/readyz (DB + data dir)
   metrics/                 prom-client registry; /metrics route only when enabled
-  auth/                    /auth/* controller+service; crypto (JWT/argon2/opaque tokens);
+  auth/                    /auth/* controller+service; crypto (JWT/argon2/opaque tokens/TOTP);
                            global guards (throttler, JWT-or-PAT, PAT scope, roles) +
                            @Public/@Roles/@CurrentUser
-  users/                   /admin/users controller+service (invite/reset tokens via API)
+  users/                   /admin/users controller+service (invite/reset tokens via API) +
+                           MeLifecycleController/AccountLifecycleService (M15 /me/reset-data, DELETE /me)
   settings/                SettingsService (typed DB settings) + /admin/settings
   change-log/              ChangeLogService (transact + gapless seq) + ChangeEventBus
                            (in-process fan-out for M5's ws push)
@@ -1419,14 +1425,34 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 - **Notifications inbox:** `GET /api/v1/notifications?unread=true|false&page=&pageSize=` (`operationId: listNotifications`, `pageSize` clamped to 200) and `POST /api/v1/notifications/read` (`operationId: markNotificationsRead`, accepting `{ ids }` or `{ all: true }`, idempotent, rejecting empty or both with `400 BAD_REQUEST`) provide the offline catch-up path. `NotificationOutbox.bookmarkId` uses `ON DELETE SET NULL` while retaining `payload` history when a bookmark is purged.
 - **Filtering, search grammar & MCP parity:** Activates `reminder:true|false` (`-reminder:true`) in `search-query.parser.ts` & `search-query.compiler.ts` (only `file:` remains reserved for M18) and `GET /bookmarks?reminder=true|false`. Adds `listNotifications` and `markNotificationsRead` to `src/mcp/mcp-tool-catalog.ts` (39 tools total: 13 reads, 26 mutations).
 
-## Wave-2 Handoff (for M15+)
+## Two-factor authentication & account lifecycle (M15 — D15, D19, D20, Raindrop parity G5, G13)
 
-M0–M14 are complete and green (318 unit / 191 e2e tests across 52 test files). Next is **M15 (2FA & account lifecycle)**:
+- **TOTP 2FA crypto (`src/auth/crypto/totp.service.ts`):** Hand-rolled on Node/Bun `node:crypto` (RFC 4226 HOTP, RFC 6238 TOTP, RFC 4648 Base32) matching `JwtService`’s zero-dependency posture, unit-tested against all RFC 6238 Appendix B SHA1/SHA256/SHA512 test vectors (`totp.service.test.ts`). Secrets are 160-bit (20 random bytes → 32 Base32 chars), encrypted at rest with AES-256-GCM (`v1:<iv>.<tag>.<ciphertext>`) keyed from `ARCDROP__JWT__SECRET`, and verified over a 30s period with `±1` step tolerance (`timingSafeEqual`).
+- **Setup, enable & disable (`AuthController` + `AuthService`):**
+  - `POST /api/v1/auth/tfa/setup` (`operationId: setupTfa`) mints a pending secret + `otpauth://totp/ArcDrop:...` URI while keeping `totpEnabled: false` (`409 CONFLICT` if already enabled).
+  - `POST /api/v1/auth/tfa/enable` (`operationId: enableTfa`) confirms a valid 6-digit TOTP code (`400` before setup, `401` on invalid code), flips `totpEnabled = true`, mints **10 single-use `xxxxx-xxxxx` recovery codes** returned **once** (sha256-hashed at rest in `tfa_recovery_codes`), and revokes **all** active sessions (`refresh_tokens`).
+  - `POST /api/v1/auth/tfa/disable` (`operationId: disableTfa`) requires either a valid TOTP `code` or an unconsumed `recoveryCode`, clears the secret, deletes recovery codes, voids pending challenges, and revokes **all** active sessions.
+- **Two-step login & hard throttling:** When password authentication succeeds for a user with `totpEnabled: true`, `POST /api/v1/auth/login` throws `401 application/problem+json` carrying `code: "TOTP_REQUIRED"`, a single-use 5-minute `challenge` token (`one_time_tokens.type = 'tfa_challenge'`, unusable on `/auth/claim`), and `expiresAt`. `POST /api/v1/auth/login/tfa` (`operationId: loginTfa`) exchanges `{ challenge, code | recoveryCode }` for a normal `{ user, accessToken, refreshToken }` session pair; recovery codes mark `used_at` atomically and work at most once. All four 2FA endpoints (`/auth/tfa/setup`, `/auth/tfa/enable`, `/auth/tfa/disable`, `/auth/login/tfa`) enforce a strict **5 req/min** IP throttle (`429 TOO_MANY_REQUESTS`), and `PatScopeGuard` blocks all PAT access (`403`) on `/auth/*`, `/admin/*`, and `/me/*` (zero MCP tools added for 2FA or account lifecycle).
+- **Recovery-code caveat (no SMTP escape hatch — D15, D20):** ArcDrop has **no outbound email/SMTP recovery flow by design**. If a user loses both their authenticator app/TOTP secret and all single-use recovery codes, they cannot log into their account via self-service. Store the one-time recovery codes offline when enabling 2FA.
+- **Account lifecycle (`MeLifecycleController` + `AccountLifecycleService`):**
+  - `POST /api/v1/me/reset-data` (`operationId: resetOwnData`): Password-confirmed (`401` on bad password), hard-wipes all user library data (`notification_outbox`, `change_events`, `highlights`, `bookmark_tags`, `bookmark_collections`, `bookmarks`, `tags`, `collections`) inside one transaction, resets `users.sync_seq = 0`, and fires ride-along orphaned icon eviction (`204`). Profile, instance settings, active sessions, PATs, and 2FA enrollment survive; devices holding old cursors (`since > 0`) receive `{ resyncRequired: true, changes: [], cursor: "0" }` cleanly; other users’ libraries are untouched.
+  - `DELETE /api/v1/me` (`operationId: deleteOwnAccount`): Password-confirmed self-delete (`204`), wiping all library data, `tfa_recovery_codes`, `personal_access_tokens`, `refresh_tokens`, `one_time_tokens`, and the `users` row + ride-along icon eviction. Locks active admins (`FOR UPDATE`) and returns `409 CONFLICT` if the caller is the **last active admin** (preserving M2’s `/admin/users/{id}` guardrail).
+  - **Account-to-account transfer:** No bespoke transfer endpoint is needed — export the source account’s library using M8’s `POST /api/v1/data/export` with `{ format: "json" }` (`arcdrop/v1` full-fidelity archive including collections, tags, timestamps, favorites, content types, and highlights), then upload that JSON file to the destination account via `POST /api/v1/data/import` (and optionally call `POST /api/v1/me/reset-data` or `DELETE /api/v1/me` on the source account).
 
-- **Lifecycle wipe scope (`POST /me/reset-data` & `DELETE /me`):** `notification_outbox` (added in M14) holds per-user rows with `user_id` (`ON DELETE CASCADE`) and `bookmark_id` (`ON DELETE SET NULL`). `POST /me/reset-data` must explicitly wipe `notification_outbox` alongside bookmarks, collections, tags, highlights, and change events so a library reset leaves a completely clean slate; `DELETE /me` cascades via `users.id`. Also update any e2e `wipeData` helpers if new tables are added in M15.
-- **D15 / D20 posture:** Continue with zero SMTP recovery paths (2FA recovery codes are hashed single-use tokens shown once, same discipline as PATs/one-time tokens; document the recovery-code caveat in `apps/api/README.md`).
-- **Reserved search operators:** Only `file:` remains reserved in `src/bookmarks/search-query.parser.ts` (reserved for M18).
-- **MCP, migrations & verification discipline:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, mirror any new authenticated non-admin REST operations in `src/mcp/mcp-tool-catalog.ts` + `test/mcp.e2e.test.ts` (if M15 adds any beyond `/auth/*` and `/me/reset-data` / `DELETE /me` — check credential-surface boundaries consistent with `/auth` and `/me/tokens`!), update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun test src && bun test e2e`.
+## Decisions recorded (M15)
+
+- **Hand-rolled TOTP on `node:crypto`:** Implementing RFC 4226/6238/4648 directly keeps zero external runtime dependencies and matches `JwtService`’s auditability (verified against RFC 6238 Appendix B SHA1/SHA256/SHA512 vectors).
+- **PAT isolation broadened to `/me/*`:** `PatScopeGuard` now blocks PATs across the entire `/me` controller prefix (`/me/tokens`, `/me/reset-data`, `DELETE /me`) in addition to `/auth/*` and `/admin/*`; e2e MCP parity excludes `/api/v1/me` & `/api/v1/me/*` so agent/token credentials can never mutate account lifecycle or mint/revoke credentials.
+- **`ProblemDetailsDto` + `ProblemJsonFilter` extension preservation:** Non-standard top-level problem extensions returned in `UnauthorizedException` payloads (`challenge`, `expiresAt` on `401 TOTP_REQUIRED`) are preserved verbatim alongside `code` and documented in OpenAPI `ProblemDetailsDto`.
+
+## Wave-2 Handoff (for M16+)
+
+M0–M15 are complete and green (**325 unit / 200 e2e tests across 54 test files**). Next is **M16 (Manual ordering — D21, parity G8)**:
+
+- **Membership-scoped ordering (`D21`):** `bookmark_collections` (in `src/database/entities/bookmark-collection.entity.ts`) needs an `order` integer column via a new TypeORM migration added explicitly to `src/database/migrations/index.ts`. New memberships should append using `MAX(order) + 1` inside `ChangeLogService.transact` (same user `sync_seq` row-lock serialization pattern M4 uses for collection siblings).
+- **Query & validation contracts:** `GET /bookmarks?sort=manual` must require `collectionId` (`400 BAD_REQUEST` otherwise) and order by membership `order` (nulls last, tie-break cleanly). Preserve explicit `order` across bookmark trash → restore; delete/purge removes the membership row and slot.
+- **MCP catalog parity (`src/mcp/mcp-tool-catalog.ts`):** M16’s `PATCH /collections/{id}/bookmarks/order` is an authenticated non-admin library mutation — add its matching tool to `mcp-tool-catalog.ts` and keep `test/mcp.e2e.test.ts` parity green (note: `listBookmarks` DTO changes propagate automatically to MCP `tools/list` via `validationMetadatasToSchemas`).
+- **Reserved search operators & verification:** Only `file:` remains reserved in `src/bookmarks/search-query.parser.ts` (for M18). Keep entity/migration indexes explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
 
 ## Decisions recorded (M4)
 

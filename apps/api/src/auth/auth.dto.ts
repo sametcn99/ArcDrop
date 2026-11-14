@@ -83,6 +83,86 @@ export class ChangePasswordDto {
   newPassword!: string;
 }
 
+export class TfaSetupResponseDto {
+  @ApiProperty({ description: 'Base32-encoded 160-bit TOTP shared secret' })
+  secret!: string;
+
+  @ApiProperty({
+    description: 'otpauth:// URI for authenticator QR enrollment',
+    example: 'otpauth://totp/ArcDrop:alice%40example.com?secret=...&issuer=ArcDrop',
+  })
+  otpauthUri!: string;
+}
+
+export class EnableTfaDto {
+  @ApiProperty({
+    example: '123456',
+    description: 'Current 6-digit code from the authenticator app',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(32)
+  code!: string;
+}
+
+export class TfaEnableResponseDto {
+  @ApiProperty({
+    type: [String],
+    description: 'Single-use recovery codes — returned ONCE and hashed at rest',
+    example: ['a1b2c-d3e4f', '01234-56789'],
+  })
+  recoveryCodes!: string[];
+}
+
+export class DisableTfaDto {
+  @ApiPropertyOptional({ example: '123456', description: 'Current 6-digit TOTP code' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(32)
+  code?: string;
+
+  @ApiPropertyOptional({
+    example: 'a1b2c-d3e4f',
+    description: 'Single-use recovery code (alternative to TOTP code)',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  recoveryCode?: string;
+}
+
+export class LoginTfaDto {
+  @ApiProperty({ description: 'Short-lived challenge token returned by 401 TOTP_REQUIRED' })
+  @IsString()
+  @MinLength(1)
+  challenge!: string;
+
+  @ApiPropertyOptional({ example: '123456', description: 'Current 6-digit TOTP code' })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(32)
+  code?: string;
+
+  @ApiPropertyOptional({
+    example: 'a1b2c-d3e4f',
+    description: 'Single-use recovery code (consumed upon success)',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  recoveryCode?: string;
+
+  @ApiPropertyOptional({ example: 'MacBook Pro — Safari' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  deviceLabel?: string;
+}
+
 export class UserDto {
   @ApiProperty({ example: '5e9f8a3c-…' })
   id!: string;
@@ -99,6 +179,10 @@ export class UserDto {
   /** False until the invite token has been claimed (plan D15). */
   @ApiProperty()
   hasPassword!: boolean;
+
+  /** True once TOTP two-factor authentication has been confirmed and enabled (M15). */
+  @ApiProperty()
+  totpEnabled!: boolean;
 
   @ApiProperty()
   createdAt!: Date;

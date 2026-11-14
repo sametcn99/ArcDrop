@@ -615,7 +615,8 @@ describe('MCP server (e2e)', () => {
             secured === true &&
             !path.startsWith('/api/v1/admin') &&
             !path.startsWith('/api/v1/auth') &&
-            !path.startsWith('/api/v1/me/tokens') &&
+            path !== '/api/v1/me' &&
+            !path.startsWith('/api/v1/me/') &&
             !path.startsWith('/api/v1/icons') &&
             !path.endsWith('/mcp');
           if (!isAgentSurface) continue;
@@ -816,19 +817,42 @@ describe('MCP server (e2e)', () => {
       expect(ticket.status).toBe(403);
     });
 
-    it('PATs never reach the auth and admin surfaces — even an admin’s own token', async () => {
+    it('PATs never reach auth, admin, or /me surfaces — even an admin’s own token', async () => {
       const adminPat = await createPat(baseUrl, admin.accessToken, 'Admin agent');
       const sessions = await call(baseUrl, 'GET', '/auth/me', { bearer: adminPat.token });
       expect(sessions.status).toBe(403);
       expect(problem(sessions).detail).toContain('auth surface');
 
+      const tfaSetup = await call(baseUrl, 'POST', '/auth/tfa/setup', {
+        bearer: alicePat.token,
+      });
+      expect(tfaSetup.status).toBe(403);
+      expect(problem(tfaSetup).detail).toContain('auth surface');
+
       const adminUsers = await call(baseUrl, 'GET', '/admin/users', { bearer: adminPat.token });
       expect(adminUsers.status).toBe(403);
       expect(problem(adminUsers).detail).toContain('admin surface');
 
-      // a plain user's read-write PAT is equally refused on /admin
+      // a plain user's read-write PAT is equally refused on /admin and /me/*
       const adminViaAlice = await call(baseUrl, 'GET', '/admin/users', { bearer: alicePat.token });
       expect(adminViaAlice.status).toBe(403);
+
+      const listTokensViaPat = await call(baseUrl, 'GET', '/me/tokens', {
+        bearer: alicePat.token,
+      });
+      expect(listTokensViaPat.status).toBe(403);
+
+      const resetViaPat = await call(baseUrl, 'POST', '/me/reset-data', {
+        bearer: alicePat.token,
+        body: { password: 'user-password-1' },
+      });
+      expect(resetViaPat.status).toBe(403);
+
+      const deleteViaPat = await call(baseUrl, 'DELETE', '/me', {
+        bearer: alicePat.token,
+        body: { password: 'user-password-1' },
+      });
+      expect(deleteViaPat.status).toBe(403);
     });
 
     it('PAT lifecycle: revoke → immediate 401; foreign ids are 404; revoke is idempotent', async () => {

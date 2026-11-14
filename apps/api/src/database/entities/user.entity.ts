@@ -38,6 +38,20 @@ export class User {
   status!: UserStatus;
 
   /**
+   * Whether TOTP two-factor authentication is currently enabled (M15).
+   * Remains `false` while `totpSecret` holds an unconfirmed setup secret.
+   */
+  @Column({ type: 'boolean', name: 'totp_enabled', default: false })
+  totpEnabled!: boolean;
+
+  /**
+   * AES-256-GCM encrypted Base32 TOTP shared secret (M15). Holds either a
+   * pending setup secret (`totpEnabled === false`) or the active secret.
+   */
+  @Column({ type: 'text', name: 'totp_secret', nullable: true })
+  totpSecret!: string | null;
+
+  /**
    * Per-user monotonic change-log cursor (plan D4). Incremented atomically
    * (`UPDATE ... RETURNING`) by `ChangeLogService` once per recorded change —
    * the row lock serializes concurrent writers, so a user's seqs are gapless.

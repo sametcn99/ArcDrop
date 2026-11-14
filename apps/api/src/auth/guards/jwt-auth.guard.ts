@@ -70,6 +70,7 @@ export class JwtAuthGuard implements CanActivate {
       email: user.email,
       role: user.role,
       status: user.status,
+      totpEnabled: user.totpEnabled,
       sub: claims.sub,
       fam: claims.fam,
       createdAt: user.createdAt,
@@ -96,6 +97,7 @@ export class JwtAuthGuard implements CanActivate {
       email: user.email,
       role: user.role,
       status: user.status,
+      totpEnabled: user.totpEnabled,
       sub: user.id,
       fam: row.id, // no refresh family — the PAT row id occupies the slot
       createdAt: user.createdAt,

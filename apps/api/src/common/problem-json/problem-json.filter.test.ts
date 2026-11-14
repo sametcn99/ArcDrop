@@ -1,5 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
-import { BadRequestException, NotFoundException, type ArgumentsHost } from '@nestjs/common';
+import {
+  BadRequestException,
+  NotFoundException,
+  UnauthorizedException,
+  type ArgumentsHost,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { ProblemJsonFilter } from './problem-json.filter';
 import type { ProblemDetails } from './problem-codes';
@@ -87,6 +92,28 @@ describe('ProblemJsonFilter', () => {
     const body = capture.body!;
     expect(body.code).toBe('VALIDATION_FAILED');
     expect(body.errors).toEqual([{ field: 'name', messages: ['name must be a string'] }]);
+  });
+
+  it('preserves custom problem code and 2FA challenge extensions (TOTP_REQUIRED)', () => {
+    const { filter, host, capture } = createHost('/api/v1/auth/login', 'req-2fa');
+    filter.catch(
+      new UnauthorizedException({
+        code: 'TOTP_REQUIRED',
+        message: 'Two-factor authentication code required',
+        challenge: 'challenge-token-123',
+        expiresAt: '2026-11-14T08:30:00.000Z',
+      }),
+      host,
+    );
+
+    expect(capture.statusCode).toBe(401);
+    const body = capture.body!;
+    expect(body.code).toBe('TOTP_REQUIRED');
+    expect(body.type).toBe('https://arcdrop.dev/problems/totp-required');
+    expect(body.title).toBe('Unauthorized');
+    expect(body.detail).toBe('Two-factor authentication code required');
+    expect(body.challenge).toBe('challenge-token-123');
+    expect(body.expiresAt).toBe('2026-11-14T08:30:00.000Z');
   });
 
   it('maps Express body-parser PayloadTooLargeError (413) to problem+json', () => {

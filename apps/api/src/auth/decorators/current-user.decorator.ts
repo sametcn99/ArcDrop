@@ -8,6 +8,8 @@ export interface RequestUser extends AccessTokenClaims {
   email: string;
   role: 'admin' | 'user';
   status: 'active' | 'disabled';
+  /** Whether TOTP two-factor authentication is enabled on this account (M15). */
+  totpEnabled: boolean;
   /**
    * Refresh-token family this access token belongs to (the session).
    * For PAT principals (M7) this carries the PAT row id instead — the

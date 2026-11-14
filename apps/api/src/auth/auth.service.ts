@@ -11,20 +11,27 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, IsNull, Not, type Repository } from 'typeorm';
 import { OneTimeToken } from '@api/database/entities/one-time-token.entity';
 import { RefreshToken } from '@api/database/entities/refresh-token.entity';
+import { TfaRecoveryCode } from '@api/database/entities/tfa-recovery-code.entity';
 import { User } from '@api/database/entities/user.entity';
 import { SettingsService } from '@api/settings/settings.service';
 import { JwtService } from './crypto/jwt.service';
 import { PasswordService } from './crypto/password.service';
 import { REFRESH_TOKEN_TTL_MS, TokenService } from './crypto/token.service';
+import { TFA_CHALLENGE_TTL_MS, TotpService } from './crypto/totp.service';
 import {
   AuthSessionResponseDto,
   BootstrapDto,
   ChangePasswordDto,
   ClaimDto,
+  DisableTfaDto,
+  EnableTfaDto,
   LoginDto,
+  LoginTfaDto,
   RefreshDto,
   RegisterDto,
   SessionDto,
+  TfaEnableResponseDto,
+  TfaSetupResponseDto,
   UserDto,
 } from './auth.dto';
 import type { RequestUser } from './decorators/current-user.decorator';
@@ -32,9 +39,10 @@ import type { RequestUser } from './decorators/current-user.decorator';
 const GENERIC_LOGIN_FAILURE = 'Invalid email or password';
 
 /**
- * Auth flows (plan D2/D3/D15): first-run bootstrap, bearer login, refresh
- * rotation with reuse detection, logout, password change, sessions, invite/
- * reset claim and the registration gate.
+ * Auth flows (plan D2/D3/D15, extended M15 with TOTP 2FA): first-run
+ * bootstrap, bearer login (single-step or two-step challenge), refresh rotation
+ * with reuse detection, logout, password change, sessions, TOTP setup/enable/
+ * disable, invite/reset claim and the registration gate.
  *
  * Refresh-token discipline: every login/refresh/claim mints a fresh opaque
  * token in a `familyId`; the previous token is revoked in the same
@@ -47,10 +55,12 @@ export class AuthService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(RefreshToken) private readonly refreshTokens: Repository<RefreshToken>,
     @InjectRepository(OneTimeToken) private readonly oneTimeTokens: Repository<OneTimeToken>,
+    @InjectRepository(TfaRecoveryCode) private readonly recoveryCodes: Repository<TfaRecoveryCode>,
     private readonly dataSource: DataSource,
     private readonly jwt: JwtService,
     private readonly passwords: PasswordService,
     private readonly tokens: TokenService,
+    private readonly totp: TotpService,
     private readonly settings: SettingsService,
   ) {}
 
@@ -82,7 +92,239 @@ export class AuthService {
       // the response never reveals which one it was.
       throw new UnauthorizedException(GENERIC_LOGIN_FAILURE);
     }
+
+    if (user.totpEnabled) {
+      const challenge = this.tokens.issue(TFA_CHALLENGE_TTL_MS);
+      const row = this.oneTimeTokens.create({
+        userId: user.id,
+        type: 'tfa_challenge',
+        tokenHash: challenge.hash,
+        expiresAt: challenge.expiresAt,
+        usedAt: null,
+      });
+      await this.oneTimeTokens.save(row);
+
+      throw new UnauthorizedException({
+        code: 'TOTP_REQUIRED',
+        message: 'Two-factor authentication code required',
+        challenge: challenge.raw,
+        expiresAt: challenge.expiresAt.toISOString(),
+      });
+    }
+
     return this.issueSessionFor(user, undefined, deviceLabel);
+  }
+
+  /**
+   * Completes a two-step login (M15) using the short-lived `challenge` token
+   * from `401 TOTP_REQUIRED` plus either a 6-digit TOTP `code` or a single-use
+   * `recoveryCode`.
+   */
+  async loginTfa(dto: LoginTfaDto, deviceLabel: string): Promise<AuthSessionResponseDto> {
+    const method = resolveSecondFactorInput(dto);
+
+    type LoginTfaOutcome =
+      | { kind: 'invalid_challenge' }
+      | { kind: 'bad_code' }
+      | { kind: 'ok'; session: AuthSessionResponseDto };
+
+    const tokenHash = this.tokens.hashRaw(dto.challenge);
+    const outcome = await this.dataSource.transaction(async (manager): Promise<LoginTfaOutcome> => {
+      const oneTime = await manager.findOne(OneTimeToken, {
+        where: { tokenHash, type: 'tfa_challenge' },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!oneTime || oneTime.usedAt !== null || oneTime.expiresAt.getTime() <= Date.now()) {
+        return { kind: 'invalid_challenge' };
+      }
+
+      const user = await manager.findOne(User, {
+        where: { id: oneTime.userId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!user || user.status !== 'active' || !user.totpEnabled || !user.totpSecret) {
+        return { kind: 'invalid_challenge' };
+      }
+
+      if (method.kind === 'totp') {
+        const secret = this.totp.decryptSecret(user.totpSecret);
+        if (!this.totp.verifyCode(secret, method.value)) {
+          return { kind: 'bad_code' };
+        }
+      } else {
+        const codeHash = this.totp.hashRecoveryCode(method.value);
+        const consumedCode = await manager.update(
+          TfaRecoveryCode,
+          { userId: user.id, codeHash, usedAt: IsNull() },
+          { usedAt: new Date() },
+        );
+        if (consumedCode.affected !== 1) {
+          return { kind: 'bad_code' };
+        }
+      }
+
+      const consumedChallenge = await manager.update(
+        OneTimeToken,
+        { id: oneTime.id, usedAt: IsNull() },
+        { usedAt: new Date() },
+      );
+      if (consumedChallenge.affected !== 1) {
+        return { kind: 'invalid_challenge' };
+      }
+
+      return {
+        kind: 'ok',
+        session: await this.issueSessionFor(user, undefined, deviceLabel, manager),
+      };
+    });
+
+    switch (outcome.kind) {
+      case 'invalid_challenge':
+        throw new UnauthorizedException('Invalid or expired 2FA challenge');
+      case 'bad_code':
+        throw new UnauthorizedException('Invalid two-factor authentication or recovery code');
+      case 'ok':
+        return outcome.session;
+    }
+  }
+
+  /**
+   * Generates a pending TOTP secret + `otpauth://` URI for the caller (M15).
+   * Does NOT enable 2FA yet — `POST /auth/tfa/enable` confirms it.
+   */
+  async setupTfa(user: RequestUser): Promise<TfaSetupResponseDto> {
+    const row = await this.users.findOneByOrFail({ id: user.id });
+    if (row.totpEnabled) {
+      throw new ConflictException('Two-factor authentication is already enabled');
+    }
+
+    const secret = this.totp.generateSecret();
+    row.totpSecret = this.totp.encryptSecret(secret);
+    row.totpEnabled = false;
+    await this.users.save(row);
+
+    return {
+      secret,
+      otpauthUri: this.totp.buildOtpauthUri({
+        accountName: row.email,
+        secretBase32: secret,
+      }),
+    };
+  }
+
+  /**
+   * Verifies a TOTP code against the pending secret, enables 2FA, mints 10
+   * single-use recovery codes (returned once, hashed at rest), and revokes ALL
+   * existing refresh-token sessions for the user (M15).
+   */
+  async enableTfa(user: RequestUser, dto: EnableTfaDto): Promise<TfaEnableResponseDto> {
+    const generated = this.totp.generateRecoveryCodes();
+
+    await this.dataSource.transaction(async (manager) => {
+      const row = await manager.findOne(User, {
+        where: { id: user.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!row) {
+        throw new UnauthorizedException('User not found');
+      }
+      if (row.totpEnabled) {
+        throw new ConflictException('Two-factor authentication is already enabled');
+      }
+      if (!row.totpSecret) {
+        throw new BadRequestException('Run POST /auth/tfa/setup before enabling 2FA');
+      }
+
+      const secret = this.totp.decryptSecret(row.totpSecret);
+      if (!this.totp.verifyCode(secret, dto.code)) {
+        throw new UnauthorizedException('Invalid two-factor verification code');
+      }
+
+      row.totpEnabled = true;
+      await manager.save(row);
+
+      await manager.delete(TfaRecoveryCode, { userId: row.id });
+      const recoveryRows = generated.map((item) =>
+        manager.create(TfaRecoveryCode, {
+          userId: row.id,
+          codeHash: item.hash,
+          usedAt: null,
+        }),
+      );
+      await manager.save(recoveryRows);
+
+      await manager.update(
+        RefreshToken,
+        { userId: row.id, revokedAt: IsNull() },
+        { revokedAt: new Date() },
+      );
+    });
+
+    return { recoveryCodes: generated.map((item) => item.raw) };
+  }
+
+  /**
+   * Disables 2FA after verifying either a valid TOTP code or a valid unconsumed
+   * recovery code, deletes all recovery codes, and revokes ALL sessions (M15).
+   */
+  async disableTfa(user: RequestUser, dto: DisableTfaDto): Promise<void> {
+    const method = resolveSecondFactorInput(dto);
+
+    type DisableOutcome = { kind: 'not_enabled' } | { kind: 'bad_code' } | { kind: 'ok' };
+
+    const outcome = await this.dataSource.transaction(async (manager): Promise<DisableOutcome> => {
+      const row = await manager.findOne(User, {
+        where: { id: user.id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!row || !row.totpEnabled || !row.totpSecret) {
+        return { kind: 'not_enabled' };
+      }
+
+      if (method.kind === 'totp') {
+        const secret = this.totp.decryptSecret(row.totpSecret);
+        if (!this.totp.verifyCode(secret, method.value)) {
+          return { kind: 'bad_code' };
+        }
+      } else {
+        const codeHash = this.totp.hashRecoveryCode(method.value);
+        const consumed = await manager.update(
+          TfaRecoveryCode,
+          { userId: row.id, codeHash, usedAt: IsNull() },
+          { usedAt: new Date() },
+        );
+        if (consumed.affected !== 1) {
+          return { kind: 'bad_code' };
+        }
+      }
+
+      row.totpEnabled = false;
+      row.totpSecret = null;
+      await manager.save(row);
+
+      await manager.delete(TfaRecoveryCode, { userId: row.id });
+      await manager.update(
+        OneTimeToken,
+        { userId: row.id, type: 'tfa_challenge', usedAt: IsNull() },
+        { usedAt: new Date() },
+      );
+      await manager.update(
+        RefreshToken,
+        { userId: row.id, revokedAt: IsNull() },
+        { revokedAt: new Date() },
+      );
+
+      return { kind: 'ok' };
+    });
+
+    switch (outcome.kind) {
+      case 'not_enabled':
+        throw new BadRequestException('Two-factor authentication is not enabled');
+      case 'bad_code':
+        throw new UnauthorizedException('Invalid two-factor authentication or recovery code');
+      case 'ok':
+        return;
+    }
   }
 
   /** Open registration — served only while the instance setting is on (D3/D16). */
@@ -113,7 +355,7 @@ export class AuthService {
         where: { tokenHash },
         lock: { mode: 'pessimistic_write' },
       });
-      if (!oneTime) {
+      if (!oneTime || oneTime.type === 'tfa_challenge') {
         throw new UnauthorizedException('Invalid invite or reset token');
       }
       if (oneTime.usedAt) {
@@ -364,6 +606,20 @@ export class AuthService {
   }
 }
 
+function resolveSecondFactorInput(dto: {
+  code?: string;
+  recoveryCode?: string;
+}): { kind: 'totp'; value: string } | { kind: 'recovery'; value: string } {
+  const hasCode = dto.code !== undefined;
+  const hasRecovery = dto.recoveryCode !== undefined;
+  if (hasCode === hasRecovery) {
+    throw new BadRequestException('Provide either a TOTP code or a recoveryCode');
+  }
+  return hasCode
+    ? { kind: 'totp', value: dto.code! }
+    : { kind: 'recovery', value: dto.recoveryCode! };
+}
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
@@ -383,6 +639,7 @@ function toUserDto(user: User): UserDto {
     role: user.role,
     status: user.status,
     hasPassword: user.passwordHash !== null,
+    totpEnabled: user.totpEnabled,
     createdAt: user.createdAt,
   };
 }

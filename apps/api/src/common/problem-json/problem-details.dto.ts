@@ -33,6 +33,17 @@ export class ProblemDetailsDto {
 
   @ApiPropertyOptional({ type: () => [ProblemFieldErrorDto] })
   errors?: ProblemFieldErrorDto[];
+
+  @ApiPropertyOptional({
+    description: 'Short-lived 2FA login challenge token (present when `code === "TOTP_REQUIRED"`)',
+  })
+  challenge?: string;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description: 'Challenge expiry timestamp (present when `code === "TOTP_REQUIRED"`)',
+  })
+  expiresAt?: string;
 }
 
 interface ProblemSpec {
@@ -209,7 +220,8 @@ export function enrichOpenApiWithProblemResponses(document: OpenAPIObject): Open
         Array.isArray(operation.security) &&
         operation.security.some((entry) => Object.keys(entry).includes('bearer'));
       const isMcp = path.endsWith('/mcp');
-      const hasJsonOrBody = method === 'post' || method === 'put' || method === 'patch';
+      const hasJsonOrBody =
+        method === 'post' || method === 'put' || method === 'patch' || path === '/api/v1/me';
 
       const attachIfMissing = (status: string): void => {
         const spec = PROBLEM_SPECS[status];
@@ -248,11 +260,14 @@ export function enrichOpenApiWithProblemResponses(document: OpenAPIObject): Open
 
       if (
         path.endsWith('/auth/bootstrap') ||
+        path.endsWith('/auth/tfa/setup') ||
+        path.endsWith('/auth/tfa/enable') ||
         path.endsWith('/admin/users') ||
         path.endsWith('/data/import') ||
         path.endsWith('/tags/rename') ||
         path.endsWith('/collections') ||
-        path.endsWith('/bookmarks')
+        path.endsWith('/bookmarks') ||
+        path === '/api/v1/me'
       ) {
         if (method === 'post' || method === 'delete' || method === 'patch') {
           attachIfMissing('409');

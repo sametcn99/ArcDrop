@@ -49,18 +49,22 @@ export class PatRateLimiter {
 }
 
 /**
- * Personal-access-token surface rules (plan M7). Runs after `JwtAuthGuard`
- * (which resolves the principal, JWT or PAT) and before `RolesGuard`:
+ * Personal-access-token surface rules (plan M7, extended M15). Runs after
+ * `JwtAuthGuard` (which resolves the principal, JWT or PAT) and before
+ * `RolesGuard`:
  *
  * 1. `/auth/*` is unreachable via PAT — a PAT is a credential, not a
- *    session; it must never rotate, log out, list, or change sessions.
+ *    session; it must never rotate, log out, list, change sessions, or
+ *    manage 2FA.
  * 2. `/admin/*` is unreachable via PAT — admin tooling stays session-only
  *    ("no admin tools via PAT by default", even for an admin's own token).
- * 3. Read-only tokens may only use HTTP-safe methods (GET/HEAD/OPTIONS);
+ * 3. `/me/*` is unreachable via PAT — PAT minting/listing/revoking and
+ *    account lifecycle (`/me/reset-data`, `DELETE /me`) stay session-only.
+ * 4. Read-only tokens may only use HTTP-safe methods (GET/HEAD/OPTIONS);
  *    every mutating REST route is refused at this guard level. The MCP
  *    endpoint opts out via `@PatScopeDeferred()` (every tool call is an
  *    HTTP POST) and enforces read-only per TOOL instead.
- * 4. Every PAT request counts against the per-token rate budget; excess is
+ * 5. Every PAT request counts against the per-token rate budget; excess is
  *    a 429.
  */
 @Injectable()
@@ -86,6 +90,11 @@ export class PatScopeGuard implements CanActivate {
     }
     if (firstSegment === 'admin') {
       throw new ForbiddenException('The admin surface is not reachable via personal access tokens');
+    }
+    if (firstSegment === 'me') {
+      throw new ForbiddenException(
+        'Personal access tokens cannot access account credential or lifecycle routes',
+      );
     }
 
     if (this.exceedsRateLimit(user)) {

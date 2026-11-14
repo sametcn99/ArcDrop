@@ -12,6 +12,7 @@ import { PersonalAccessToken } from './personal-access-token.entity';
 import { RefreshToken } from './refresh-token.entity';
 import { Setting } from './setting.entity';
 import { Tag } from './tag.entity';
+import { TfaRecoveryCode } from './tfa-recovery-code.entity';
 import { User } from './user.entity';
 
 /**
@@ -27,6 +28,7 @@ export const entities: Array<EntityCtor | EntitySchema> = [
   User,
   RefreshToken,
   OneTimeToken,
+  TfaRecoveryCode,
   PersonalAccessToken,
   Setting,
   AuditLogEntry,

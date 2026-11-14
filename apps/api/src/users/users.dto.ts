@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsIn, IsOptional, IsUUID, MaxLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
 import { UserDto } from '@api/auth/auth.dto';
 
 export class CreateUserDto {
@@ -55,4 +55,13 @@ export class CreateUserResponseDto {
 export class ResetPasswordResponseDto {
   @ApiProperty({ type: OneTimeTokenDto, description: 'Valid ~1 hour, single-use' })
   reset!: OneTimeTokenDto;
+}
+
+/** Password confirmation body for destructive `/me/*` lifecycle routes (M15). */
+export class ConfirmPasswordDto {
+  @ApiProperty({ example: 'correct-horse-battery', minLength: 1, maxLength: 128 })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(128)
+  password!: string;
 }

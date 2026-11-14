@@ -9,12 +9,14 @@ import {
 } from 'typeorm';
 import { User } from './user.entity';
 
-export type OneTimeTokenType = 'invite' | 'reset';
+export type OneTimeTokenType = 'invite' | 'reset' | 'tfa_challenge';
 
 /**
- * A single-use, expiring token handed back through the admin API response
- * (plan D15 — no SMTP in v1): `invite` tokens (~24h) set a first password,
- * `reset` tokens (~1h) replace a lost one. `POST /auth/claim` consumes them.
+ * A single-use, expiring token:
+ * - `invite` (~24h) sets a first password via `POST /auth/claim` (D15)
+ * - `reset` (~1h) replaces a lost password via `POST /auth/claim` (D15)
+ * - `tfa_challenge` (~5m) bridges step 1 (`POST /auth/login` → 401 `TOTP_REQUIRED`)
+ *   and step 2 (`POST /auth/login/tfa`) when 2FA is enabled (M15).
  *
  * Stored hashed; `usedAt` marks consumption — a used or expired token is
  * rejected, which makes the token single-use by construction.
@@ -24,7 +26,11 @@ export class OneTimeToken {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'enum', enum: ['invite', 'reset'], enumName: 'one_time_token_type' })
+  @Column({
+    type: 'enum',
+    enum: ['invite', 'reset', 'tfa_challenge'],
+    enumName: 'one_time_token_type',
+  })
   type!: OneTimeTokenType;
 
   @Index()
