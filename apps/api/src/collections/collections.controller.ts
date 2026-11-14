@@ -29,20 +29,23 @@ import {
   CollectionIdParamDto,
   CollectionListDto,
   CollectionNodeDto,
+  CollectionShareResponseDto,
   CreateCollectionDto,
   DeleteCollectionQueryDto,
   DeleteEmptyCollectionsResponseDto,
+  ListCollectionsQueryDto,
   MergeCollectionsDto,
   MergeCollectionsResponseDto,
   ReorderCollectionBookmarksDto,
   ReorderCollectionsDto,
   SortCollectionsResponseDto,
   UpdateCollectionDto,
+  UpdateCollectionShareDto,
 } from './collections.dto';
 import { CollectionsService } from './collections.service';
 
 /**
- * Collection surface (plan M4, extended M13/M16). All routes are bearer-authenticated
+ * Collection surface (plan M4, extended M13/M16/M19). All routes are bearer-authenticated
  * (global guard) and user-scoped. Static paths (`tree`, `order`, `merge`,
  * `sort-alphabetical`, `delete-empty`) are declared ahead of the `:id` routes
  * so Nest never mistakes them for ids.
@@ -60,11 +63,15 @@ export class CollectionsController {
     description:
       'Grouped per parent (roots first); siblings ordered by `order`, then ' +
       '`createdAt`, then `id`. `bookmarkCount` covers ACTIVE bookmarks with a ' +
-      'direct membership. Trashed collections are not listed.',
+      'direct membership. Trashed collections are not listed. Optional `shared` ' +
+      'query filters by public sharing state (`true` or `false`).',
   })
   @ApiOkResponse({ type: CollectionListDto })
-  list(@CurrentUser() user: RequestUser): Promise<CollectionListDto> {
-    return this.collections.list(user);
+  list(
+    @CurrentUser() user: RequestUser,
+    @Query() query: ListCollectionsQueryDto,
+  ): Promise<CollectionListDto> {
+    return this.collections.list(user, query);
   }
 
   @Get('tree')
@@ -200,6 +207,25 @@ export class CollectionsController {
     @Body() dto: UpdateCollectionDto,
   ): Promise<CollectionDto> {
     return this.collections.update(user, params.id, dto);
+  }
+
+  @Put(':id/share')
+  @ApiOperation({
+    operationId: 'updateCollectionShare',
+    summary: 'Enable or disable unauthenticated public sharing and RSS for a collection (M19)',
+    description:
+      'When `enabled: true`, preserves an existing token or mints a fresh 192-bit token ' +
+      'and returns the public JSON and RSS URL paths. When `enabled: false`, immediately ' +
+      'revokes public access and clears the token so re-enabling rotates to a new link. ' +
+      'Active nested child collections are included automatically.',
+  })
+  @ApiOkResponse({ type: CollectionShareResponseDto })
+  setShare(
+    @CurrentUser() user: RequestUser,
+    @Param() params: CollectionIdParamDto,
+    @Body() dto: UpdateCollectionShareDto,
+  ): Promise<CollectionShareResponseDto> {
+    return this.collections.setShare(user, params.id, dto);
   }
 
   @Delete(':id')

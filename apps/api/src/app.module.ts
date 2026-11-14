@@ -22,6 +22,7 @@ import { McpModule } from './mcp/mcp.module';
 import { PortabilityModule } from './portability/portability.module';
 import { LibraryHealthModule } from './library-health/library-health.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PublicSharingModule } from './public-sharing/public-sharing.module';
 import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
 import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 
@@ -32,7 +33,8 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
  * M9 — hardening & ops, M10 — enrichment, M11 — search operators,
  * M12 — library health, M13 — bulk ops, M14 — reminders & notifications,
  * M15 — 2FA & account lifecycle, M16 — manual ordering,
- * M17 — archive & full-text search, M18 — file uploads).
+ * M17 — archive & full-text search, M18 — file uploads,
+ * M19 — public sharing & RSS).
  *
  * Import order matters for DI resolution: config first, then logging (so the
  * pino-backed Nest logger exists before anything logs), then infrastructure
@@ -48,7 +50,8 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
     DatabaseModule,
     RateLimitModule,
     // Global default: 100 requests per minute per IP. `/auth/*` overrides
-    // this with a strict 10/min (see AuthController).
+    // this with a strict 10/min (see AuthController); `/public/*` uses
+    // its own shared per-IP budget via PublicRateLimitGuard.
     ThrottlerModule.forRoot({ throttlers: [{ ttl: 60_000, limit: 100 }] }),
     ScheduleModule.forRoot(),
     HealthModule,
@@ -63,6 +66,7 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
     TokensModule,
     BookmarksModule,
     CollectionsModule,
+    PublicSharingModule,
     SyncModule,
     NotificationsModule,
     LibraryHealthModule,

@@ -42,6 +42,7 @@ describe('loadConfig', () => {
       reindexPerMinute: 30,
       mcpToolsPerMinute: 300,
       bulkPerMinute: 30,
+      publicPerMinute: 60,
     });
     expect(config.log.level).toBe('info');
   });
@@ -54,6 +55,7 @@ describe('loadConfig', () => {
       ARCDROP__DATA_DIR: '/var/arcdrop',
       ARCDROP__METRICS__ENABLED: 'TRUE',
       ARCDROP__RATE_LIMIT__IMPORT_PER_MINUTE: '15',
+      ARCDROP__RATE_LIMIT__PUBLIC_PER_MINUTE: '25',
       ARCDROP__LOG__LEVEL: 'debug',
     });
     expect(config.port).toBe(8080);
@@ -61,6 +63,7 @@ describe('loadConfig', () => {
     expect(config.dataDir).toBe('/var/arcdrop');
     expect(config.metrics.enabled).toBe(true);
     expect(config.rateLimit.importPerMinute).toBe(15);
+    expect(config.rateLimit.publicPerMinute).toBe(25);
     expect(config.log.level).toBe('debug');
   });
 

@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
 import { BookmarkDto, HighlightDto } from '@api/bookmarks/bookmarks.dto';
+import { CollectionShareDto } from '@api/collections/collections.dto';
 
 /** Page size for `/sync/changes` — above 200 is CLAMPED, like bookmark paging. */
 export const DEFAULT_SYNC_PAGE_SIZE = 100;
@@ -83,6 +84,9 @@ export class CollectionSnapshotDto {
 
   @ApiProperty()
   order!: number;
+
+  @ApiProperty({ type: CollectionShareDto })
+  share!: CollectionShareDto;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

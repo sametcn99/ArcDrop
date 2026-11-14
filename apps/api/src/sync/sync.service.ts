@@ -193,6 +193,7 @@ export class SyncService {
         case 'collection': {
           const row = collectionById.get(change.id);
           if (row) {
+            const shareEnabled = row.shareEnabled ?? false;
             snapshot = {
               id: row.id,
               parentId: row.parentId,
@@ -200,6 +201,10 @@ export class SyncService {
               icon: row.icon,
               color: row.color,
               order: row.order,
+              share: {
+                enabled: shareEnabled,
+                shareToken: shareEnabled ? (row.shareToken ?? null) : null,
+              },
               createdAt: row.createdAt,
               updatedAt: row.updatedAt,
               deletedAt: row.deletedAt ?? null,

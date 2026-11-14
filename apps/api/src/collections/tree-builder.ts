@@ -1,4 +1,4 @@
-import type { CollectionNodeDto } from './collections.dto';
+import type { CollectionNodeDto, CollectionShareDto } from './collections.dto';
 
 /** The row view of an ACTIVE collection the tree is built from. */
 export interface CollectionTreeRow {
@@ -8,6 +8,7 @@ export interface CollectionTreeRow {
   icon: string | null;
   color: string | null;
   order: number;
+  share?: CollectionShareDto;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -54,6 +55,7 @@ export function buildCollectionTree(
       icon: row.icon,
       color: row.color,
       order: row.order,
+      share: row.share ?? { enabled: false, shareToken: null },
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       bookmarkCount: counts.get(row.id) ?? 0,

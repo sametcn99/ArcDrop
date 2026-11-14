@@ -10,20 +10,25 @@ import {
 } from 'typeorm';
 
 /**
- * A user-defined hierarchical collection (plan M4, D5). A collection is a
- * plain folder-like node: `parentId` self-references `collections.id` and is
- * `null` for roots. Siblings are ordered by `order` (smaller sorts earlier);
- * `PATCH /collections/order` assigns the values explicitly, creates append
- * at `MAX(order) + 1` within the target sibling group.
+ * A user-defined hierarchical collection (plan M4, D5; extended M19 public sharing).
+ * A collection is a plain folder-like node: `parentId` self-references
+ * `collections.id` and is `null` for roots. Siblings are ordered by `order`
+ * (smaller sorts earlier); `PATCH /collections/order` assigns the values
+ * explicitly, creates append at `MAX(order) + 1` within the target sibling group.
  *
  * Trash is a PLAIN `deleted_at` column, NOT `@DeleteDateColumn` — the same
  * discipline as `Bookmark` (TypeORM's soft-delete magic would silently
  * append `deleted_at IS NULL` to finds, contradicting the explicit trash
  * scoping this module states in every query). Trash/restore are plain
- * updates; there is no hard-delete path in the API for collections.
+ * updates; second DELETE hard-deletes trashed rows.
  */
 @Entity({ name: 'collections' })
 @Index('IX_collections_user_parent', ['userId', 'parentId'])
+@Index('IX_collections_user_share', ['userId', 'shareEnabled'])
+@Index('UX_collections_share_token', ['shareToken'], {
+  unique: true,
+  where: '"share_token" IS NOT NULL',
+})
 export class Collection {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -53,6 +58,17 @@ export class Collection {
    */
   @Column({ type: 'int', name: 'order', default: 0 })
   order!: number;
+
+  /** Whether public unauthenticated sharing + RSS feed are enabled (M19 / D19). */
+  @Column({ type: 'boolean', name: 'share_enabled', default: false })
+  shareEnabled!: boolean;
+
+  /**
+   * Unguessable 192-bit base64url token while shared; cleared on disable so
+   * disable + re-enable rotates to a fresh token (M19).
+   */
+  @Column({ type: 'text', name: 'share_token', nullable: true })
+  shareToken!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

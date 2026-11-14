@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
 import { BookmarkCollection } from '@api/database/entities/bookmark-collection.entity';
 import { Collection } from '@api/database/entities/collection.entity';
@@ -19,14 +19,18 @@ import type {
   CollectionDto,
   CollectionListDto,
   CollectionNodeDto,
+  CollectionShareDto,
+  CollectionShareResponseDto,
   CreateCollectionDto,
   DeleteEmptyCollectionsResponseDto,
+  ListCollectionsQueryDto,
   MergeCollectionsDto,
   MergeCollectionsResponseDto,
   ReorderCollectionBookmarksDto,
   ReorderCollectionsDto,
   SortCollectionsResponseDto,
   UpdateCollectionDto,
+  UpdateCollectionShareDto,
 } from './collections.dto';
 import { findRecursivelyEmptyCollectionIds, planAlphabeticalSort } from './collection-bulk-helpers';
 import { lockUserForMembershipAppend, nextMembershipOrder } from './membership-order';
@@ -41,11 +45,11 @@ import { buildCollectionTree, compareSiblings, type CollectionTreeRow } from './
 const MAX_TREE_WALK = 10_000;
 
 /**
- * Collections domain (plan M4, D5, extended M13/M16): hierarchical folders, the
+ * Collections domain (plan M4, D5, extended M13/M16/M19): hierarchical folders, the
  * nested tree with direct bookmark counts, exact membership sync, cycle
  * protection, sibling ordering, membership-scoped bookmark manual ordering
- * (plan D21), and transactional bulk merge/sort/delete-empty — all user-scoped
- * and change-logged (plan D4).
+ * (plan D21), transactional bulk merge/sort/delete-empty, and public collection
+ * sharing toggles (plan D19) — all user-scoped and change-logged (plan D4).
  *
  * A row another user owns simply does not exist (404, never 403). Trash is
  * the plain-`deletedAt` discipline shared with bookmarks:
@@ -72,13 +76,17 @@ export class CollectionsService {
   /**
    * Flat rows of the caller's ACTIVE collections. Grouped per parent (roots
    * first), siblings ordered by the shared comparator: `order` asc,
-   * `createdAt` asc, `id` asc.
+   * `createdAt` asc, `id` asc. Optionally filtered by `query.shared`.
    */
-  async list(user: RequestUser): Promise<CollectionListDto> {
-    const rows = await this.collections
+  async list(user: RequestUser, query: ListCollectionsQueryDto = {}): Promise<CollectionListDto> {
+    const qb = this.collections
       .createQueryBuilder('c')
       .where('c.userId = :userId', { userId: user.id })
-      .andWhere('c.deletedAt IS NULL')
+      .andWhere('c.deletedAt IS NULL');
+    if (query.shared !== undefined) {
+      qb.andWhere('c.shareEnabled = :shared', { shared: query.shared });
+    }
+    const rows = await qb
       .orderBy('c.parentId', 'ASC', 'NULLS FIRST')
       .addOrderBy('c.order', 'ASC')
       .addOrderBy('c.createdAt', 'ASC')
@@ -145,6 +153,8 @@ export class CollectionsService {
         icon: dto.icon ?? null,
         color: dto.color ?? null,
         order,
+        shareEnabled: false,
+        shareToken: null,
         createdAt: new Date(),
         updatedAt: new Date(),
         deletedAt: null,
@@ -154,6 +164,51 @@ export class CollectionsService {
     });
 
     return toCollectionDto(row, new Map());
+  }
+
+  /**
+   * Enables or disables unauthenticated public sharing (`PUT /collections/{id}/share`).
+   * - Enabling when already enabled keeps the existing `shareToken` (idempotent).
+   * - Disabling clears `shareToken = null` so disable + re-enable rotates the token.
+   * - Refuses unknown, foreign, or trashed collections with 404.
+   */
+  async setShare(
+    user: RequestUser,
+    id: string,
+    dto: UpdateCollectionShareDto,
+  ): Promise<CollectionShareResponseDto> {
+    return this.changeLog.transact(async (manager, record) => {
+      const row = await manager.findOne(Collection, { where: { id, userId: user.id } });
+      if (!row) throw new NotFoundException('Collection not found');
+      if (row.deletedAt !== null) {
+        throw new NotFoundException('Collection not found among the active collections');
+      }
+
+      if (dto.enabled) {
+        if (row.shareEnabled && row.shareToken) {
+          return toShareResponse(row.id, true, row.shareToken);
+        }
+        const shareToken = generateShareToken();
+        await manager.update(
+          Collection,
+          { id: row.id, userId: user.id },
+          { shareEnabled: true, shareToken },
+        );
+        await record(user.id, { entity: 'collection', entityId: row.id, action: 'update' });
+        return toShareResponse(row.id, true, shareToken);
+      }
+
+      if (!row.shareEnabled && row.shareToken === null) {
+        return toShareResponse(row.id, false, null);
+      }
+      await manager.update(
+        Collection,
+        { id: row.id, userId: user.id },
+        { shareEnabled: false, shareToken: null },
+      );
+      await record(user.id, { entity: 'collection', entityId: row.id, action: 'update' });
+      return toShareResponse(row.id, false, null);
+    });
   }
 
   /**
@@ -198,8 +253,7 @@ export class CollectionsService {
   }
 
   /**
-   * DELETE, two-phase (see the class doc):
-   *
+   * DELETE, two-phase (see the class doc):\n   *
    * - First call (active row): trashes the row. Blocked with 409 while
    *   ACTIVE child collections exist unless `?cascade=trash`, which trashes
    *   the whole ACTIVE subtree (the row included — so a cascade on a leaf
@@ -899,6 +953,33 @@ export class CollectionsService {
   }
 }
 
+/** 192-bit CSPRNG token serialized as 32 URL-safe base64url chars. */
+function generateShareToken(): string {
+  return randomBytes(24).toString('base64url');
+}
+
+function toShareDto(row: Collection): CollectionShareDto {
+  const enabled = row.shareEnabled ?? false;
+  return {
+    enabled,
+    shareToken: enabled ? (row.shareToken ?? null) : null,
+  };
+}
+
+function toShareResponse(
+  collectionId: string,
+  enabled: boolean,
+  shareToken: string | null,
+): CollectionShareResponseDto {
+  return {
+    collectionId,
+    enabled,
+    shareToken,
+    publicPath: enabled && shareToken ? `/api/v1/public/collections/${shareToken}` : null,
+    rssPath: enabled && shareToken ? `/api/v1/public/collections/${shareToken}/rss` : null,
+  };
+}
+
 function dedupeIds(ids: readonly string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -919,6 +1000,7 @@ function toTreeRow(row: Collection): CollectionTreeRow {
     icon: row.icon,
     color: row.color,
     order: row.order,
+    share: toShareDto(row),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -933,6 +1015,7 @@ function toCollectionDto(row: Collection, counts: ReadonlyMap<string, number>): 
     color: row.color,
     order: row.order,
     bookmarkCount: counts.get(row.id) ?? 0,
+    share: toShareDto(row),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

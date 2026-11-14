@@ -93,6 +93,11 @@ export class AppConfigService {
     return this.config.rateLimit.bulkPerMinute;
   }
 
+  /** M19 global per-IP rate limit per minute across `/public/*` routes. */
+  get rateLimitPublicPerMinute(): number {
+    return this.config.rateLimit.publicPerMinute;
+  }
+
   get logLevel(): string {
     return this.config.log.level;
   }

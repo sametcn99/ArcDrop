@@ -30,6 +30,7 @@ function makeConfig(dataDir: string): AppConfig {
       reindexPerMinute: 30,
       mcpToolsPerMinute: 300,
       bulkPerMinute: 30,
+      publicPerMinute: 60,
     },
     log: { level: 'fatal' },
   };

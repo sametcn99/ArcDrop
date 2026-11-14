@@ -1,9 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsInt,
   IsOptional,
@@ -24,6 +25,15 @@ export const MAX_COLLECTIONS_PER_BOOKMARK = 100;
 export const MAX_ORDER_ITEMS = 1000;
 /** Cap for one collection merge batch (`POST /collections/merge`). */
 export const MAX_BULK_COLLECTION_IDS = 500;
+
+/** Query-string boolean: `true/1` → true, `false/0/''` → false, else invalid. */
+const toBoolean = ({ value }: { value: unknown }): unknown => {
+  if (value === 'true' || value === true || value === 1 || value === '1') return true;
+  if (value === 'false' || value === false || value === 0 || value === '0' || value === '') {
+    return false;
+  }
+  return value;
+};
 
 export class CreateCollectionDto {
   @ApiProperty({ maxLength: MAX_COLLECTION_TITLE_LENGTH })
@@ -80,6 +90,66 @@ export class UpdateCollectionDto {
   @IsOptional()
   @IsUUID()
   parentId?: string | null;
+}
+
+export class UpdateCollectionShareDto {
+  @ApiProperty({
+    description:
+      'true to enable unauthenticated public sharing & RSS (keeps existing token if already enabled, ' +
+      'mints a fresh 192-bit token otherwise); false to disable and clear the token so re-enabling rotates it',
+  })
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+export class CollectionShareDto {
+  @ApiProperty({ description: 'Whether unauthenticated public sharing is enabled (M19)' })
+  enabled!: boolean;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Unguessable 192-bit share token when enabled; null otherwise (M19)',
+  })
+  shareToken!: string | null;
+}
+
+export class CollectionShareResponseDto {
+  @ApiProperty({ format: 'uuid' })
+  collectionId!: string;
+
+  @ApiProperty()
+  enabled!: boolean;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Unguessable share token when enabled; null when disabled',
+  })
+  shareToken!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    example: '/api/v1/public/collections/Vx8kQ2mN9rT1pZ4wX7yB3cD6eF0gH5jK',
+    description: 'Relative unauthenticated JSON API path when enabled; null when disabled',
+  })
+  publicPath!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    example: '/api/v1/public/collections/Vx8kQ2mN9rT1pZ4wX7yB3cD6eF0gH5jK/rss',
+    description: 'Relative unauthenticated RSS 2.0 feed path when enabled; null when disabled',
+  })
+  rssPath!: string | null;
+}
+
+export class ListCollectionsQueryDto {
+  @ApiPropertyOptional({
+    description:
+      'Filter active collections by public sharing state (`true` = shared, `false` = unshared)',
+  })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  shared?: boolean;
 }
 
 export class CollectionOrderItemDto {
@@ -181,6 +251,9 @@ export class CollectionDto {
 
   @ApiProperty({ description: 'Active bookmarks directly in this collection' })
   bookmarkCount!: number;
+
+  @ApiProperty({ type: CollectionShareDto, description: 'Public sharing state (M19)' })
+  share!: CollectionShareDto;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

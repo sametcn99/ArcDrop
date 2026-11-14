@@ -288,7 +288,7 @@ async function waitFor(
   throw new Error('expected change notification did not arrive within the deadline');
 }
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering, M17 archive, M18 file uploads. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering, M17 archive, M18 file uploads (M19 public sharing intentionally excluded per wave-2 ruling). */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -623,6 +623,8 @@ describe('MCP server (e2e)', () => {
             path !== '/api/v1/me' &&
             !path.startsWith('/api/v1/me/') &&
             !path.startsWith('/api/v1/icons') &&
+            !path.startsWith('/api/v1/public') &&
+            !path.endsWith('/share') &&
             !path.endsWith('/mcp');
           if (!isAgentSurface) continue;
           surfaceOps.add(operationId);

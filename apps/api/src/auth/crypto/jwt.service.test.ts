@@ -18,6 +18,7 @@ function makeJwtService(secret: string): JwtService {
       reindexPerMinute: 30,
       mcpToolsPerMinute: 300,
       bulkPerMinute: 30,
+      publicPerMinute: 60,
     },
     log: { level: 'fatal' },
   });

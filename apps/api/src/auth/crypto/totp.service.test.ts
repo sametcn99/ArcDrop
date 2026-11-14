@@ -24,6 +24,7 @@ function makeTotpService(secret = 'unit-test-secret-0123456789abcdef0123456789')
       reindexPerMinute: 30,
       mcpToolsPerMinute: 300,
       bulkPerMinute: 30,
+      publicPerMinute: 60,
     },
     log: { level: 'fatal' },
   });

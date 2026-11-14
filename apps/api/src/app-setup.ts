@@ -85,6 +85,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     )
     .addTag('Metadata', 'SSRF-hardened metadata enrichment + reindex (plan M6)')
     .addTag('Icons', 'Public unguessable icon cache (plan M6/D18)')
+    .addTag('Public', 'Unauthenticated public collection sharing and RSS 2.0 feeds (plan M19/D19)')
     .addTag('Files', 'Private authenticated user-uploaded file serving (plan M18/D19)')
     .addTag('Tokens', 'Personal access tokens — agent auth (plan M7/D23)')
     .addTag(
