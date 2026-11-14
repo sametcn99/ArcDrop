@@ -1,11 +1,11 @@
 /**
- * The ArcDrop export model (plan M8, M10). Export is user-scoped and covers
+ * The ArcDrop export model (plan M8, M10, M18). Export is user-scoped and covers
  * the ACTIVE library only (trash excluded — it auto-purges per D17);
  * identities (bookmark/collection/tag/highlight ids) are NOT exported: ids
  * are meaningless across instances, so relationships travel as tag NAMES and
  * collection PATHS and the importer re-links through them.
  */
-import type { ContentType } from '@api/database/entities/bookmark.entity';
+import type { ContentType, StorageKind } from '@api/database/entities/bookmark.entity';
 import type { ExportHighlight } from './export-highlights';
 
 export const ARCDROP_EXPORT_FORMAT = 'arcdrop/v1';
@@ -18,8 +18,18 @@ export interface ExportCollection {
   order: number;
 }
 
+export interface ExportFileMeta {
+  ref: string;
+  name: string;
+  mime: string;
+  size: number;
+  archivePath?: string;
+}
+
 export interface ExportBookmark {
-  url: string;
+  storageKind?: StorageKind;
+  url: string | null;
+  file?: ExportFileMeta | null;
   title: string | null;
   excerpt: string | null;
   note: string | null;
@@ -66,7 +76,7 @@ export function csvField(value: string): string {
 /** CSV row: tags/collections join with `;`, path segments join with `/`. */
 export function csvRowOf(bookmark: ExportBookmark): string {
   const cells = [
-    bookmark.url,
+    bookmark.url ?? '',
     bookmark.title ?? '',
     bookmark.excerpt ?? '',
     bookmark.note ?? '',
@@ -98,8 +108,9 @@ const escapeHtml = (value: string): string =>
 
 const unixSeconds = (iso: string): string => String(Math.floor(Date.parse(iso) / 1000));
 
-/** One `<DT><A …>` line with its optional `<DD>` description. */
+/** One `<DT><A …>` line with its optional `<DD>` description (URL bookmarks only). */
 function* renderNetscapeLink(bookmark: ExportBookmark, indent: string): Generator<string> {
+  if (bookmark.url === null) return;
   const attributes = [
     `HREF="${escapeHtml(bookmark.url)}"`,
     `ADD_DATE="${unixSeconds(bookmark.createdAt)}"`,
@@ -157,16 +168,16 @@ export function htmlTreeOf(
     }
   }
 
-  const assigned = new Set<string>();
+  const assigned = new Set<ExportBookmark>();
   for (const bookmark of bookmarks) {
     const path = [...bookmark.collections].sort((a, b) => sortKey(a).localeCompare(sortKey(b)))[0];
     if (path === undefined) continue;
     const folder = folderByPath.get(sortKey(path));
     if (folder === undefined) continue;
     folder.bookmarks.push(bookmark);
-    assigned.add(bookmark.url);
+    assigned.add(bookmark);
   }
-  root.bookmarks = bookmarks.filter((bookmark) => !assigned.has(bookmark.url));
+  root.bookmarks = bookmarks.filter((bookmark) => !assigned.has(bookmark));
   return root;
 }
 
@@ -201,5 +212,7 @@ export function* renderNetscapeFolder(folder: HtmlFolder, depth: number): Genera
 
 /** One URL per line (Raindrop parity G3) — CRLF-free, trailing newline. */
 export function* renderTxtChunks(bookmarks: Iterable<ExportBookmark>): Generator<string> {
-  for (const bookmark of bookmarks) yield `${bookmark.url}\n`;
+  for (const bookmark of bookmarks) {
+    if (bookmark.url !== null) yield `${bookmark.url}\n`;
+  }
 }

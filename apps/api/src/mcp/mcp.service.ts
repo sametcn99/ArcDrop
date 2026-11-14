@@ -23,6 +23,7 @@ import { BulkBookmarksService } from '@api/bookmarks/bulk-bookmarks.service';
 import { HighlightsService } from '@api/bookmarks/highlights.service';
 import { TagsService } from '@api/bookmarks/tags.service';
 import { CollectionsService } from '@api/collections/collections.service';
+import { FilesService } from '@api/files/files.service';
 import { DuplicatesService } from '@api/library-health/duplicates.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import { NotificationsService } from '@api/notifications/notifications.service';
@@ -69,6 +70,7 @@ export class McpService implements OnModuleDestroy {
     highlights: HighlightsService,
     tags: TagsService,
     collections: CollectionsService,
+    files: FilesService,
     duplicates: DuplicatesService,
     metadata: MetadataFetchService,
     notifications: NotificationsService,
@@ -84,6 +86,7 @@ export class McpService implements OnModuleDestroy {
       highlights,
       tags,
       collections,
+      files,
       duplicates,
       metadata,
       notifications,

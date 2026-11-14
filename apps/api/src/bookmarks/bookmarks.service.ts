@@ -1,8 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  PayloadTooLargeException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { isUUID } from 'class-validator';
 import { randomUUID } from 'node:crypto';
-import { Bookmark } from '@api/database/entities/bookmark.entity';
+import { readFile, unlink } from 'node:fs/promises';
+import {
+  Bookmark,
+  type CacheStatus,
+  type StorageKind,
+} from '@api/database/entities/bookmark.entity';
 import { BookmarkCollection } from '@api/database/entities/bookmark-collection.entity';
 import { BookmarkTag } from '@api/database/entities/bookmark-tag.entity';
 import { Collection } from '@api/database/entities/collection.entity';
@@ -12,8 +22,25 @@ import { In, IsNull, Not } from 'typeorm';
 import { ChangeLogService } from '@api/change-log/change-log.service';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import { nextMembershipOrder } from '@api/collections/membership-order';
+import { FileStorageService } from '@api/files/file-storage.service';
+import {
+  defaultTitleFromFileName,
+  resolveUploadFileType,
+  sanitizeFileName,
+} from '@api/files/file-types';
+import { UploadQuotaService } from '@api/files/upload-quota.service';
 import { ArchiveStorageService } from '@api/metadata/archive-storage.service';
+import {
+  EPUB_CONTENT_TYPE,
+  extractEpubContent,
+  extractPdfContent,
+  extractPlainTextContent,
+  PDF_CONTENT_TYPE,
+  PLAIN_TEXT_CONTENT_TYPES,
+  type ExtractedContent,
+} from '@api/metadata/content-extractor';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
+import { SettingsService } from '@api/settings/settings.service';
 import {
   BookmarkArchiveDto,
   BookmarkDto,
@@ -31,12 +58,31 @@ import { parseSearchQuery, SearchQueryParseError } from './search-query.parser';
 import { TagsService } from './tags.service';
 import { UrlDecompositionService } from './url-decomposition.service';
 
+const MAX_TITLE_LENGTH = 512;
+const MAX_EXCERPT_LENGTH = 2000;
+
+export interface CreateFileBookmarkInput {
+  fileName: string;
+  mimeType?: string;
+  size: number;
+  tempPath?: string;
+  bytes?: Buffer;
+  title?: string | null;
+  excerpt?: string | null;
+  note?: string | null;
+  favorite?: boolean;
+  tags?: readonly string[];
+  collectionIds?: readonly string[];
+  reminderAt?: string | null;
+}
+
 /**
- * Bookmark CRUD, trash/restore, server-side FTS search + paging, archive
- * retrieval, and stats (plan M3, D10/D12/D13/D17; enriched M10; operator
+ * Bookmark CRUD, file uploads, trash/restore, server-side FTS search + paging,
+ * archive retrieval, and stats (plan M3, D10/D12/D13/D17; enriched M10; operator
  * grammar M11; broken-link state M12; reminders M14; manual collection sort
- * M16/D21; archive & FTS M17). Every route is user-scoped — a row another user
- * owns simply does not exist (404, never 403: existence is not leaked).
+ * M16/D21; archive & FTS M17; file uploads M18/D19). Every route is user-scoped
+ * — a row another user owns simply does not exist (404, never 403: existence is
+ * not leaked).
  *
  * Every mutation runs through `ChangeLogService.transact` so the ChangeEvent
  * is appended in the mutation's own transaction with a gapless per-user seq,
@@ -55,6 +101,9 @@ export class BookmarksService {
     private readonly changeLog: ChangeLogService,
     private readonly metadata: MetadataFetchService,
     private readonly archives: ArchiveStorageService,
+    private readonly fileStorage: FileStorageService,
+    private readonly uploadQuota: UploadQuotaService,
+    private readonly settings: SettingsService,
   ) {}
 
   // -- Reads -----------------------------------------------------------------
@@ -67,7 +116,7 @@ export class BookmarksService {
     return toBookmarkDto(row, tags.get(row.id) ?? []);
   }
 
-  /** Permanent-copy archive (extracted HTML + plain text) for one owned bookmark (M17). */
+  /** Permanent-copy archive (extracted HTML + plain text) for one owned bookmark (M17/M18). */
   async getArchive(user: RequestUser, id: string): Promise<BookmarkArchiveDto> {
     const row = await this.bookmarks.findOneBy({ id, userId: user.id });
     if (!row) throw new NotFoundException('Bookmark not found');
@@ -88,7 +137,7 @@ export class BookmarksService {
   }
 
   /**
-   * Search + filters + paging (plan D10, M10, M11, M12, M14, M16, M17).
+   * Search + filters + paging (plan D10, M10, M11, M12, M14, M16, M17, M18).
    * Defaults: active set (trashed excluded), sort by `updatedAt` desc,
    * pageSize 20 clamped to 200. `sort=manual` requires `collectionId` (D21)
    * and orders `order ASC NULLS LAST`.
@@ -161,6 +210,12 @@ export class BookmarksService {
       qb.andWhere('b.reminderAt IS NOT NULL');
     } else if (query.reminder === false) {
       qb.andWhere('b.reminderAt IS NULL');
+    }
+
+    if (query.file === true) {
+      qb.andWhere("b.storageKind = 'file'");
+    } else if (query.file === false) {
+      qb.andWhere("b.storageKind = 'url'");
     }
 
     if (query.type !== undefined) {
@@ -303,6 +358,7 @@ export class BookmarksService {
       const entity = manager.create(Bookmark, {
         id: randomUUID(), // explicit so the event below can reference it
         userId: user.id,
+        storageKind: 'url',
         url: dto.url,
         title: dto.title ?? null,
         excerpt: dto.excerpt ?? null,
@@ -311,6 +367,10 @@ export class BookmarksService {
         contentType: 'link',
         coverRef: null,
         iconRef: null,
+        fileRef: null,
+        fileName: null,
+        fileMime: null,
+        fileSize: null,
         lastCheckedAt: null,
         brokenReason: null,
         brokenAt: null,
@@ -344,8 +404,198 @@ export class BookmarksService {
       return entity;
     });
 
-    this.metadata.scheduleEnrichment(user.id, row.id, row.url, 'fill');
+    this.metadata.scheduleEnrichment(user.id, row.id, dto.url, 'fill');
     return toBookmarkDto(row, []);
+  }
+
+  /**
+   * Creates a file-backed bookmark (plan M18 / D19, Raindrop parity G17).
+   * Validates MIME allowlist + per-file cap, extracts readable content + FTS
+   * text locally from the uploaded bytes (no network/SSRF fetch), enforces
+   * the per-user monthly quota atomically inside `ChangeLogService.transact`,
+   * attaches tags/collections in the same transaction, and cleans up temp/
+   * stored files on any rollback so orphans are never left behind.
+   */
+  async createFileBookmark(
+    user: RequestUser,
+    input: CreateFileBookmarkInput,
+  ): Promise<BookmarkDto> {
+    let fileRef: string | null = null;
+    const bookmarkId = randomUUID();
+
+    try {
+      const spec = resolveUploadFileType(input.mimeType, input.fileName);
+      const safeFileName = sanitizeFileName(input.fileName);
+
+      if (!Number.isFinite(input.size) || input.size <= 0) {
+        throw new BadRequestException('uploaded file must not be empty');
+      }
+
+      const fileMaxBytes = await this.settings.get('fileMaxBytes');
+      if (input.size > fileMaxBytes) {
+        throw new PayloadTooLargeException({
+          code: 'PAYLOAD_TOO_LARGE',
+          message:
+            `Uploaded file exceeds the ${fileMaxBytes} byte per-file limit. ` +
+            `Reduce the file size below ${fileMaxBytes} bytes or have an admin raise fileMaxBytes.`,
+          limitBytes: fileMaxBytes,
+        });
+      }
+
+      const reminderAt =
+        input.reminderAt !== undefined && input.reminderAt !== null
+          ? parseReminderAt(input.reminderAt)
+          : null;
+
+      const uniqueCollectionIds = dedupeStrings(input.collectionIds ?? []);
+      const normalizedTags = (input.tags ?? []).map((t) => t.trim()).filter(Boolean);
+
+      // Local-file extraction BEFORE opening the database transaction so
+      // CPU-bound PDF/EPUB parsing never holds row locks.
+      let extracted: ExtractedContent | null = null;
+      let cacheStatus: CacheStatus = 'skipped';
+      let cacheError: string | null = spec.extractable ? null : 'non-text-file';
+
+      if (spec.extractable) {
+        const archiveMaxBytes = await this.settings.get('archiveMaxBytes');
+        if (input.size > archiveMaxBytes) {
+          cacheStatus = 'skipped';
+          cacheError = 'response-too-large';
+        } else {
+          const rawBytes =
+            input.bytes ?? (input.tempPath ? await readFile(input.tempPath) : Buffer.alloc(0));
+          const localResult = await extractLocalFileText(spec.canonicalMime, rawBytes);
+          extracted = localResult.extracted;
+          cacheStatus = localResult.cacheStatus;
+          cacheError = localResult.cacheError;
+        }
+      }
+
+      const providedTitle = cleanOptionalInput(input.title);
+      const providedExcerpt = cleanOptionalInput(input.excerpt);
+      const resolvedTitle = clampText(
+        providedTitle ?? extracted?.title ?? defaultTitleFromFileName(safeFileName),
+        MAX_TITLE_LENGTH,
+      );
+      const resolvedExcerpt = clampNullable(
+        providedExcerpt ?? extracted?.excerpt ?? null,
+        MAX_EXCERPT_LENGTH,
+      );
+      const resolvedNote = cleanOptionalInput(input.note);
+
+      if (input.tempPath) {
+        fileRef = await this.fileStorage.storeFromTempFile(input.tempPath, spec.extension);
+      } else if (input.bytes) {
+        fileRef = await this.fileStorage.storeBuffer(input.bytes, spec.extension);
+      } else {
+        throw new BadRequestException('uploaded file payload is missing');
+      }
+
+      if (extracted !== null) {
+        await this.archives.write(bookmarkId, {
+          html: extracted.htmlContent,
+          text: extracted.textContent,
+        });
+      }
+
+      const now = new Date();
+
+      return await this.changeLog.transact(async (manager, record) => {
+        // Lock the user row FIRST via change-log seq increment to preserve
+        // strict lock order across upload_usage and bookmark_collections.
+        await record(user.id, { entity: 'bookmark', entityId: bookmarkId, action: 'create' });
+
+        await this.uploadQuota.consumeOrThrow(manager, user.id, input.size, now);
+
+        if (uniqueCollectionIds.length > 0) {
+          const cols = await manager.find(Collection, {
+            where: { userId: user.id, id: In(uniqueCollectionIds), deletedAt: IsNull() },
+            select: { id: true },
+          });
+          if (cols.length !== uniqueCollectionIds.length) {
+            throw new NotFoundException('Collection not found');
+          }
+        }
+
+        const resolvedTags =
+          normalizedTags.length > 0
+            ? await this.tags.resolveTagNames(manager, user.id, normalizedTags, record)
+            : [];
+
+        const entity = manager.create(Bookmark, {
+          id: bookmarkId,
+          userId: user.id,
+          storageKind: 'file',
+          url: null,
+          title: resolvedTitle,
+          excerpt: resolvedExcerpt,
+          note: resolvedNote,
+          favorite: input.favorite ?? false,
+          contentType: spec.contentType,
+          coverRef: null,
+          iconRef: null,
+          fileRef,
+          fileName: safeFileName,
+          fileMime: spec.canonicalMime,
+          fileSize: String(input.size),
+          scheme: null,
+          host: null,
+          domain: null,
+          port: null,
+          path: null,
+          query: null,
+          fragment: null,
+          lastCheckedAt: null,
+          brokenReason: null,
+          brokenAt: null,
+          reminderAt,
+          remindedAt: null,
+          cacheStatus,
+          cacheCheckedAt: now,
+          cacheError,
+          archiveText: extracted?.dbTextContent ?? null,
+          createdAt: now,
+          updatedAt: now,
+        });
+        await manager.insert(Bookmark, entity);
+
+        if (resolvedTags.length > 0) {
+          await manager.insert(
+            BookmarkTag,
+            resolvedTags.map((tag) => ({ bookmarkId, tagId: tag.id })),
+          );
+        }
+
+        for (const collectionId of uniqueCollectionIds) {
+          const order = await nextMembershipOrder(manager, collectionId);
+          await manager.insert(BookmarkCollection, {
+            bookmarkId,
+            collectionId,
+            order,
+          });
+          await record(user.id, {
+            entity: 'collection',
+            entityId: collectionId,
+            action: 'update',
+          });
+        }
+
+        return toBookmarkDto(
+          entity,
+          resolvedTags.map((tag) => ({ id: tag.id, name: tag.name })),
+        );
+      });
+    } catch (error) {
+      if (fileRef) {
+        await this.fileStorage.remove(fileRef).catch(() => {});
+      }
+      await this.archives.remove(bookmarkId).catch(() => {});
+      throw error;
+    } finally {
+      if (input.tempPath) {
+        await unlink(input.tempPath).catch(() => {});
+      }
+    }
   }
 
   /**
@@ -356,11 +606,7 @@ export class BookmarksService {
    * `reminderAt` to null clears both `reminderAt` and `remindedAt`; resending
    * the unchanged `reminderAt` preserves `remindedAt` so already-fired
    * reminders never re-arm idempotently. Refuses trashed bookmarks (404 among
-   * the active set).
-   *
-   * A url change also schedules the M6/M17 pipeline in `refresh` mode after
-   * commit: coverRef/iconRef/contentType and the permanent archive copy belong
-   * to the page THE URL pointed at, so they are re-fetched for the new one.
+   * the active set), and refuses `url` edits on file-backed bookmarks (400).
    */
   async update(user: RequestUser, id: string, dto: UpdateBookmarkDto): Promise<BookmarkDto> {
     let urlChangedTo: string | null = null;
@@ -370,6 +616,11 @@ export class BookmarksService {
       if (row.deletedAt) {
         // The trash is read-only except for restore.
         throw new NotFoundException('Bookmark not found among the active bookmarks');
+      }
+      if (row.storageKind === 'file' && dto.url !== undefined) {
+        throw new BadRequestException(
+          'File-backed bookmarks have no URL; delete and re-upload to replace the file',
+        );
       }
 
       const patch: Partial<Bookmark> = {};
@@ -560,6 +811,50 @@ export class BookmarksService {
   }
 }
 
+async function extractLocalFileText(
+  canonicalMime: string,
+  bytes: Uint8Array,
+): Promise<{
+  extracted: ExtractedContent | null;
+  cacheStatus: CacheStatus;
+  cacheError: string | null;
+}> {
+  if (canonicalMime === PDF_CONTENT_TYPE) {
+    try {
+      const candidate = await extractPdfContent(bytes);
+      if (candidate !== null) {
+        return { extracted: candidate, cacheStatus: 'ready', cacheError: null };
+      }
+      return { extracted: null, cacheStatus: 'skipped', cacheError: 'empty-pdf-text' };
+    } catch {
+      return { extracted: null, cacheStatus: 'skipped', cacheError: 'pdf-extraction-failed' };
+    }
+  }
+
+  if (canonicalMime === EPUB_CONTENT_TYPE) {
+    try {
+      const candidate = extractEpubContent(bytes);
+      if (candidate !== null) {
+        return { extracted: candidate, cacheStatus: 'ready', cacheError: null };
+      }
+      return { extracted: null, cacheStatus: 'skipped', cacheError: 'empty-epub-text' };
+    } catch {
+      return { extracted: null, cacheStatus: 'skipped', cacheError: 'epub-extraction-failed' };
+    }
+  }
+
+  if (PLAIN_TEXT_CONTENT_TYPES.has(canonicalMime)) {
+    const text = new TextDecoder('utf-8').decode(bytes);
+    const candidate = extractPlainTextContent(text);
+    if (candidate !== null) {
+      return { extracted: candidate, cacheStatus: 'ready', cacheError: null };
+    }
+    return { extracted: null, cacheStatus: 'skipped', cacheError: 'empty-content' };
+  }
+
+  return { extracted: null, cacheStatus: 'skipped', cacheError: 'non-text-file' };
+}
+
 function parseReminderAt(raw: string): Date {
   const parsed = new Date(raw);
   if (Number.isNaN(parsed.getTime())) {
@@ -568,14 +863,56 @@ function parseReminderAt(raw: string): Date {
   return parsed;
 }
 
+function dedupeStrings(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const val of values) {
+    if (!seen.has(val)) {
+      seen.add(val);
+      out.push(val);
+    }
+  }
+  return out;
+}
+
+function cleanOptionalInput(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function clampText(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value;
+}
+
+function clampNullable(value: string | null, max: number): string | null {
+  if (value === null) return null;
+  return clampText(value, max);
+}
+
 /**
  * Maps a `Bookmark` row to the wire shape. Exported so the sync module's
  * snapshot assembly (M5) serves byte-identical bookmark payloads.
  */
 export function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
+  const storageKind: StorageKind = row.storageKind ?? 'url';
+  const urlParts =
+    storageKind === 'url' && row.scheme !== null && row.host !== null && row.path !== null
+      ? {
+          scheme: row.scheme,
+          host: row.host,
+          domain: row.domain,
+          port: row.port,
+          path: row.path,
+          query: row.query,
+          fragment: row.fragment,
+        }
+      : null;
+
   return {
     id: row.id,
-    url: row.url,
+    storageKind,
+    url: row.url ?? null,
     title: row.title,
     excerpt: row.excerpt,
     note: row.note,
@@ -583,15 +920,11 @@ export function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
     contentType: row.contentType ?? 'link',
     coverRef: row.coverRef,
     iconRef: row.iconRef,
-    urlParts: {
-      scheme: row.scheme,
-      host: row.host,
-      domain: row.domain,
-      port: row.port,
-      path: row.path,
-      query: row.query,
-      fragment: row.fragment,
-    },
+    urlParts,
+    fileRef: row.fileRef ?? null,
+    fileName: row.fileName ?? null,
+    fileMime: row.fileMime ?? null,
+    fileSize: row.fileSize !== null && row.fileSize !== undefined ? Number(row.fileSize) : null,
     tags,
     lastCheckedAt: row.lastCheckedAt ?? null,
     brokenReason: row.brokenReason ?? null,

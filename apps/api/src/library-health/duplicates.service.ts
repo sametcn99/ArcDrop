@@ -19,12 +19,12 @@ import type {
 import { normalizeBookmarkParts } from './url-normalize';
 
 /**
- * Duplicates finder & transactional resolver (plan M12 / D13 / D19, parity G10).
+ * Duplicates finder & transactional resolver (plan M12 / D13 / D19, parity G10, extended M18).
  *
  * Duplicates remain ALLOWED on bookmark creation (D13); this service only
  * surfaces groups of non-trashed URL bookmarks sharing a normalized URL and
  * optionally merges + trashes extras in one change-logged transaction.
- * (File-backed bookmarks arrive in M18 — v1 covers URL bookmarks only.)
+ * File-backed bookmarks (`storageKind = 'file'`) have no URL and are skipped.
  */
 @Injectable()
 export class DuplicatesService {
@@ -35,19 +35,25 @@ export class DuplicatesService {
   ) {}
 
   /**
-   * Finds all groups of ≥2 active (`deletedAt IS NULL`) bookmarks for `userId`
+   * Finds all groups of ≥2 active (`deletedAt IS NULL`) URL bookmarks for `userId`
    * sharing the same normalized URL (`urlParts`-backed). Inside each group, the
    * oldest bookmark (`createdAt ASC, id ASC`) is `original` and newer copies are `extras`.
    */
   async findDuplicates(userId: string): Promise<DuplicateGroupsResponseDto> {
     const rows = await this.bookmarks.find({
-      where: { userId, deletedAt: IsNull() },
+      where: { userId, storageKind: 'url', deletedAt: IsNull() },
       order: { createdAt: 'ASC', id: 'ASC' },
     });
 
     const grouped = new Map<string, Bookmark[]>();
     for (const row of rows) {
-      const key = normalizeBookmarkParts(row);
+      if (row.host === null || row.path === null) continue;
+      const key = normalizeBookmarkParts({
+        host: row.host,
+        port: row.port,
+        path: row.path,
+        query: row.query,
+      });
       const list = grouped.get(key);
       if (list) {
         list.push(row);

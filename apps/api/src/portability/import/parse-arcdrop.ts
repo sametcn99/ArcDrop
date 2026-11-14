@@ -17,12 +17,14 @@ interface RawJsonRecord {
 }
 
 /**
- * ArcDrop JSON import — the round-trip format our exporter writes (plan M8, M10).
+ * ArcDrop JSON import — the round-trip format our exporter writes (plan M8, M10, M18).
  * Shape: `{ format: 'arcdrop/v1', collections: [{ path, title, icon, color,
  * order }], bookmarks: [{ url, title, excerpt, note, favorite, contentType,
  * tags, collections, highlights, createdAt, updatedAt }] }`. `collections`
  * per bookmark are root→leaf SEGMENT ARRAYS (no escaping problems, ids are
- * meaningless across instances).
+ * meaningless across instances). File-backed entries (`storageKind === 'file'` or
+ * `url === null`) are recorded in `skipped` because files must be uploaded via
+ * `POST /bookmarks/file`.
  */
 export function isArcDropJson(value: unknown): boolean {
   return (
@@ -80,6 +82,15 @@ export function parseArcDropDocument(value: unknown): ParsedImport {
     const source = `bookmark ${i + 1}`;
     if (typeof raw !== 'object' || raw === null) {
       result.errors.push({ reason: 'bookmark entry is not an object', source });
+      continue;
+    }
+
+    if (raw['storageKind'] === 'file' || raw['url'] === null) {
+      result.skipped.push({
+        reason:
+          'file-backed bookmarks cannot be imported via URL upsert — re-upload via POST /bookmarks/file',
+        source,
+      });
       continue;
     }
 

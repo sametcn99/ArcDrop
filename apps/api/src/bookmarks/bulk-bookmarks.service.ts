@@ -17,6 +17,8 @@ import { Collection } from '@api/database/entities/collection.entity';
 import { Highlight } from '@api/database/entities/highlight.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import { queryRows } from '@api/database/query-rows';
+import { FileEvictionService } from '@api/files/file-eviction.service';
+import { FileStorageService } from '@api/files/file-storage.service';
 import { ArchiveStorageService } from '@api/metadata/archive-storage.service';
 import { IconEvictionService } from '@api/metadata/icon-eviction.service';
 import { In, IsNull, Not, type EntityManager } from 'typeorm';
@@ -40,11 +42,14 @@ export class BulkBookmarksService {
     private readonly tags: TagsService,
     private readonly iconEviction: IconEvictionService,
     private readonly archives: ArchiveStorageService,
+    private readonly fileStorage: FileStorageService,
+    private readonly fileEviction: FileEvictionService,
   ) {}
 
   async execute(user: RequestUser, dto: BulkBookmarksDto): Promise<BulkBookmarksResponseDto> {
     const uniqueIds = dedupe(dto.ids);
     const normalizedTags = this.validateActionPayload(dto);
+    let deletedFileRefs: Array<string | null> = [];
 
     const result = await this.changeLog.transact(async (manager, record) => {
       const rows = await manager.find(Bookmark, {
@@ -72,8 +77,10 @@ export class BulkBookmarksService {
           return this.applyTrash(manager, user.id, uniqueIds, record);
         case 'restore':
           return this.applyRestore(manager, user.id, uniqueIds, record);
-        case 'delete':
+        case 'delete': {
+          deletedFileRefs = rows.map((r) => r.fileRef);
           return this.applyHardDelete(manager, user.id, uniqueIds, record);
+        }
       }
     });
 
@@ -82,6 +89,9 @@ export class BulkBookmarksService {
       void this.iconEviction.evictOrphaned().catch(() => {});
       // M17: purge deletes archive bytes on disk.
       void this.archives.removeMany(result.ids).catch(() => {});
+      // M18: hard-deleted file bookmarks remove uploaded bytes on disk.
+      void this.fileStorage.removeMany(deletedFileRefs).catch(() => {});
+      void this.fileEviction.evictOrphaned().catch(() => {});
     }
 
     return result;

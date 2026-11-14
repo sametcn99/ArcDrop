@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M17 — Archive & full-text search (**Wave 2: M0–M17**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (41 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`); plus M15 TOTP 2FA with single-use recovery codes, two-step login (`TOTP_REQUIRED`), password-confirmed `POST /me/reset-data` & `DELETE /me`, and documented export→import account transfer; plus M16 membership-scoped manual bookmark ordering (`bookmark_collections.order`, `PATCH /collections/{id}/bookmarks/order`, `GET /bookmarks?sort=manual&collectionId=`); plus M17 automatic permanent archiving (Readability + linkedom HTML extraction, `unpdf` PDF extraction, `ARCDROP__DATA_DIR/archives/{id}/`, XSS sanitization, `cacheStatus` lifecycle with exponential backoff, `GET /bookmarks/{id}/archive`) and PostgreSQL `'simple'` full-text search + GIN indexes across titles, excerpts, notes, extracted bodies, and highlights (`cacheStatus=` filter & `cache.status:` operator). **Next:** Wave 2 — M18 (file uploads).
+**Status:** M18 — File uploads (**Wave 2: M0–M18**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (43 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and active M12/M14/M17/M18 filters); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`); plus M15 TOTP 2FA with single-use recovery codes, two-step login (`TOTP_REQUIRED`), password-confirmed `POST /me/reset-data` & `DELETE /me`, and documented export→import account transfer; plus M16 membership-scoped manual bookmark ordering (`bookmark_collections.order`, `PATCH /collections/{id}/bookmarks/order`, `GET /bookmarks?sort=manual&collectionId=`); plus M17 automatic permanent archiving (Readability + linkedom HTML extraction, `unpdf` PDF extraction, `ARCDROP__DATA_DIR/archives/{id}/`, XSS sanitization, `cacheStatus` lifecycle with exponential backoff, `GET /bookmarks/{id}/archive`) and PostgreSQL `'simple'` full-text search + GIN indexes across titles, excerpts, notes, extracted bodies, and highlights (`cacheStatus=` filter & `cache.status:` operator); plus M18 first-class file uploads (`storageKind=file`, `POST /bookmarks/file` multipart, MIME allowlist & MIME-to-contentType mapping, per-file & monthly UTC upload quotas with 413 details, private auth-required `GET /files/{id}`, direct-from-volume PDF/EPUB/Markdown/TXT extraction & FTS indexing, active `file=` / `file:` filter, purge/eviction byte cleanup, and ZIP bundle export via `POST /data/export` `includeFiles=true`). **Next:** Wave 2 — M19 (public sharing & RSS).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -34,20 +34,20 @@ Config is validated with zod at boot (fail-fast: invalid env → report with the
 (typo protection). Copy `.env.example` to `.env` for local dev — bun loads it
 automatically.
 
-| Variable                                     | Required | Default     | Meaning                                                                                                                  |
-| -------------------------------------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `ARCDROP__DATABASE__URL`                     | yes      | —           | PostgreSQL connection URL (`postgres://…`)                                                                               |
-| `ARCDROP__JWT__SECRET`                       | yes      | —           | JWT signing secret & TOTP secret encryption key seed, min 32 chars (M2; M15 AES-256-GCM)                                 |
-| `ARCDROP__PORT`                              | no       | `3000`      | HTTP port                                                                                                                |
-| `ARCDROP__CORS__ORIGINS`                     | no       | empty       | Comma-separated browser origins; empty = CORS off                                                                        |
-| `ARCDROP__DATA_DIR`                          | no       | `/data`     | Data volume root (icons live in `…/icons` since M6; archives in `…/archives` since M17); must be writable                |
-| `ARCDROP__METRICS__ENABLED`                  | no       | `false`     | Serve Prometheus metrics at `/metrics`                                                                                   |
-| `ARCDROP__METADATA__ENABLED`                 | no       | `true`      | M6 outbound metadata/icon fetch pipeline master switch                                                                   |
-| `ARCDROP__METADATA__ALLOW_PRIVATE`           | no       | `false`     | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
-| `ARCDROP__MCP__PAT_REQUESTS_PER_MINUTE`      | no       | `300`       | M7 per-PAT request budget per minute (REST + MCP combined)                                                               |
-| `ARCDROP__PORTABILITY__IMPORT_MAX_BYTES`     | no       | `26214400`  | M8 import cap per uploaded file (25 MiB); larger uploads are a `413` problem+json                                        |
-| `ARCDROP__PORTABILITY__IMPORT_ZIP_MAX_BYTES` | no       | `314572800` | M8 import cap for ZIP uploads (300 MB — archives unpack to many files)                                                   |
-| `ARCDROP__LOG__LEVEL`                        | no       | `info`      | pino level: `fatal…trace`                                                                                                |
+| Variable                                     | Required | Default     | Meaning                                                                                                                                          |
+| -------------------------------------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ARCDROP__DATABASE__URL`                     | yes      | —           | PostgreSQL connection URL (`postgres://…`)                                                                                                       |
+| `ARCDROP__JWT__SECRET`                       | yes      | —           | JWT signing secret & TOTP secret encryption key seed, min 32 chars (M2; M15 AES-256-GCM)                                                         |
+| `ARCDROP__PORT`                              | no       | `3000`      | HTTP port                                                                                                                                        |
+| `ARCDROP__CORS__ORIGINS`                     | no       | empty       | Comma-separated browser origins; empty = CORS off                                                                                                |
+| `ARCDROP__DATA_DIR`                          | no       | `/data`     | Data volume root (icons live in `…/icons` since M6; archives in `…/archives` since M17; uploaded files in `…/files` since M18); must be writable |
+| `ARCDROP__METRICS__ENABLED`                  | no       | `false`     | Serve Prometheus metrics at `/metrics`                                                                                                           |
+| `ARCDROP__METADATA__ENABLED`                 | no       | `true`      | M6 outbound metadata/icon fetch pipeline master switch                                                                                           |
+| `ARCDROP__METADATA__ALLOW_PRIVATE`           | no       | `false`     | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production                         |
+| `ARCDROP__MCP__PAT_REQUESTS_PER_MINUTE`      | no       | `300`       | M7 per-PAT request budget per minute (REST + MCP combined)                                                                                       |
+| `ARCDROP__PORTABILITY__IMPORT_MAX_BYTES`     | no       | `26214400`  | M8 import cap per uploaded file (25 MiB); larger uploads are a `413` problem+json                                                                |
+| `ARCDROP__PORTABILITY__IMPORT_ZIP_MAX_BYTES` | no       | `314572800` | M8 import cap for ZIP uploads (300 MB — archives unpack to many files)                                                                           |
+| `ARCDROP__LOG__LEVEL`                        | no       | `info`      | pino level: `fatal…trace`                                                                                                                        |
 
 ## Local development
 
@@ -111,7 +111,8 @@ generated migrations.
   `Setting` (D16 runtime settings), `AuditLogEntry` (M7 tool-call audit),
   `Bookmark`, `Highlight` (M10 / D6), `Tag`, `BookmarkTag`, `BookmarkCollection`,
   `Collection`, `ChangeEvent` (M3/M4/M10), `NotificationOutbox` (M14 / D20),
-  `TfaRecoveryCode` (M15 single-use 2FA recovery codes).
+  `TfaRecoveryCode` (M15 single-use 2FA recovery codes), `UploadUsage` (M18
+  monthly per-user upload quota counters).
 - `src/database/migrations/` — explicit migration list + the no-op
   `InitialSetup1763000000000` pipeline proof, `M2AuthUsers1794606603617`
   (users/refresh_tokens/one_time_tokens/settings + the three enum types),
@@ -136,7 +137,11 @@ generated migrations.
   `cache_error`/`archive_text`, `bookmarks.search_vector` STORED `'simple'` tsvector +
   GIN `IX_bookmarks_search_vector`, `IX_bookmarks_user_cache_status`,
   `IX_bookmarks_cache_retry`, and `highlights.search_vector` STORED `'simple'`
-  tsvector + GIN `IX_highlights_search_vector`).
+  tsvector + GIN `IX_highlights_search_vector`), and `M18FileUploads1794638000000`
+  (`bookmark_storage_kind` enum `url|file`, nullable `url`/`scheme`/`host`/`path`,
+  `bookmarks.file_ref`/`file_name`/`file_mime`/`file_size`, `IX_bookmarks_user_storage_kind`,
+  and `upload_usage` table with `UX_upload_usage_user_month` and `ON DELETE CASCADE`
+  FK to `users`).
   M5/M6/M8/M9/M11/M13 needed NO schema work.
 
 ### Migration workflow
@@ -515,8 +520,8 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 + M10–M17 catalog (41 tools):** bookmarks `listBookmarks` (incl. M11/M12/M14/M17
-  `search`/`q` operator grammar with content/highlight FTS, `favorite`, `type`, `broken`, `reminder`, and `cacheStatus` filters + archive status fields), `getBookmark`, `getBookmarkArchive` (M17), `createBookmark`, `updateBookmark` (incl.
+- **v1 + M10–M18 catalog (43 tools — 15 reads, 28 mutations):** bookmarks `listBookmarks` (incl. M11/M12/M14/M17/M18
+  `search`/`q` operator grammar with content/highlight/file FTS, `favorite`, `type`, `file`, `broken`, `reminder`, and `cacheStatus` filters + `storageKind`/`file*` + archive status fields), `getBookmark`, `getBookmarkArchive` (M17), `createBookmark`, `uploadBookmarkFile` (M18 — base64 payload capped at 1 MiB decoded), `getFile` (M18 — metadata + inline base64 when `<= 1 MiB`), `updateBookmark` (incl.
   `favorite` toggle & `reminderAt`), `deleteBookmark` (trash), `restoreBookmark`,
   `bulkBookmarks` (M13: move/addTags/removeTags/trash/restore/delete),
   `replaceBookmarkTags`, `replaceBookmarkCollections` (membership sync),
@@ -536,13 +541,16 @@ like extra REST JSON bodies (DTO whitelist), never errors.
   `structuredContent` (the exact service result; void operations return a
   bare `ok`) plus the same JSON as readable text content. Annotations carry
   `readOnlyHint` (derived from the REST method) and `idempotentHint`.
-  Portability specifics: `exportData` (POST at REST → mutation-classified,
-  same as `createSyncTicket` — read-only agents use the list/changes reads
-  instead) answers json as structuredContent and csv/html/txt as the
-  document text; `importData` takes base64 `data` + explicit `format`,
-  decoded cap **1 MiB** — bigger uploads (25 MiB file / 300 MB zip) belong
-  to REST; the JSON body limit is **2 MB** (see `setupApp`) exactly so this
-  tool's envelope fits.
+  Portability & file-upload specifics: `exportData` (POST at REST → mutation-classified,
+  same as `createSyncTicket` — read-only agents use the list/changes/`getFile` reads
+  instead) answers json as structuredContent, csv/html/txt as document text, and
+  `includeFiles: true` as a base64 ZIP bundle (capped at **1 MiB** over MCP — bigger
+  bundles belong to REST `POST /data/export`); `importData` and `uploadBookmarkFile`
+  both take base64 `data` with a **1 MiB** decoded cap — larger imports/uploads (25 MiB
+  import / 300 MB zip / `settings.fileMaxBytes` 300 MiB default file upload) belong
+  to REST; the `/api/v1/mcp` JSON body limit is **2 MB** (see `setupApp`) so
+  these 1 MiB base64 envelopes fit. Similarly, `getFile` inlines base64 bytes up to
+  **1 MiB** and omits `data` with a `_note` pointing to `GET /files/{id}` above that.
 - **THE CONVENTION FOR FUTURE MILESTONES: new authenticated, non-admin REST
   surface ⇒ add the matching tool(s) in `src/mcp/mcp-tool-catalog.ts` and
   extend the e2e parity set. The e2e parity test FAILS the build when a
@@ -617,8 +625,8 @@ fields and timestamps).
 
 ### Export — `POST /data/export` (operationId `exportData`)
 
-`{ format: json|csv|html|txt, collectionId? }` → streaming file download
-(`Content-Disposition: attachment`, `arcdrop-export.<ext>`; bookmark rows
+`{ format: json|csv|html|txt, collectionId?, includeFiles? }` → streaming file download
+(`Content-Disposition: attachment`, `arcdrop-export.<ext>`, or `arcdrop-export.zip` when `includeFiles: true`; bookmark rows
 stream out in keyset-paged batches of 500 — never one giant buffer; HTML
 buffers the rows it needs for the folder tree, personal-scale).
 `collectionId` scopes to that collection's ACTIVE subtree (unknown or
@@ -642,6 +650,7 @@ NETSCAPE-Bookmark-file-1>`), collections as nested `<H3>/<DL>` folders,
   LOSSY: a bookmark in several collections renders once (first path);
   tags with commas break the TAGS list.
 - **txt** — one URL per line. Everything except URLs is lossy by definition.
+- **`includeFiles: true` (M18 ZIP bundle)** — bundles `export.<format>`, a SHA-256 checksummed `manifest.json` (`format: 'arcdrop/export-bundle/v1'`), and every active uploaded file as `files/<bookmarkId>-<fileName>` (trashed file items excluded; re-import counts `storageKind: 'file'` items without URLs as skipped).
 
 ### Import — `POST /data/import` (operationId `importData`)
 
@@ -1007,14 +1016,19 @@ src/
   settings/                SettingsService (typed DB settings) + /admin/settings
   change-log/              ChangeLogService (transact + gapless seq) + ChangeEventBus
                            (in-process fan-out for M5's ws push)
-  bookmarks/               /bookmarks CRUD + bulk + trash/restore + list/search/stats;
+  bookmarks/               /bookmarks CRUD + `POST /bookmarks/file` + bulk + trash/restore + list/search/stats;
                            `BulkBookmarksService` (M13: `POST /bookmarks/bulk`);
                            /bookmarks/{id}/tags; /tags/{name} rename/merge/delete;
                            /bookmarks/{id}/collections (delegates to CollectionsService);
                            /bookmarks/{id}/reindex (schedules the M6 pipeline);
                            UrlDecompositionService (D12); `search-query.parser.ts` +
-                           `search-query.compiler.ts` (M11 grammar); TrashPurgeService +
-                           cron job (purge now fires the icon-eviction ride-along)
+                           `search-query.compiler.ts` (M11/M18 grammar); TrashPurgeService +
+                           cron job (purge fires icon + file eviction ride-alongs)
+  files/                   M18: private user file storage (`ARCDROP__DATA_DIR/files`),
+                           `GET /files/{id}` auth-required inline/download streaming,
+                           MIME allowlist + contentType mapping, `FileUploadInterceptor`,
+                           `UploadQuotaService` (`upload_usage` monthly UTC buckets),
+                           and `FileEvictionService`
   collections/             /collections flat list + tree + CRUD + restore + order +
                            M13 `merge` / `sort-alphabetical` / `delete-empty`;
                            cycle protection, two-phase delete, membership sync;
@@ -1058,6 +1072,7 @@ src/
                            inbox backed by `NotificationOutbox`; `RemindersService`
                            & per-minute `RemindersJob` (`FOR UPDATE OF b SKIP LOCKED`
                            + post-commit `SyncGateway.pushToUser`, WS-only per D20)
+  (portability/export)     `zip-writer.ts` (M18 stored ZIP builder for `includeFiles=true`)
 test/
   helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset;
                            metadata pipeline DISABLED by default — see the M6 section)
@@ -1104,6 +1119,12 @@ test/
                                 & mark-read, cancel/trash/delete paths, disabled-user skip,
                                 `reminder=` / `reminder:` filter & operator, UTC normalization,
                                 MCP parity, D20 zero-SMTP check)
+  file-uploads.e2e.test.ts     M18 suite (multipart PDF/EPUB/MD/TXT/PNG/MP3/MP4 upload,
+                                415/400 rejections, auth-required GET /files/{id} roundtrip,
+                                direct-from-volume FTS without SSRF/network, file: grammar
+                                + filters, dupes/broken-links skip, per-file & monthly quota
+                                413 + rollover reset, trash/purge/reset/eviction cleanup,
+                                ZIP bundle manifest/checksums, MCP uploadBookmarkFile/getFile)
   zip-builder.ts               test-only minimal ZIP WRITER (inverse of the M8
                                 reader) — builds stored/deflate archives for fixtures
 ```
@@ -1398,26 +1419,26 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 
 `GET /api/v1/bookmarks` (`search` or alias `q`) and the mirrored MCP tool `listBookmarks` share **one canonical Raindrop-compatible search grammar** implemented as a pure, field-model-driven parser (`src/bookmarks/search-query.parser.ts`) and TypeORM SQL compiler (`src/bookmarks/search-query.compiler.ts`):
 
-| Syntax                                    | Meaning                                                                                    | Notes                                                                                                                |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `word` / `"exact phrase"`                 | Case-insensitive substring match across `title`, `excerpt`, `note`, `url`, and tag names   | `\"` and `\\` escapes inside quotes; LIKE metacharacters (`%`, `_`, `\`) escaped                                     |
-| `-word` / `-"exact phrase"`               | Exclusion across the same fields                                                           | Uses `COALESCE(col, '')` so `NULL` `title`/`excerpt`/`note` never drop rows                                          |
-| `#tag` / `#"multi word tag"`              | Exact tag name match (`tags.name_lower`)                                                   | Negatable with `-#tag` / `-#"multi word tag"`                                                                        |
-| `title:` / `excerpt:` / `note:` / `link:` | Field-scoped substring match (`link:` aliases `url`)                                       | Supports `"quoted phrases"` and `-` prefix negation                                                                  |
-| `type:<X>`                                | Content type (`article\|image\|video\|audio\|document\|book\|link`)                        | Case-insensitive value; negatable (`-type:video`)                                                                    |
-| `favorite:true\|false`                    | Favorite flag filter                                                                       | Negatable (`-favorite:true`)                                                                                         |
-| `notag:true\|false`                       | Untagged (`true`) or has ≥1 tag (`false`)                                                  | Negatable (`-notag:true`)                                                                                            |
-| `created:` / `lastUpdate:`                | UTC date/range filter with optional `<`, `>`, `<=`, `>=` prefix and `YYYY[-MM[-DD]]` value | `created:2025-05` matches `[2025-05-01T00:00Z, 2025-06-01T00:00Z)`; calendar-validated (incl. leap years); negatable |
-| `match:OR` / `match:AND`                  | Match mode (`AND` default)                                                                 | In `OR` mode, positive clauses are OR'd and exclusions (`-...`) stay ANDed outside                                   |
-| `broken:true\|false`                      | Broken-link state (`brokenAt IS NOT NULL` / `IS NULL`) — active since M12                  | Negatable (`-broken:true`); reflects instance `brokenLinkCheckMode` sweeps                                           |
-| `file:` / `reminder:`                     | Reserved Wave-2 operators (M18 / M14)                                                      | Fail explicitly with `400 BAD_REQUEST` (`"operator not available yet"`)                                              |
+| Syntax                                    | Meaning                                                                                    | Notes                                                                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `word` / `"exact phrase"`                 | Case-insensitive substring match across `title`, `excerpt`, `note`, `url`, and tag names   | `\"` and `\\` escapes inside quotes; LIKE metacharacters (`%`, `_`, `\`) escaped                                        |
+| `-word` / `-"exact phrase"`               | Exclusion across the same fields                                                           | Uses `COALESCE(col, '')` so `NULL` `title`/`excerpt`/`note` never drop rows                                             |
+| `#tag` / `#"multi word tag"`              | Exact tag name match (`tags.name_lower`)                                                   | Negatable with `-#tag` / `-#"multi word tag"`                                                                           |
+| `title:` / `excerpt:` / `note:` / `link:` | Field-scoped substring match (`link:` aliases `url`)                                       | Supports `"quoted phrases"` and `-` prefix negation                                                                     |
+| `type:<X>`                                | Content type (`article\|image\|video\|audio\|document\|book\|link`)                        | Case-insensitive value; negatable (`-type:video`)                                                                       |
+| `favorite:true\|false`                    | Favorite flag filter                                                                       | Negatable (`-favorite:true`)                                                                                            |
+| `notag:true\|false`                       | Untagged (`true`) or has ≥1 tag (`false`)                                                  | Negatable (`-notag:true`)                                                                                               |
+| `created:` / `lastUpdate:`                | UTC date/range filter with optional `<`, `>`, `<=`, `>=` prefix and `YYYY[-MM[-DD]]` value | `created:2025-05` matches `[2025-05-01T00:00Z, 2025-06-01T00:00Z)`; calendar-validated (incl. leap years); negatable    |
+| `match:OR` / `match:AND`                  | Match mode (`AND` default)                                                                 | In `OR` mode, positive clauses are OR'd and exclusions (`-...`) stay ANDed outside                                      |
+| `broken:true\|false`                      | Broken-link state (`brokenAt IS NOT NULL` / `IS NULL`) — active since M12                  | Negatable (`-broken:true`); reflects instance `brokenLinkCheckMode` sweeps                                              |
+| `reminder:` / `cache.status:` / `file:`   | Activated in M14 / M17 / M18                                                               | `file:` accepts `true\|false\|<ext>\|<mime>\|image\|video\|audio\|document\|book` (negatable); zero reserved slots left |
 
 - **Error contract:** invalid syntax, unknown operators (`foo:bar`), bad dates, reserved operators, or supplying both `search` and `q` return `400 BAD_REQUEST` (`application/problem+json` on REST, `CallToolResult { isError: true }` on MCP) with the exact character `position` in the message. Bare URLs (`https://…`), time-like numbers (`12:30`), lone `-`, and `--flags` stay plain text terms.
 - **Composability & M17 extensibility:** compiled grammar predicates compose via `AND` with all REST query parameters (`collectionId`, `tag`, `domain`, `favorite`, `type`, `unassignedOnly`, `trashed`, `updatedSince`). `DEFAULT_TEXT_SEARCH_FIELDS` and `DEFAULT_TEXT_FIELD_BUILDERS` are registry-driven so M17 can plug in full-text `content` / `highlights` fields without rewriting the parser.
 
 ## Library health (M12 — D13, D19, Raindrop parity G10, G11)
 
-- **Scope note (URL bookmarks only):** File-backed bookmarks do not exist yet (arriving in M18), so both duplicate grouping and broken-link sweeping operate solely on active URL bookmarks.
+- **Scope note (URL bookmarks only):** Both duplicate grouping (`GET /library/duplicates`) and broken-link sweeping explicitly filter to active URL bookmarks (`storage_kind = 'url'`), skipping file-backed items (M18).
 - **Duplicates finder (`GET /api/v1/library/duplicates`, operationId `findDuplicates`):** Groups the caller's non-trashed URL bookmarks using `normalizeBookmarkParts` (`src/library-health/url-normalize.ts`, built over D12 `urlParts` without altering verbatim `url` storage per D13): ignores scheme, strips leading `www.` on multi-label hosts (keeping non-`www.` subdomains), preserves non-default ports, strips trailing slashes on non-root paths while preserving case sensitivity, drops fragments, removes tracking parameters (`utm_*`, `fbclid`, `gclid`, `ref`, `mc_cid`, `mc_eid`, case-insensitive), and sorts remaining query parameters deterministically. Groups with `≥ 2` rows return `{ normalizedUrl, original, extras[] }` ordered oldest-first (`createdAt ASC, id ASC`).
 - **Transactional resolve (`POST /api/v1/library/duplicates/resolve`, operationId `resolveDuplicates`):** Validates `keepId` and `trashIds[]` (active, owned, `keepId ∉ trashIds`), merges unique tags and collection memberships onto `keepId`, soft-trashes `trashIds` (`deletedAt = now`), and records change events for the modified keeper, touched collections, and trashed extras inside one `ChangeLogService.transact` transaction so sync cursors reconstruct the exact merged state.
 - **Broken-links scanner:** Adds `lastCheckedAt`, `brokenReason`, and `brokenAt` on `Bookmark` (migration `M12LibraryHealth1794629705566`, exposed on `BookmarkDto` and sync snapshots) plus the instance setting `brokenLinkCheckMode` (`'off' | 'basic' | 'default' | 'strict'`, default `'default'`, admin-managed via `PUT /admin/settings`):
@@ -1499,13 +1520,38 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 - **Self-contained pure-JS extractors over headless browsers:** `@mozilla/readability` + `linkedom` and `unpdf` execute deterministically in Bun (`1.4.2`) inside the lightweight container with zero Chromium/native-addon surface.
 - **`'simple'` FTS dictionary + `UNION` subquery form:** Multilingual tokenization + `:*` prefix search + `b.id IN (... UNION ...)` delivers GIN Bitmap Index Scans across both `bookmarks` and `highlights` without breaking non-English inflection or URL/short-token `ILIKE` fallback.
 
-## Wave-2 Handoff (for M18+)
+## File uploads (M18 — D19, Raindrop parity G17)
 
-M0–M17 are complete and green (**335 unit / 215 e2e tests across 58 test files**). Next is **M18 (File uploads — D19, Raindrop parity G17)**:
+- **First-class file bookmarks (`storageKind: 'url' | 'file'`):**
+  - Migration `M18FileUploads1794638000000` adds `bookmark_storage_kind`, `file_ref`, `file_name`, `file_mime`, and `file_size` on `bookmarks`, makes `url`/`scheme`/`host`/`path` nullable (URL decomposition skipped; `url` remains `null`), and adds `upload_usage` (`user_id`, UTC `month` `YYYY-MM`, `bytes_used`).
+  - `POST /api/v1/bookmarks/file` (`operationId: uploadBookmarkFile`) accepts `multipart/form-data` (`file` + optional `title`, `excerpt`, `note`, `favorite`, `tags`, `collectionIds`, `reminderAt`) through `ChangeLogService.transact` + `BookmarksService.createFileBookmark`, so file items participate seamlessly in tags, collections, highlights, reminders, manual order, trash/restore, and sync deltas.
+- **MIME allowlist, settings caps & quota:**
+  - Allowlist: `jpeg`, `gif`, `png`, `webp`, `heic` (`image`); `mp4`, `mov`, `wmv`, `webm` (`video`); `mp3`, `wav`, `aiff`, `flac` (`audio`); `epub` (`book`); `pdf`, `md`, `txt` (`document`). Executable/active-content types (`text/html`, `image/svg+xml`, scripts) are rejected with `415 UNSUPPORTED_MEDIA_TYPE`.
+  - Instance settings (`SettingsDto`): `fileMaxBytes` (default 300 MiB, bounded `[1 KiB, 1 GiB]`) enforced mid-stream via `FileUploadInterceptor`, and `monthlyUploadQuotaBytes` (default 10 GiB, bounded `[1 KiB, 10 TiB]`) enforced atomically via `UploadQuotaService.consumeOrThrow` (`FOR UPDATE` on `upload_usage`). Overages return `413 PAYLOAD_TOO_LARGE` or `413 UPLOAD_QUOTA_EXCEEDED` with `limitBytes`, `usedBytes`, and `resetAt` (first instant of the next UTC month) and leave zero orphan bytes on disk.
+- **Private serving contrast (`/files/{id}` vs public `/icons/{id}`):**
+  - Unlike `GET /api/v1/icons/{id}` (public capability ref for `<img>` tags), `GET /api/v1/files/{id}` (matching either bookmark UUID or `fileRef`, `operationId: getFile`) **ALWAYS requires bearer authentication (JWT or PAT) and ownership verification** (`401` anonymous, `404` foreign/missing/URL-only — existence is never leaked).
+  - Serves inline by default (`?download=1` sets `Content-Disposition: attachment`) with `Cache-Control: private, max-age=31536000, immutable` and `X-Content-Type-Options: nosniff`. Browser/web clients render private previews via authenticated blob fetches (`Authorization` header), never bare `<img src>`.
+- **Direct-from-volume FTS indexing:**
+  - Text-bearing uploads (`pdf` via `unpdf`, `epub` via OPF/spine parser in `extractEpubContent`, `md`, and `txt`) extract plain text & sanitized HTML directly from the uploaded bytes without outbound network/SSRF calls, persist `ARCDROP__DATA_DIR/archives/{id}/`, populate `bookmarks.archive_text`, and set `cacheStatus = 'ready'` so `GET /bookmarks?search=…` matches uploaded file contents via M17 PostgreSQL FTS + GIN immediately. Non-text media (`image|video|audio`) sets `cacheStatus = 'skipped'`.
+- **Filters, lifecycle & exports:**
+  - `GET /bookmarks?file=true|false|<ext|mime|kind>` and M11 grammar operator `file:` (last reserved slot activated) filter file items; `type=` covers MIME-mapped content types.
+  - `PUT /bookmarks/{id}` forbids modifying `url` on `file` items (`400`), `POST /bookmarks/{id}/reindex` refuses `file` items (`400`), and `/library/duplicates` + broken-links sweeps skip `file` items.
+  - Trash keeps file bytes so restore works; bulk hard delete, `TrashPurgeService`, `POST /me/reset-data`, `DELETE /me`, and `FileEvictionService` (shared daily `05:00` job + purge ride-along) delete file blobs & archives cleanly (`reset-data` preserves `upload_usage` so resets cannot bypass monthly quotas).
+  - `POST /data/export` accepts `includeFiles: true` to produce an `arcdrop-export.zip` with `export.<format>`, SHA-256 `manifest.json` (`arcdrop/export-bundle/v1`), and `files/<bookmarkId>-<fileName>`.
+  - No file versioning/replace by design (Raindrop parity — delete and re-upload).
 
-- **Extraction pipeline reuse:** Uploaded text, Markdown, and PDF files in M18 can invoke `extractPlainTextContent` / `extractPdfContent` (`src/metadata/content-extractor.ts`), persist rendered previews/text via `ArchiveStorageService` (`ARCDROP__DATA_DIR/archives/{id}/`), and populate `bookmarks.archive_text` (`cacheStatus: 'ready'`) so uploaded files become immediately searchable via M17's PostgreSQL FTS + GIN indexes.
-- **Grammar activation:** Activate `file:` (`file:true|false` / `file:<mime|ext>`) in `src/bookmarks/search-query.parser.ts` (the sole remaining entry in `RESERVED_OPERATORS`) and `src/bookmarks/search-query.compiler.ts`.
-- **Standing conventions:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), maintain global lock order (`users` row lock first inside `ChangeLogService.transact`), use `queryRows()` for raw `RETURNING` SQL, mirror any new authenticated non-admin REST endpoints in `src/mcp/mcp-tool-catalog.ts`, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
+## Decisions recorded (M18)
+
+- **Quota table survives `POST /me/reset-data`:** Deleting bookmarks removes stored files, but `upload_usage` rows remain tied to `users(id) ON DELETE CASCADE` until account deletion (`DELETE /me`) so users cannot repeatedly wipe their library to bypass monthly bandwidth/storage quotas.
+- **MCP 1 MiB base64 envelope cap vs REST 300 MiB streaming:** `uploadBookmarkFile`, `getFile` inline `data`, and `exportData` `includeFiles=true` cap decoded payloads at 1 MiB to fit cleanly inside the 2 MiB `/api/v1/mcp` JSON-RPC body ceiling; larger files return `_note` / `downloadPath` or `413` directing callers to REST multipart/stream routes (**43 MCP tools total: 15 reads, 28 mutations**).
+- **Deterministic post-commit volume cleanup + daily eviction safety net:** File deletion runs immediately post-commit on hard delete/purge/reset and is backed up by `FileEvictionService` running alongside `IconEvictionJob` at `05:00` to sweep any stranded blobs.
+
+## Wave-2 Handoff (for M19+)
+
+M0–M18 are complete and green (**347 unit / 219 e2e tests across 63 test files**). Next is **M19 (Public sharing & RSS)**:
+
+- **Private-by-default file & icon boundaries:** Keep `GET /api/v1/files/{id}` strictly authenticated + user-owned; if M19 exposes public collection/bookmark sharing, never make private `/files/{id}` endpoints unauthenticated without explicit share-token scoping.
+- **MCP parity & guardrails:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), maintain global lock order (`users` row lock first inside `ChangeLogService.transact`), use `queryRows()` for raw `RETURNING` SQL, mirror any new authenticated non-admin REST endpoints in `src/mcp/mcp-tool-catalog.ts` (and list any intentionally unmirrored public routes explicitly in `test/mcp.e2e.test.ts`), update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
 
 ## Decisions recorded (M4)
 

@@ -101,11 +101,12 @@ export function classifyProbeOutcome(
 }
 
 /**
- * Broken-links sweep engine (plan M12 / D19, parity G11).
+ * Broken-links sweep engine (plan M12 / D19, parity G11, extended M18).
  *
  * Reuses M6's `SsrfSafeFetchService.probeUrl` so every check resolves DNS
  * first, blocks private IP ranges, and re-validates every redirect hop.
- * Sweeps active URL bookmarks gently (≤5 concurrent, jittered) and records
+ * Sweeps active URL bookmarks (`storageKind = 'url'`) gently (≤5 concurrent,
+ * jittered) — skipping file-backed bookmarks completely — and records
  * `bookmark:update` change events whenever `brokenAt` / `brokenReason` changes.
  */
 @Injectable()
@@ -149,6 +150,8 @@ export class BrokenLinksService {
           .createQueryBuilder('b')
           .select(['b.id', 'b.userId', 'b.url', 'b.brokenAt', 'b.brokenReason'])
           .where('b.deletedAt IS NULL')
+          .andWhere("b.storageKind = 'url'")
+          .andWhere('b.url IS NOT NULL')
           .orderBy('b.id', 'ASC')
           .take(batchSize);
 
@@ -199,9 +202,14 @@ export class BrokenLinksService {
     mode: Exclude<BrokenLinkCheckMode, 'off'>,
     deadlineMs?: number,
   ): Promise<'marked-broken' | 'cleared' | 'unchanged' | 'policy-skip'> {
+    if (row.url === null) {
+      return 'policy-skip';
+    }
+    const targetUrl = row.url;
+
     let outcome: { ok: true; status: number } | { ok: false; reason: string };
     try {
-      const probe = await this.fetcher.probeUrl(row.url, { deadlineMs });
+      const probe = await this.fetcher.probeUrl(targetUrl, { deadlineMs });
       outcome = { ok: true, status: probe.status };
     } catch (error) {
       const reason = error instanceof MetadataFetchError ? error.reason : 'network-error';
@@ -220,19 +228,19 @@ export class BrokenLinksService {
       const reasonChanged = !wasBroken || row.brokenReason !== classification.reason;
       if (reasonChanged) {
         const nextBrokenAt = row.brokenAt ?? now;
-        await this.persistStatusChange(row.userId, row.id, row.url, {
+        await this.persistStatusChange(row.userId, row.id, targetUrl, {
           lastCheckedAt: now,
           brokenAt: nextBrokenAt,
           brokenReason: classification.reason,
         });
         return wasBroken ? 'unchanged' : 'marked-broken';
       }
-      await this.touchLastCheckedAt(row.id, row.url, now);
+      await this.touchLastCheckedAt(row.id, targetUrl, now);
       return 'unchanged';
     }
 
     if (classification.kind === 'healthy' && wasBroken) {
-      await this.persistStatusChange(row.userId, row.id, row.url, {
+      await this.persistStatusChange(row.userId, row.id, targetUrl, {
         lastCheckedAt: now,
         brokenAt: null,
         brokenReason: null,
@@ -240,7 +248,7 @@ export class BrokenLinksService {
       return 'cleared';
     }
 
-    await this.touchLastCheckedAt(row.id, row.url, now);
+    await this.touchLastCheckedAt(row.id, targetUrl, now);
     return 'unchanged';
   }
 

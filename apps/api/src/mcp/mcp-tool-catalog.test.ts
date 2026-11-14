@@ -6,6 +6,7 @@ import type { BulkBookmarksService } from '@api/bookmarks/bulk-bookmarks.service
 import type { HighlightsService } from '@api/bookmarks/highlights.service';
 import type { TagsService } from '@api/bookmarks/tags.service';
 import type { CollectionsService } from '@api/collections/collections.service';
+import type { FilesService } from '@api/files/files.service';
 import type { DuplicatesService } from '@api/library-health/duplicates.service';
 import type { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import type { NotificationsService } from '@api/notifications/notifications.service';
@@ -20,6 +21,7 @@ const stubs = {} as {
   highlights: HighlightsService;
   tags: TagsService;
   collections: CollectionsService;
+  files: FilesService;
   duplicates: DuplicatesService;
   metadata: MetadataFetchService;
   notifications: NotificationsService;
@@ -28,12 +30,14 @@ const stubs = {} as {
   portability: PortabilityService;
 };
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering, M17 archive. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering, M17 archive, M18 files. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
   'getBookmarkArchive',
   'createBookmark',
+  'uploadBookmarkFile',
+  'getFile',
   'updateBookmark',
   'deleteBookmark',
   'restoreBookmark',
@@ -73,7 +77,7 @@ const EXPECTED_TOOLS = [
   'exportBookmarkHighlights',
 ] as const;
 
-describe('MCP tool catalog (M7/M12/M13/M14/M16/M17)', () => {
+describe('MCP tool catalog (M7/M12/M13/M14/M16/M17/M18)', () => {
   const catalog = buildToolCatalog(stubs);
   const byName = new Map(catalog.map((tool) => [tool.name, tool]));
 
@@ -95,6 +99,7 @@ describe('MCP tool catalog (M7/M12/M13/M14/M16/M17)', () => {
         'listBookmarks',
         'getBookmark',
         'getBookmarkArchive',
+        'getFile',
         'getBookmarkStats',
         'listBookmarkTags',
         'findDuplicates',

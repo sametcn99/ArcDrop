@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
 import { Highlight } from '@api/database/entities/highlight.entity';
 import { ChangeLogService } from '@api/change-log/change-log.service';
+import { FileEvictionService } from '@api/files/file-eviction.service';
+import { FileStorageService } from '@api/files/file-storage.service';
 import { ArchiveStorageService } from '@api/metadata/archive-storage.service';
 import { IconEvictionService } from '@api/metadata/icon-eviction.service';
 import { SettingsService } from '@api/settings/settings.service';
@@ -16,13 +18,13 @@ export interface PurgeSummary {
 const MS_PER_DAY = 86_400_000;
 
 /**
- * Trash retention sweep (plan D17, extended M10/M17): hard-deletes bookmarks
+ * Trash retention sweep (plan D17, extended M10/M17/M18): hard-deletes bookmarks
  * that have been in the trash longer than `trashRetentionDays` (default 30, D16).
  *
  * The purge emits ChangeEvents like any mutation: one `bookmark:delete`
  * tombstone per purged row, one `highlight:delete` tombstone per cascaded
  * highlight row, plus `tag:delete` for tags whose last membership vanished.
- * On-disk archives and orphaned icons are evicted after commit.
+ * On-disk archives, uploaded file bytes, and orphaned icons are evicted after commit.
  */
 @Injectable()
 export class TrashPurgeService {
@@ -33,6 +35,8 @@ export class TrashPurgeService {
     private readonly changeLog: ChangeLogService,
     private readonly iconEviction: IconEvictionService,
     private readonly archives: ArchiveStorageService,
+    private readonly fileStorage: FileStorageService,
+    private readonly fileEviction: FileEvictionService,
   ) {}
 
   async purgeExpired(now: Date = new Date()): Promise<PurgeSummary> {
@@ -41,11 +45,12 @@ export class TrashPurgeService {
 
     const expired = await this.bookmarks.find({
       where: { deletedAt: LessThan(cutoff) },
-      select: { id: true, userId: true },
+      select: { id: true, userId: true, fileRef: true },
     });
     if (expired.length === 0) return { purged: 0 };
 
     const expiredIds = expired.map((row) => row.id);
+    const expiredFileRefs = expired.map((row) => row.fileRef);
 
     const summary = await this.changeLog.transact(async (manager, record) => {
       // Collect cascaded highlight ids BEFORE deleting the parent bookmarks so
@@ -81,6 +86,9 @@ export class TrashPurgeService {
     void this.iconEviction.evictOrphaned().catch(() => {});
     // M17: purge deletes archive bytes on disk.
     void this.archives.removeMany(expiredIds).catch(() => {});
+    // M18: purge deletes uploaded file bytes on disk.
+    void this.fileStorage.removeMany(expiredFileRefs).catch(() => {});
+    void this.fileEviction.evictOrphaned().catch(() => {});
 
     return summary;
   }

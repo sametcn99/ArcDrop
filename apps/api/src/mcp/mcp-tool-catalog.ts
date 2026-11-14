@@ -30,6 +30,12 @@ import {
   UpdateCollectionDto,
 } from '@api/collections/collections.dto';
 import { CollectionsService } from '@api/collections/collections.service';
+import {
+  FileIdParamDto,
+  MCP_FILE_UPLOAD_MAX_DECODED_BYTES,
+  UploadBookmarkFileToolDto,
+} from '@api/files/files.dto';
+import { FilesService } from '@api/files/files.service';
 import { DuplicatesService } from '@api/library-health/duplicates.service';
 import { ResolveDuplicatesDto } from '@api/library-health/library-health.dto';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
@@ -88,7 +94,7 @@ function define(
 
 /**
  * The ArcDrop MCP tool catalog (plan M7/D23) — one tool per REST operation
- * of the user-facing surface (bookmarks, archive, highlights, collections,
+ * of the user-facing surface (bookmarks, files, archive, highlights, collections,
  * tags, library health, bulk operations, sync, notifications, reindex). Names
  * ARE the REST `operationId`s; input schemas are generated from the same DTO
  * classes the REST routes validate; every call goes through the SAME services —
@@ -105,6 +111,7 @@ export function buildToolCatalog(deps: {
   highlights: HighlightsService;
   tags: TagsService;
   collections: CollectionsService;
+  files: FilesService;
   duplicates: DuplicatesService;
   metadata: MetadataFetchService;
   notifications: NotificationsService;
@@ -118,6 +125,7 @@ export function buildToolCatalog(deps: {
     highlights,
     tags,
     collections,
+    files,
     duplicates,
     metadata,
     notifications,
@@ -126,11 +134,11 @@ export function buildToolCatalog(deps: {
     portability,
   } = deps;
   return [
-    // -- bookmarks (M3/M6/M10/M11/M12/M13/M14/M16/M17) -----------------------
+    // -- bookmarks (M3/M6/M10/M11/M12/M13/M14/M16/M17/M18) ------------------
     define(
       'listBookmarks',
       'GET',
-      'Search / filter / page bookmarks (including broken-link fields lastCheckedAt/brokenReason/brokenAt, reminder fields reminderAt/remindedAt, and archive fields cacheStatus/cacheCheckedAt). `search` (or alias `q`) parses the canonical M11/M12/M14/M17 operator grammar: `word`, `"exact phrase"` (hybrid Postgres `simple` FTS + prefix `:*` + ILIKE fallback across title/excerpt/note/archived content/highlights/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `cache.status:` (`pending|ready|failed|invalid-origin|skipped`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`file:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, reminder, type, cacheStatus, updatedSince; sorted by updated-desc (default), created-desc, title-asc, or manual (membership order asc NULLS LAST; requires collectionId per D21); pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
+      'Search / filter / page bookmarks (including storageKind/fileRef/fileName/fileMime/fileSize, broken-link fields lastCheckedAt/brokenReason/brokenAt, reminder fields reminderAt/remindedAt, and archive fields cacheStatus/cacheCheckedAt). `search` (or alias `q`) parses the canonical M11/M12/M14/M17/M18 operator grammar: `word`, `"exact phrase"` (hybrid Postgres `simple` FTS + prefix `:*` + ILIKE fallback across title/excerpt/note/archived content/PDF/EPUB/text files/highlights/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `file:` (`true|false|ext|mime|image|video|audio|document|book`, negatable), `cache.status:` (`pending|ready|failed|invalid-origin|skipped`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, reminder, file, type, cacheStatus, updatedSince; sorted by updated-desc (default), created-desc, title-asc, or manual (membership order asc NULLS LAST; requires collectionId per D21); pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
       [ListBookmarksQueryDto],
       (user, [query]) => bookmarks.list(user, query as ListBookmarksQueryDto),
     ),
@@ -156,9 +164,49 @@ export function buildToolCatalog(deps: {
       (user, [dto]) => bookmarks.create(user, dto as CreateBookmarkDto),
     ),
     define(
+      'uploadBookmarkFile',
+      'POST',
+      `Upload a private file as a first-class library bookmark (M18): accepts base64 \`data\` + \`fileName\` plus optional \`mimeType\`, \`title\`, \`excerpt\`, \`note\`, \`favorite\`, \`tags\`, \`collectionIds\`, and \`reminderAt\`. Allowed types: jpeg/gif/png/webp/heic, mp4/mov/wmv/webm, mp3/wav/aiff/flac, epub, pdf, md, txt; text-bearing files feed the M17 FTS pipeline directly from disk. Decoded cap over MCP is ${MCP_FILE_UPLOAD_MAX_DECODED_BYTES} bytes (1 MiB) — larger files up to settings.fileMaxBytes (default 300 MiB) use REST POST /bookmarks/file multipart. Monthly per-user upload quota applies.`,
+      [UploadBookmarkFileToolDto],
+      (user, [dto]) => {
+        const request = dto as UploadBookmarkFileToolDto;
+        const compact = request.data.replaceAll(/\s+/g, '');
+        if (!/^[A-Za-z0-9+/]+={0,2}$/.test(compact)) {
+          throw new BadRequestException('data must be base64 text');
+        }
+        const bytes = Buffer.from(compact, 'base64');
+        if (bytes.length > MCP_FILE_UPLOAD_MAX_DECODED_BYTES) {
+          throw new PayloadTooLargeException(
+            `decoded file payload exceeds the ${MCP_FILE_UPLOAD_MAX_DECODED_BYTES} byte MCP upload cap — use REST POST /bookmarks/file`,
+          );
+        }
+        return bookmarks.createFileBookmark(user, {
+          fileName: request.fileName,
+          mimeType: request.mimeType,
+          size: bytes.length,
+          bytes,
+          title: request.title,
+          excerpt: request.excerpt,
+          note: request.note,
+          favorite: request.favorite,
+          tags: request.tags,
+          collectionIds: request.collectionIds,
+          reminderAt: request.reminderAt,
+        });
+      },
+    ),
+    define(
+      'getFile',
+      'GET',
+      `Fetch metadata and content for a private uploaded file by bookmark UUID or \`fileRef\` (M18). Returns { bookmarkId, fileRef, fileName, fileMime, fileSize, contentType, downloadPath, data? } where \`data\` carries base64 bytes when fileSize <= ${MCP_FILE_UPLOAD_MAX_DECODED_BYTES} bytes (larger files omit \`data\` with \`_note\` pointing to REST GET /files/{id}). Auth + ownership required (404 for foreign, missing, or URL-only bookmarks).`,
+      [FileIdParamDto],
+      (user, [p]) =>
+        files.getFileForMcp(user, (p as FileIdParamDto).id, MCP_FILE_UPLOAD_MAX_DECODED_BYTES),
+    ),
+    define(
       'updateBookmark',
       'PUT',
-      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle and reminderAt UTC ISO-8601 timestamp), explicit null clears (including clearing a pending reminder), absent fields stay; a url change re-runs URL decomposition, clears any broken-link flag, resets/evicts the old archive, and refreshes cover/icon/contentType/archive from the new page. Refuses trashed bookmarks.',
+      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle and reminderAt UTC ISO-8601 timestamp), explicit null clears (including clearing a pending reminder), absent fields stay; a url change re-runs URL decomposition, clears any broken-link flag, resets/evicts the old archive, and refreshes cover/icon/contentType/archive from the new page. File-backed bookmarks reject `url` changes with 400. Refuses trashed bookmarks.',
       [BookmarkIdParamDto, UpdateBookmarkDto],
       (user, [p, dto]) =>
         bookmarks.update(user, (p as BookmarkIdParamDto).id, dto as UpdateBookmarkDto),
@@ -166,7 +214,7 @@ export function buildToolCatalog(deps: {
     define(
       'deleteBookmark',
       'DELETE',
-      'Move a bookmark to the trash (soft delete; restoreBookmark undoes it). Hard deletion happens in the daily retention sweep.',
+      'Move a bookmark to the trash (soft delete; restoreBookmark undoes it). Hard deletion happens in the daily retention sweep (and deletes uploaded file bytes + archive copy).',
       [BookmarkIdParamDto],
       async (user, [p]) => {
         await bookmarks.trash(user, (p as BookmarkIdParamDto).id);
@@ -183,7 +231,7 @@ export function buildToolCatalog(deps: {
     define(
       'bulkBookmarks',
       'POST',
-      'Run one transactional bulk operation over up to 500 bookmarks: move (collectionIds, mode assign|union), addTags, removeTags, trash, restore, or delete (hard delete strictly for already-trashed ids). Any invalid id or state conflict rolls back the entire batch with zero events. Returns { action, affected, ids }.',
+      'Run one transactional bulk operation over up to 500 bookmarks: move (collectionIds, mode assign|union), addTags, removeTags, trash, restore, or delete (hard delete strictly for already-trashed ids, removing any uploaded file bytes and archives). Any invalid id or state conflict rolls back the entire batch with zero events. Returns { action, affected, ids }.',
       [BulkBookmarksDto],
       (user, [dto]) => bulkBookmarks.execute(user, dto as BulkBookmarksDto),
     ),
@@ -214,7 +262,7 @@ export function buildToolCatalog(deps: {
     define(
       'reindexBookmark',
       'POST',
-      'Re-run the metadata, icon, content-type, and permanent-copy archive extraction pipeline for one bookmark (202-style immediate "scheduled" answer; completion lands as a change event). Cover/icon/contentType and archived copy are re-evaluated, text only fills while still null.',
+      'Re-run the metadata, icon, content-type, and permanent-copy archive extraction pipeline for one URL bookmark (202-style immediate "scheduled" answer; completion lands as a change event). Cover/icon/contentType and archived copy are re-evaluated, text only fills while still null. Refuses file-backed bookmarks (400).',
       [BookmarkIdParamDto],
       (user, [p]) => metadata.reindex(user.id, (p as BookmarkIdParamDto).id),
     ),
@@ -237,7 +285,7 @@ export function buildToolCatalog(deps: {
     define(
       'findDuplicates',
       'GET',
-      'Group the caller’s active URL bookmarks by normalized URL (ignoring scheme, leading www., trailing slash except root /, fragment, and tracking params utm_*/fbclid/gclid/ref/mc_cid/mc_eid). Returns { groups: [{ normalizedUrl, original, extras[] }] } with oldest bookmark as original.',
+      'Group the caller’s active URL bookmarks by normalized URL (ignoring scheme, leading www., trailing slash except root /, fragment, and tracking params utm_*/fbclid/gclid/ref/mc_cid/mc_eid; file-backed items are excluded). Returns { groups: [{ normalizedUrl, original, extras[] }] } with oldest bookmark as original.',
       [],
       (user) => duplicates.findDuplicates(user.id),
     ),
@@ -450,14 +498,34 @@ export function buildToolCatalog(deps: {
       (user) => Promise.resolve(syncTickets.issue(user.id)),
     ),
 
-    // -- portability (M8/M10) ------------------------------------------------
+    // -- portability (M8/M10/M18) ------------------------------------------
     define(
       'exportData',
       'POST',
-      'Export the caller’s library. format: json (full fidelity — bookmarks incl. favorite/contentType/tags/collections/highlights) | csv | html (Netscape) | txt (one url per line); optional collectionId scopes to that collection’s subtree. json answers structuredContent with the parsed document; the other formats answer the document as text content. Covers the ACTIVE library only (trash excluded). NOTE: POST at REST, so scope=read-only tokens cannot call it — list/changes tools cover reads instead.',
+      'Export the caller’s library. format: json (full fidelity — bookmarks incl. favorite/contentType/tags/collections/highlights) | csv | html (Netscape) | txt (one url per line); optional collectionId scopes to that collection’s subtree; includeFiles=true returns a base64-encoded ZIP bundle with export.<format>, manifest.json, and uploaded files (capped at 1 MiB over MCP — larger bundles use REST POST /data/export). Covers the ACTIVE library only (trash excluded). NOTE: POST at REST, so scope=read-only tokens cannot call it — list/changes/getFile tools cover reads instead.',
       [ExportDataDto],
       async (user, [dto]) => {
         const request = dto as ExportDataDto;
+        if (request.includeFiles === true) {
+          const { exportedAt, zipBuffer, manifest } = await portability.exportZipBundle(
+            user,
+            request.format,
+            request.collectionId,
+          );
+          if (zipBuffer.length > MCP_IMPORT_MAX_DECODED_BYTES) {
+            throw new PayloadTooLargeException(
+              `export ZIP (${zipBuffer.length} bytes) exceeds the ${MCP_IMPORT_MAX_DECODED_BYTES} byte MCP export cap — use REST POST /data/export`,
+            );
+          }
+          return {
+            exportedAt,
+            format: 'zip',
+            encoding: 'base64',
+            byteLength: zipBuffer.length,
+            manifest,
+            data: zipBuffer.toString('base64'),
+          };
+        }
         const { exportedAt, body } = await portability.exportDocument(
           user,
           request.format,

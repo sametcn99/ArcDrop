@@ -18,6 +18,9 @@ interface MappedProblem {
   errors?: Array<{ field: string; messages: string[] }>;
   challenge?: string;
   expiresAt?: string;
+  limitBytes?: number;
+  usedBytes?: number;
+  resetAt?: string;
 }
 
 /**
@@ -50,6 +53,9 @@ export class ProblemJsonFilter implements ExceptionFilter {
       ...(mapped.errors ? { errors: mapped.errors } : {}),
       ...(mapped.challenge !== undefined ? { challenge: mapped.challenge } : {}),
       ...(mapped.expiresAt !== undefined ? { expiresAt: mapped.expiresAt } : {}),
+      ...(mapped.limitBytes !== undefined ? { limitBytes: mapped.limitBytes } : {}),
+      ...(mapped.usedBytes !== undefined ? { usedBytes: mapped.usedBytes } : {}),
+      ...(mapped.resetAt !== undefined ? { resetAt: mapped.resetAt } : {}),
     };
 
     if (mapped.status >= 500) {
@@ -75,6 +81,9 @@ export class ProblemJsonFilter implements ExceptionFilter {
       let customCode: string | undefined;
       let challenge: string | undefined;
       let expiresAt: string | undefined;
+      let limitBytes: number | undefined;
+      let usedBytes: number | undefined;
+      let resetAt: string | undefined;
 
       const payload = exception.getResponse();
       if (typeof payload === 'object' && payload !== null) {
@@ -96,6 +105,15 @@ export class ProblemJsonFilter implements ExceptionFilter {
         if (typeof record['expiresAt'] === 'string' && record['expiresAt'].length > 0) {
           expiresAt = record['expiresAt'];
         }
+        if (typeof record['limitBytes'] === 'number' && Number.isFinite(record['limitBytes'])) {
+          limitBytes = record['limitBytes'];
+        }
+        if (typeof record['usedBytes'] === 'number' && Number.isFinite(record['usedBytes'])) {
+          usedBytes = record['usedBytes'];
+        }
+        if (typeof record['resetAt'] === 'string' && record['resetAt'].length > 0) {
+          resetAt = record['resetAt'];
+        }
       }
 
       return {
@@ -108,6 +126,9 @@ export class ProblemJsonFilter implements ExceptionFilter {
         errors,
         challenge,
         expiresAt,
+        limitBytes,
+        usedBytes,
+        resetAt,
       };
     }
 

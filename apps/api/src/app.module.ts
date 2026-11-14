@@ -15,6 +15,7 @@ import { AuditModule } from './audit/audit.module';
 import { TokensModule } from './tokens/tokens.module';
 import { BookmarksModule } from './bookmarks/bookmarks.module';
 import { CollectionsModule } from './collections/collections.module';
+import { FilesModule } from './files/files.module';
 import { MetadataModule } from './metadata/metadata.module';
 import { SyncModule } from './sync/sync.module';
 import { McpModule } from './mcp/mcp.module';
@@ -31,7 +32,7 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
  * M9 — hardening & ops, M10 — enrichment, M11 — search operators,
  * M12 — library health, M13 — bulk ops, M14 — reminders & notifications,
  * M15 — 2FA & account lifecycle, M16 — manual ordering,
- * M17 — archive & full-text search).
+ * M17 — archive & full-text search, M18 — file uploads).
  *
  * Import order matters for DI resolution: config first, then logging (so the
  * pino-backed Nest logger exists before anything logs), then infrastructure
@@ -56,6 +57,7 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
     UsersModule,
     SettingsModule,
     ChangeLogModule,
+    FilesModule,
     MetadataModule,
     AuditModule,
     TokensModule,

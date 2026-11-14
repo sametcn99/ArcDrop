@@ -13,6 +13,7 @@ import { RefreshToken } from './refresh-token.entity';
 import { Setting } from './setting.entity';
 import { Tag } from './tag.entity';
 import { TfaRecoveryCode } from './tfa-recovery-code.entity';
+import { UploadUsage } from './upload-usage.entity';
 import { User } from './user.entity';
 
 /**
@@ -40,4 +41,5 @@ export const entities: Array<EntityCtor | EntitySchema> = [
   Highlight,
   NotificationOutbox,
   ChangeEvent,
+  UploadUsage,
 ];

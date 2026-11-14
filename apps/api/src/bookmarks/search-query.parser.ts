@@ -4,6 +4,7 @@ import {
   type CacheStatus,
   type ContentType,
 } from '@api/database/entities/bookmark.entity';
+import { resolveFileFilterMimes } from '@api/files/file-types';
 
 /**
  * Default bookmark fields matched by unqualified words and `"exact phrases"`
@@ -24,15 +25,11 @@ export type FieldScopeOperator = keyof typeof FIELD_SCOPE_MAP;
 export type ScopedBookmarkField = (typeof FIELD_SCOPE_MAP)[FieldScopeOperator];
 
 /**
- * Operators reserved for upcoming Wave-2 milestones. Parsed explicitly so
- * clients receive an honest 400 ("operator not available yet") rather than
- * silent fallback to plain-text matching. (`broken:` activated in M12;
- * `reminder:` activated in M14; `cache.status:` activated in M17.)
+ * Reserved operators for future milestones. All Wave-2 operators (`broken:`,
+ * `reminder:`, `cache.status:`, `file:`) are now active as of M18.
  */
-export const RESERVED_OPERATORS = {
-  file: 'M18',
-} as const;
-export type ReservedOperatorName = keyof typeof RESERVED_OPERATORS;
+export const RESERVED_OPERATORS: Readonly<Record<string, string>> = {};
+export type ReservedOperatorName = string;
 
 export type SearchMatchMode = 'AND' | 'OR';
 export type DateComparator = 'eq' | 'lt' | 'gt' | 'lte' | 'gte';
@@ -69,6 +66,19 @@ export type SearchClause =
   | {
       kind: 'cacheStatus';
       value: CacheStatus;
+      negated: boolean;
+      position: number;
+    }
+  | {
+      kind: 'file';
+      value: boolean;
+      negated: boolean;
+      position: number;
+    }
+  | {
+      kind: 'fileMime';
+      mimes: readonly string[];
+      raw: string;
       negated: boolean;
       position: number;
     }
@@ -115,7 +125,7 @@ export interface ParsedSearchQuery {
 export interface SearchParserOptions {
   /** Override the field set targeted by bare words and `"exact phrases"`. */
   defaultTextFields?: readonly string[];
-  /** Reserved operators explicitly enabled (for M18 integration). */
+  /** Reserved operators explicitly enabled (kept for API compatibility). */
   enabledReservedOperators?: readonly ReservedOperatorName[];
 }
 
@@ -149,7 +159,7 @@ const isWhitespace = (ch: string): boolean => /\s/.test(ch);
 
 /**
  * Pure parser for ArcDrop's Raindrop-compatible search operator grammar
- * (plan M11, D19, parity G9; extended M12, M14, M17).
+ * (plan M11, D19, parity G9; extended M12, M14, M17, M18).
  *
  * Grammar summary:
  * - Bare `word` or `"exact phrase"` (supports `\"` and `\\` escapes)
@@ -157,10 +167,9 @@ const isWhitespace = (ch: string): boolean => /\s/.test(ch);
  * - `#tag` and `#"multi word tag"` (and `-#tag` / `-#"multi word tag"`)
  * - `match:OR` / `match:AND` (default `AND`)
  * - Field-scoped: `title:`, `excerpt:`, `note:`, `link:`
- * - Metadata: `type:<contentType>`, `cache.status:<cacheStatus>`, `favorite:true|false`,
- *   `notag:true|false`, `broken:true|false`, `reminder:true|false`
+ * - Metadata: `type:<contentType>`, `cache.status:<cacheStatus>`, `file:<true|false|ext|mime>`,
+ *   `favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`
  * - Dates: `created:` and `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]`
- * - Reserved (fail with 400 until implemented): `file:`
  */
 export function parseSearchQuery(
   input: string,
@@ -367,8 +376,8 @@ export function parseSearchQuery(
       i += rawName.length + 1; // skip `name:`
       const valuePos = i;
 
-      if (opKey in RESERVED_OPERATORS && !enabledReserved.has(opKey as ReservedOperatorName)) {
-        const milestone = RESERVED_OPERATORS[opKey as ReservedOperatorName];
+      if (opKey in RESERVED_OPERATORS && !enabledReserved.has(opKey)) {
+        const milestone = RESERVED_OPERATORS[opKey];
         throw new SearchQueryParseError(
           'RESERVED_OPERATOR',
           opPos,
@@ -459,6 +468,37 @@ export function parseSearchQuery(
           position: termPos,
         });
         continue;
+      }
+
+      if (opKey === 'file') {
+        const { value } = readValue(valuePos, rawName);
+        const lower = value.toLowerCase();
+        if (lower === 'true' || lower === 'false') {
+          clauses.push({
+            kind: 'file',
+            value: lower === 'true',
+            negated,
+            position: termPos,
+          });
+          continue;
+        }
+        const mimes = resolveFileFilterMimes(lower);
+        if (mimes !== null) {
+          clauses.push({
+            kind: 'fileMime',
+            mimes,
+            raw: lower,
+            negated,
+            position: termPos,
+          });
+          continue;
+        }
+        throw new SearchQueryParseError(
+          'INVALID_VALUE',
+          valuePos,
+          `Invalid value "${value}" for operator "file" at position ${valuePos}; expected true, false, or an allowed file extension/MIME (e.g. pdf, epub, md, txt, png, mp4, mp3)`,
+          'file',
+        );
       }
 
       if (opKey === 'favorite') {

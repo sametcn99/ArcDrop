@@ -16,7 +16,7 @@ describe('compileSearchQuery', () => {
     expect(compiled!.sql).toContain("COALESCE(b.title, '') ILIKE :sq0");
     expect(compiled!.sql).toContain("COALESCE(b.excerpt, '') ILIKE :sq0");
     expect(compiled!.sql).toContain("COALESCE(b.note, '') ILIKE :sq0");
-    expect(compiled!.sql).toContain('b.url ILIKE :sq0');
+    expect(compiled!.sql).toContain("COALESCE(b.url, '') ILIKE :sq0");
     expect(compiled!.sql).toContain('t.name_lower ILIKE :sq0');
   });
 
@@ -49,15 +49,15 @@ describe('compileSearchQuery', () => {
     expect(compiled!.sql).not.toContain(' OR (EXISTS');
   });
 
-  it('compiles field, tag, type, cache.status, favorite, notag, broken, reminder, and date operators', () => {
+  it('compiles field, tag, type, file, cache.status, favorite, notag, broken, reminder, and date operators', () => {
     const compiled = compileSearchQuery(
       parseSearchQuery(
-        'note:"key idea" link:docs.rs #Reading -favorite:true notag:false broken:true -broken:false reminder:true -reminder:false cache.status:ready -cache.status:failed created:2025-05 lastUpdate:<=2025-06-01',
+        'note:"key idea" link:docs.rs #Reading -favorite:true notag:false broken:true -broken:false reminder:true -reminder:false file:true -file:pdf cache.status:ready -cache.status:failed created:2025-05 lastUpdate:<=2025-06-01',
       ),
     );
     expect(compiled).not.toBeNull();
     expect(compiled!.sql).toContain("COALESCE(b.note, '') ILIKE :sq0");
-    expect(compiled!.sql).toContain('b.url ILIKE :sq1');
+    expect(compiled!.sql).toContain("COALESCE(b.url, '') ILIKE :sq1");
     expect(compiled!.sql).toContain('t.name_lower = :sq2');
     expect(compiled!.sql).toContain('b.favorite = :sq3');
     expect(compiled!.sql).toContain(
@@ -65,20 +65,25 @@ describe('compileSearchQuery', () => {
     );
     expect(compiled!.sql).toContain('(b.brokenAt IS NOT NULL)');
     expect(compiled!.sql).toContain('(b.reminderAt IS NOT NULL)');
-    expect(compiled!.sql).toContain('(b.cacheStatus = :sq4)');
-    expect(compiled!.sql).toContain('(b.cacheStatus != :sq5)');
-    expect(compiled!.sql).toContain('(b.createdAt >= :sq6 AND b.createdAt < :sq7)');
-    expect(compiled!.sql).toContain('b.updatedAt < :sq8');
+    expect(compiled!.sql).toContain("(b.storageKind = 'file')");
+    expect(compiled!.sql).toContain(
+      "(NOT (b.storageKind = 'file' AND COALESCE(b.fileMime, '') IN (:...sq4)))",
+    );
+    expect(compiled!.sql).toContain('(b.cacheStatus = :sq5)');
+    expect(compiled!.sql).toContain('(b.cacheStatus != :sq6)');
+    expect(compiled!.sql).toContain('(b.createdAt >= :sq7 AND b.createdAt < :sq8)');
+    expect(compiled!.sql).toContain('b.updatedAt < :sq9');
     expect(compiled!.params).toEqual({
       sq0: '%key idea%',
       sq1: '%docs.rs%',
       sq2: 'reading',
       sq3: false,
-      sq4: 'ready',
-      sq5: 'failed',
-      sq6: new Date('2025-05-01T00:00:00.000Z'),
-      sq7: new Date('2025-06-01T00:00:00.000Z'),
-      sq8: new Date('2025-06-02T00:00:00.000Z'),
+      sq4: ['application/pdf'],
+      sq5: 'ready',
+      sq6: 'failed',
+      sq7: new Date('2025-05-01T00:00:00.000Z'),
+      sq8: new Date('2025-06-01T00:00:00.000Z'),
+      sq9: new Date('2025-06-02T00:00:00.000Z'),
     });
   });
 
@@ -140,6 +145,7 @@ describe('compileSearchQuery', () => {
     expect(compiled.params.sq6).toBe('go');
     expect(compiled.params.sq7).toBe('go:*');
     expect(compiled.sql).toContain("COALESCE(b2.archive_text, '') ILIKE :sq5");
+    expect(compiled.sql).toContain("COALESCE(b3.url, '') ILIKE :sq5");
     expect(compiled.sql).toContain('h.text ILIKE :sq5');
 
     // Negation wraps the UNION subquery cleanly

@@ -4,16 +4,18 @@ import { In, type Repository } from 'typeorm';
 import { Setting } from '@api/database/entities/setting.entity';
 import {
   DEFAULT_ARCHIVE_MAX_BYTES,
+  DEFAULT_FILE_MAX_BYTES,
+  DEFAULT_MONTHLY_UPLOAD_QUOTA_BYTES,
   type SettingsDto,
   type UpdateSettingsDto,
 } from './settings.dto';
 
 /**
- * Runtime instance settings (plan D16; extended M12, M17): DB-backed key/value
+ * Runtime instance settings (plan D16; extended M12, M17, M18): DB-backed key/value
  * rows merged over these defaults, so an admin can flip the registration toggle,
- * retention knobs, broken-link mode, or archive size cap at runtime — no
- * container recreate, no restart. Secrets and infrastructure (JWT secret, DB URL)
- * deliberately stay env-only.
+ * retention knobs, broken-link mode, archive cap, or file upload limits at
+ * runtime — no container recreate, no restart. Secrets and infrastructure
+ * (JWT secret, DB URL) deliberately stay env-only.
  */
 const DEFAULTS: SettingsDto = {
   registrationOpen: false,
@@ -21,6 +23,8 @@ const DEFAULTS: SettingsDto = {
   changeLogRetentionDays: 90,
   brokenLinkCheckMode: 'default',
   archiveMaxBytes: DEFAULT_ARCHIVE_MAX_BYTES,
+  fileMaxBytes: DEFAULT_FILE_MAX_BYTES,
+  monthlyUploadQuotaBytes: DEFAULT_MONTHLY_UPLOAD_QUOTA_BYTES,
 };
 
 export type SettingsKey = keyof SettingsDto;
@@ -31,6 +35,8 @@ const KNOWN_KEYS: SettingsKey[] = [
   'changeLogRetentionDays',
   'brokenLinkCheckMode',
   'archiveMaxBytes',
+  'fileMaxBytes',
+  'monthlyUploadQuotaBytes',
 ];
 
 @Injectable()
@@ -58,7 +64,7 @@ export class SettingsService {
     return this.getAll();
   }
 
-  /** Typed read for internal consumers (e.g. the registration gate, broken links, archiving). */
+  /** Typed read for internal consumers (e.g. registration gate, broken links, archiving, uploads). */
   async get<K extends SettingsKey>(key: K): Promise<SettingsDto[K]> {
     const all = await this.getAll();
     return all[key];

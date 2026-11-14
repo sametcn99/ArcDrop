@@ -5,6 +5,7 @@ import { AuthModule } from '@api/auth/auth.module';
 import { OneTimeToken } from '@api/database/entities/one-time-token.entity';
 import { RefreshToken } from '@api/database/entities/refresh-token.entity';
 import { User } from '@api/database/entities/user.entity';
+import { FilesModule } from '@api/files/files.module';
 import { MetadataModule } from '@api/metadata/metadata.module';
 import { AccountLifecycleService } from './account-lifecycle.service';
 import { AdminUsersController } from './admin-users.controller';
@@ -21,6 +22,7 @@ import { UsersService } from './users.service';
     TypeOrmModule.forFeature([User, OneTimeToken, RefreshToken]),
     AuthModule,
     AuditModule,
+    FilesModule,
     MetadataModule,
   ],
   controllers: [AdminUsersController, MeLifecycleController],

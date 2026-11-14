@@ -13,8 +13,8 @@ import { SsrfSafeFetchService } from '@api/metadata/ssrf-fetch.service';
 import { SettingsService } from '@api/settings/settings.service';
 
 /**
- * Metadata & archive backfill (ticket M6, extended M17) — one-shot CLI for
- * bookmarks created BEFORE M6/M17 (coverRef/iconRef/title/excerpt still null
+ * Metadata & archive backfill (ticket M6, extended M17/M18) — one-shot CLI for
+ * active URL bookmarks created BEFORE M6/M17 (coverRef/iconRef/title/excerpt still null
  * or `cacheStatus = 'pending'`). Runs the SAME pipeline
  * (`MetadataFetchService.enrich`, `fill` mode: only null fields are filled,
  * SSRF rules fully enforced) over active bookmarks in stable id order.
@@ -97,6 +97,8 @@ async function main(): Promise<void> {
         .createQueryBuilder('b')
         .where('b.id > :cursorId', { cursorId })
         .andWhere('b.deletedAt IS NULL')
+        .andWhere("b.storageKind = 'url'")
+        .andWhere('b.url IS NOT NULL')
         .andWhere(
           "(b.coverRef IS NULL OR b.iconRef IS NULL OR b.title IS NULL OR b.excerpt IS NULL OR b.cacheStatus = 'pending')",
         );
@@ -107,6 +109,7 @@ async function main(): Promise<void> {
 
       for (const row of rows) {
         cursorId = row.id;
+        if (!row.url) continue;
         scanned++;
         const outcome = await metadata.enrich(row.userId, row.id, row.url, 'fill');
         tally[outcome]++;

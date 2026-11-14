@@ -4,15 +4,15 @@ import type { ParsedSearchQuery, SearchClause } from './search-query.parser';
 export type TextFieldSqlBuilder = (paramName: string) => string;
 
 /**
- * Field-model SQL registry (plan M11). Nullable text columns use `COALESCE`
+ * Field-model SQL registry (plan M11, M18). Nullable text columns use `COALESCE`
  * so SQL `NOT (...)` exclusions behave with standard two-valued boolean logic
- * when `title`, `excerpt`, or `note` is `NULL`.
+ * when `title`, `excerpt`, `note`, or `url` (file bookmarks) is `NULL`.
  */
 export const DEFAULT_TEXT_FIELD_BUILDERS: Readonly<Record<string, TextFieldSqlBuilder>> = {
   title: (param) => `COALESCE(b.title, '') ILIKE :${param}`,
   excerpt: (param) => `COALESCE(b.excerpt, '') ILIKE :${param}`,
   note: (param) => `COALESCE(b.note, '') ILIKE :${param}`,
-  url: (param) => `b.url ILIKE :${param}`,
+  url: (param) => `COALESCE(b.url, '') ILIKE :${param}`,
   tags: (param) =>
     `EXISTS (SELECT 1 FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id WHERE bt.bookmark_id = b.id AND t.name_lower ILIKE :${param})`,
 };
@@ -230,7 +230,7 @@ function compileFtsTextClause(
 
   if (fields.has('url')) {
     unionBranches.push(
-      `SELECT b3.id FROM bookmarks b3 WHERE b3.user_id = :${ftsUserParam} AND b3.url ILIKE :${likeParam}`,
+      `SELECT b3.id FROM bookmarks b3 WHERE b3.user_id = :${ftsUserParam} AND COALESCE(b3.url, '') ILIKE :${likeParam}`,
     );
   }
 
@@ -310,6 +310,24 @@ function compileClause(
       return {
         negated: clause.negated,
         sql: clause.negated ? `b.cacheStatus != :${param}` : `b.cacheStatus = :${param}`,
+      };
+    }
+
+    case 'file': {
+      const wantFile = clause.negated ? !clause.value : clause.value;
+      return {
+        negated: clause.negated,
+        sql: wantFile ? `b.storageKind = 'file'` : `b.storageKind = 'url'`,
+      };
+    }
+
+    case 'fileMime': {
+      const param = nextParam();
+      params[param] = [...clause.mimes];
+      const positiveSql = `b.storageKind = 'file' AND COALESCE(b.fileMime, '') IN (:...${param})`;
+      return {
+        negated: clause.negated,
+        sql: clause.negated ? `NOT (${positiveSql})` : positiveSql,
       };
     }
 

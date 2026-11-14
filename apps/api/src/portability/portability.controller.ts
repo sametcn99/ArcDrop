@@ -38,10 +38,11 @@ const EXPORT_MEDIA: Record<ExportDataDto['format'], { contentType: string; exten
 };
 
 /**
- * Portability surface (plan M8): `POST /data/export` streams the library
- * out, `POST /data/import` ingests a multipart upload with a URL-keyed
- * upsert summary. The per-bookmark highlights export lives on the
- * bookmarks controller (it is a /bookmarks/{id} resource route).
+ * Portability surface (plan M8, M18): `POST /data/export` streams the library
+ * out (or builds a ZIP archive with `includeFiles=true`), `POST /data/import`
+ * ingests a multipart upload with a URL-keyed upsert summary. The per-bookmark
+ * highlights export lives on the bookmarks controller (it is a /bookmarks/{id}
+ * resource route).
  */
 @ApiTags('Portability')
 @ApiBearerAuth()
@@ -53,18 +54,21 @@ export class PortabilityController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     operationId: 'exportData',
-    summary: 'Export the caller’s library (streaming download)',
+    summary: 'Export the caller’s library (streaming download or ZIP with uploaded files)',
     description:
       'Formats: json (full fidelity — bookmarks, tags, collections, highlights ' +
       'contract section, notes; identities travel as tag names + collection paths), ' +
       'csv (lossy), html (Netscape bookmark file, lossy), txt (one URL per line). ' +
+      'When `includeFiles=true` (M18), returns an `application/zip` archive containing ' +
+      '`export.<format>`, `manifest.json` (with SHA-256 digests), and every active uploaded ' +
+      'file under `files/<bookmarkId>-<fileName>`. ' +
       'The ACTIVE library only — the trash is not exported (plan D17). ' +
       'Optional collectionId scopes the export to that collection’s subtree.',
   })
-  @ApiProduces('application/json', 'text/csv', 'text/html', 'text/plain')
+  @ApiProduces('application/json', 'text/csv', 'text/html', 'text/plain', 'application/zip')
   @ApiOkResponse({
     schema: { type: 'string', format: 'binary' },
-    description: 'The export document as a file download',
+    description: 'The export document (or ZIP bundle when includeFiles=true) as a file download',
   })
   async exportData(
     @CurrentUser() user: RequestUser,
@@ -76,8 +80,21 @@ export class PortabilityController {
       user.id,
       dto.collectionId,
     );
-    const media = EXPORT_MEDIA[dto.format];
 
+    if (dto.includeFiles === true) {
+      const { zipBuffer } = await this.portability.exportZipBundle(
+        user,
+        dto.format,
+        dto.collectionId,
+        scope,
+      );
+      return new StreamableFile(zipBuffer, {
+        type: 'application/zip',
+        disposition: 'attachment; filename="arcdrop-export.zip"',
+      });
+    }
+
+    const media = EXPORT_MEDIA[dto.format];
     const stream = Readable.from(this.portability.exportChunks(user, dto.format, scope));
     return new StreamableFile(stream, {
       type: media.contentType,

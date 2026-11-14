@@ -24,6 +24,12 @@ export interface ProblemDetails {
   challenge?: string;
   /** ISO-8601 expiry timestamp for `challenge` (present when `code === 'TOTP_REQUIRED'`). */
   expiresAt?: string;
+  /** Configured byte cap when a 413 file-size or quota check triggers (M18). */
+  limitBytes?: number;
+  /** Bytes already used in the active quota window (M18). */
+  usedBytes?: number;
+  /** ISO-8601 timestamp when the monthly upload quota resets (M18). */
+  resetAt?: string;
 }
 
 interface StatusProblem {

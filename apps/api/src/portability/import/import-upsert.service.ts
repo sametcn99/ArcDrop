@@ -504,7 +504,7 @@ export class ImportUpsertService {
     }
   }
 
-  // -- post-import enrichment --------------------------------------------------
+  // -- post-import enrichment ------------------------------------------------
 
   /**
    * Fills still-null metadata for CREATED bookmarks with bounded
@@ -520,7 +520,7 @@ export class ImportUpsertService {
         const id = ids[cursor++]!;
         try {
           const row = await this.dataSource.manager.findOneBy(Bookmark, { id, userId });
-          if (row === null) continue; // purged mid-import — nothing to fill
+          if (row === null || row.storageKind !== 'url' || row.url === null) continue;
           await this.metadata.enrich(userId, id, row.url, 'fill');
         } catch {
           // Fire-and-forget by contract (M6): a dropped pool connection or a
@@ -531,7 +531,7 @@ export class ImportUpsertService {
     await Promise.all(workers);
   }
 
-  // -- summary shaping ---------------------------------------------------------
+  // -- summary shaping -------------------------------------------------------
 
   /** Caps `skipped`/`errors` so a hostile upload cannot return megabytes of reasons. */
   private capSummaryNotes(summary: ImportSummaryDto): void {

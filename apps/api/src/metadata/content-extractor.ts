@@ -1,6 +1,8 @@
 import { Readability } from '@mozilla/readability';
+import { posix as posixPath } from 'node:path';
 import { parseHTML } from 'linkedom';
 import { extractText, getDocumentProxy } from 'unpdf';
+import { readZipEntries } from '@api/portability/import/zip-reader';
 
 /**
  * Cap for plain text persisted in PostgreSQL `bookmarks.archive_text` (FTS
@@ -12,6 +14,7 @@ import { extractText, getDocumentProxy } from 'unpdf';
 export const MAX_ARCHIVE_TEXT_CHARS = 500_000;
 
 export const PDF_CONTENT_TYPE = 'application/pdf';
+export const EPUB_CONTENT_TYPE = 'application/epub+zip';
 export const PLAIN_TEXT_CONTENT_TYPES = new Set(['text/plain', 'text/markdown', 'text/x-markdown']);
 
 export interface ExtractedContent {
@@ -384,7 +387,7 @@ export async function extractPdfContent(bytes: Uint8Array): Promise<ExtractedCon
   }
 }
 
-/** Extracts plain-text documents (shared foundation for `text/plain` & M18 uploads). */
+/** Extracts plain-text / Markdown documents (shared foundation for `text/plain`, `text/markdown`, M18 uploads). */
 export function extractPlainTextContent(rawText: string): ExtractedContent | null {
   const normalized = rawText.replaceAll('\u0000', '').replace(/\r\n?/g, '\n').trim();
   if (normalized === '') return null;
@@ -398,6 +401,128 @@ export function extractPlainTextContent(rawText: string): ExtractedContent | nul
     dbTextContent,
     truncated: dbTextContent.length < normalized.length,
   };
+}
+
+/**
+ * Extracts title, description, sanitized HTML chapters, and plain text from an
+ * EPUB archive (`application/epub+zip`, plan M18 / D19). Reuses the in-tree
+ * classic-ZIP reader + `linkedom` so zero new dependencies are introduced.
+ *
+ * Reading order comes from `META-INF/container.xml` → OPF `<manifest>` +
+ * `<spine>` when available, falling back to lexicographically sorted
+ * `.xhtml`/`.html` entries inside the archive.
+ */
+export function extractEpubContent(bytes: Uint8Array): ExtractedContent | null {
+  if (bytes.byteLength === 0) return null;
+
+  const entries = readZipEntries(Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes));
+  const byName = new Map<string, Buffer>();
+  for (const entry of entries) {
+    byName.set(normalizeEpubPath(entry.name), entry.bytes);
+  }
+
+  let title: string | null = null;
+  let excerpt: string | null = null;
+  const chapterPaths: string[] = [];
+
+  const containerBytes = byName.get('META-INF/container.xml');
+  if (containerBytes) {
+    const containerXml = containerBytes.toString('utf8');
+    const opfPathMatch = /full-path\s*=\s*["']([^"']+)["']/i.exec(containerXml);
+    const opfPath = opfPathMatch ? normalizeEpubPath(opfPathMatch[1]!) : null;
+    const opfBytes = opfPath ? byName.get(opfPath) : undefined;
+    if (opfPath && opfBytes) {
+      const opfXml = opfBytes.toString('utf8');
+      const opfDir = posixPath.dirname(opfPath);
+      const doc = (parseHTML(opfXml) as unknown as { document: DomDocumentLike }).document;
+
+      const titleEl = doc.querySelector('dc\\:title, title');
+      title = cleanOptionalText(titleEl?.textContent);
+      const descEl = doc.querySelector('dc\\:description, description');
+      excerpt = cleanOptionalText(descEl?.textContent);
+
+      const manifestById = new Map<string, { href: string; mediaType: string }>();
+      for (const item of Array.from(doc.querySelectorAll('item'))) {
+        const id = item.getAttribute('id');
+        const href = item.getAttribute('href');
+        const mediaType = (item.getAttribute('media-type') ?? '').toLowerCase();
+        if (id && href) {
+          manifestById.set(id, { href: decodeUriSafe(href), mediaType });
+        }
+      }
+
+      for (const ref of Array.from(doc.querySelectorAll('itemref'))) {
+        const idref = ref.getAttribute('idref');
+        if (!idref) continue;
+        const manifestItem = manifestById.get(idref);
+        if (!manifestItem) continue;
+        if (
+          manifestItem.mediaType &&
+          !manifestItem.mediaType.includes('html') &&
+          !manifestItem.mediaType.includes('xml')
+        ) {
+          continue;
+        }
+        const resolved = normalizeEpubPath(
+          opfDir === '.' ? manifestItem.href : posixPath.join(opfDir, manifestItem.href),
+        );
+        if (byName.has(resolved)) {
+          chapterPaths.push(resolved);
+        }
+      }
+    }
+  }
+
+  if (chapterPaths.length === 0) {
+    for (const name of [...byName.keys()].sort()) {
+      if (/\.(xhtml|html|htm)$/i.test(name)) {
+        chapterPaths.push(name);
+      }
+    }
+  }
+
+  const htmlSections: string[] = [];
+  const textSections: string[] = [];
+
+  for (const chapterPath of chapterPaths) {
+    const raw = byName.get(chapterPath)?.toString('utf8');
+    if (!raw) continue;
+    const sanitized = sanitizeExtractedHtml(raw);
+    const text = extractBlockTextFromHtml(sanitized || raw);
+    if (text !== '') {
+      textSections.push(text);
+      if (sanitized !== '') {
+        htmlSections.push(`<section>${sanitized}</section>`);
+      } else {
+        htmlSections.push(`<section><p>${escapeHtml(text)}</p></section>`);
+      }
+    }
+  }
+
+  const combinedText = textSections.join('\n').trim();
+  if (combinedText === '') return null;
+
+  const dbTextContent = truncateForDb(combinedText);
+  return {
+    title,
+    excerpt,
+    htmlContent: `<article>${htmlSections.join('\n')}</article>`,
+    textContent: combinedText,
+    dbTextContent,
+    truncated: dbTextContent.length < combinedText.length,
+  };
+}
+
+function normalizeEpubPath(raw: string): string {
+  return posixPath.normalize(raw.replaceAll('\\', '/')).replace(/^\/+/, '');
+}
+
+function decodeUriSafe(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
 }
 
 /**

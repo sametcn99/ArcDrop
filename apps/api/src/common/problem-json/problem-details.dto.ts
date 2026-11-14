@@ -44,6 +44,22 @@ export class ProblemDetailsDto {
     description: 'Challenge expiry timestamp (present when `code === "TOTP_REQUIRED"`)',
   })
   expiresAt?: string;
+
+  @ApiPropertyOptional({
+    description: 'Configured byte limit when a 413 file-size or monthly quota check triggers (M18)',
+  })
+  limitBytes?: number;
+
+  @ApiPropertyOptional({
+    description: 'Bytes already used in the active upload quota month (M18)',
+  })
+  usedBytes?: number;
+
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description: 'UTC ISO-8601 timestamp when the monthly upload quota resets (M18)',
+  })
+  resetAt?: string;
 }
 
 interface ProblemSpec {
@@ -115,7 +131,8 @@ const PROBLEM_SPECS: Readonly<Record<string, ProblemSpec>> = {
     },
   },
   '413': {
-    description: 'Request payload exceeds configured size limit (`application/problem+json`)',
+    description:
+      'Request payload exceeds configured size limit or monthly upload quota (`application/problem+json`)',
     example: {
       type: problemTypeUri(problemForStatus(413).code),
       title: 'Payload Too Large',
@@ -123,6 +140,18 @@ const PROBLEM_SPECS: Readonly<Record<string, ProblemSpec>> = {
       code: 'PAYLOAD_TOO_LARGE',
       detail: 'JSON request body exceeds the configured size limit',
       instance: '/api/v1/bookmarks',
+      requestId: '8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b',
+    },
+  },
+  '415': {
+    description: 'Uploaded file MIME type is not on the allowlist (`application/problem+json`)',
+    example: {
+      type: problemTypeUri(problemForStatus(415).code),
+      title: 'Unsupported Media Type',
+      status: 415,
+      code: 'UNSUPPORTED_MEDIA_TYPE',
+      detail: 'Unsupported file type',
+      instance: '/api/v1/bookmarks/file',
       requestId: '8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b',
     },
   },
@@ -245,6 +274,10 @@ export function enrichOpenApiWithProblemResponses(document: OpenAPIObject): Open
         (path.includes('/audit') || path.includes('/bookmarks') || path.includes('/sync/changes'))
       ) {
         attachIfMissing('400');
+      }
+
+      if (path.endsWith('/bookmarks/file') && method === 'post') {
+        attachIfMissing('415');
       }
 
       if (isBearerSecured) {

@@ -8,8 +8,17 @@ import {
 } from 'typeorm';
 
 /**
+ * Storage kind for a bookmark (plan M18 / D19, Raindrop parity G17):
+ * - `url`: web link with non-null `url` and derived `urlParts` (default)
+ * - `file`: uploaded file stored on the API data volume (`url` & `urlParts` are null)
+ */
+export const STORAGE_KINDS = ['url', 'file'] as const;
+
+export type StorageKind = (typeof STORAGE_KINDS)[number];
+
+/**
  * Detected/classified content type for a bookmark (plan M10, Raindrop parity G7).
- * Defaults to `'link'` until classified by the M6/M10 metadata pipeline.
+ * Defaults to `'link'` until classified by the M6/M10 metadata pipeline or M18 MIME mapping.
  */
 export const CONTENT_TYPES = [
   'article',
@@ -53,11 +62,13 @@ export interface UrlParts {
 
 /**
  * A user's bookmark (plan M3, D12/D13; enriched M10; library health M12;
- * reminders M14; archive & FTS M17).
+ * reminders M14; archive & FTS M17; file uploads M18).
  *
- * - `url` is stored VERBATIM — never rewritten, never client-writable derived
- *   columns. The `urlParts` columns are derived on every url write via
- *   WHATWG URL parsing + `tldts` registrable-domain lookup (D12).
+ * - For `storageKind = 'url'`, `url` is stored VERBATIM — never rewritten, never
+ *   client-writable derived columns. The `urlParts` columns are derived on every
+ *   url write via WHATWG URL parsing + `tldts` registrable-domain lookup (D12).
+ * - For `storageKind = 'file'`, `url` and all `urlParts` columns are SQL NULL,
+ *   and `fileRef`, `fileName`, `fileMime`, `fileSize` hold the uploaded file record.
  * - NO unique index on `(userId, url)` — duplicates are allowed by design
  *   (D13): saving the same URL twice creates two bookmarks.
  * - Trash is a soft delete (`deletedAt`); a scheduled job hard-deletes rows
@@ -73,6 +84,7 @@ export interface UrlParts {
 @Index('IX_bookmarks_reminder_due', ['reminderAt', 'remindedAt', 'deletedAt'])
 @Index('IX_bookmarks_user_cache_status', ['userId', 'cacheStatus'])
 @Index('IX_bookmarks_cache_retry', ['cacheStatus', 'cacheNextRetryAt', 'deletedAt'])
+@Index('IX_bookmarks_user_storage_kind', ['userId', 'storageKind'])
 export class Bookmark {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -80,9 +92,19 @@ export class Bookmark {
   @Column({ type: 'uuid', name: 'user_id' })
   userId!: string;
 
-  /** The full URL, stored exactly as the client sent it (D12). */
-  @Column({ type: 'text' })
-  url!: string;
+  /** Whether this bookmark is a URL link (`url`) or an uploaded file (`file`) (M18). */
+  @Column({
+    type: 'enum',
+    enum: STORAGE_KINDS,
+    enumName: 'bookmark_storage_kind',
+    name: 'storage_kind',
+    default: 'url',
+  })
+  storageKind!: StorageKind;
+
+  /** The full URL, stored verbatim (D12). Null for `storageKind = 'file'`. */
+  @Column({ type: 'text', nullable: true })
+  url!: string | null;
 
   @Column({ type: 'text', nullable: true })
   title!: string | null;
@@ -97,7 +119,7 @@ export class Bookmark {
   @Column({ type: 'boolean', default: false })
   favorite!: boolean;
 
-  /** Classified content type (M10, Raindrop parity G7). */
+  /** Classified content type (M10, Raindrop parity G7; mapped from MIME on file uploads M18). */
   @Column({
     type: 'enum',
     enum: CONTENT_TYPES,
@@ -115,19 +137,37 @@ export class Bookmark {
   @Column({ type: 'text', name: 'icon_ref', nullable: true })
   iconRef!: string | null;
 
-  // -- Derived URL parts (D12) — recomputed on every url write -------------
+  // -- Uploaded file metadata (M18 / D19 / G17) ----------------------------
 
-  @Column({ type: 'text' })
-  scheme!: string;
+  /** Unguessable filename under `ARCDROP__DATA_DIR/files/`; null for `url` bookmarks. */
+  @Column({ type: 'text', name: 'file_ref', nullable: true })
+  fileRef!: string | null;
+
+  /** Original client filename for `Content-Disposition` and ZIP export; null for `url` bookmarks. */
+  @Column({ type: 'text', name: 'file_name', nullable: true })
+  fileName!: string | null;
+
+  /** Validated MIME type from the M18 allowlist; null for `url` bookmarks. */
+  @Column({ type: 'text', name: 'file_mime', nullable: true })
+  fileMime!: string | null;
+
+  /** Uploaded byte count stored as Postgres `bigint`; null for `url` bookmarks. */
+  @Column({ type: 'bigint', name: 'file_size', nullable: true })
+  fileSize!: string | null;
+
+  // -- Derived URL parts (D12) — recomputed on every url write; null for file items --
+
+  @Column({ type: 'text', nullable: true })
+  scheme!: string | null;
 
   /** Hostname without port (the port lives in its own column). */
-  @Column({ type: 'text' })
-  host!: string;
+  @Column({ type: 'text', nullable: true })
+  host!: string | null;
 
   /**
    * Registrable domain per the Public Suffix List (`tldts`), lowercased —
-   * `www.example.co.uk` → `example.co.uk`. `null` for IP hosts and
-   * single-label hostnames without a known suffix.
+   * `www.example.co.uk` → `example.co.uk`. `null` for IP hosts, single-label
+   * hostnames without a known suffix, and `file` bookmarks.
    */
   @Column({ type: 'text', nullable: true })
   domain!: string | null;
@@ -136,9 +176,9 @@ export class Bookmark {
   @Column({ type: 'text', nullable: true })
   port!: string | null;
 
-  /** Always present (WHATWG URL): `''` only for non-hierarchical schemes. */
-  @Column({ type: 'text' })
-  path!: string;
+  /** Always present for URLs (`''` only for non-hierarchical schemes); `null` for file items. */
+  @Column({ type: 'text', nullable: true })
+  path!: string | null;
 
   /** Query WITHOUT the leading `?`; `null` when the url has none. */
   @Column({ type: 'text', nullable: true })
@@ -193,7 +233,7 @@ export class Bookmark {
   @Column({ type: 'text', name: 'cache_error', nullable: true, select: false })
   cacheError!: string | null;
 
-  /** Truncated plain text extracted from HTML/PDF archive (FTS source). */
+  /** Truncated plain text extracted from HTML/PDF/EPUB/text archive (FTS source). */
   @Column({ type: 'text', name: 'archive_text', nullable: true, select: false })
   archiveText!: string | null;
 

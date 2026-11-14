@@ -393,20 +393,39 @@ describe('SearchQueryParser', () => {
     });
   });
 
-  it('rejects reserved-but-inactive operators with "operator not available yet"', () => {
-    for (const op of ['file:true', 'file:']) {
-      const name = op.replace(/^-/, '').split(':')[0]!.toLowerCase();
-      expectParseError(op, {
-        code: 'RESERVED_OPERATOR',
-        operator: name,
-        messageIncludes: 'operator not available yet',
-      });
-    }
-    expectParseError('rust file:pdf', {
-      code: 'RESERVED_OPERATOR',
+  it('parses file:true|false|<ext|mime|category> and negations (M18 activation)', () => {
+    const parsed = parseSearchQuery(
+      'file:true -file:false file:PDF file:image -file:text/markdown',
+    );
+    expect(parsed.clauses).toEqual([
+      { kind: 'file', value: true, negated: false, position: 0 },
+      { kind: 'file', value: false, negated: true, position: 10 },
+      { kind: 'fileMime', mimes: ['application/pdf'], raw: 'pdf', negated: false, position: 22 },
+      {
+        kind: 'fileMime',
+        mimes: ['image/jpeg', 'image/gif', 'image/png', 'image/webp', 'image/heic'],
+        raw: 'image',
+        negated: false,
+        position: 31,
+      },
+      {
+        kind: 'fileMime',
+        mimes: ['text/markdown'],
+        raw: 'text/markdown',
+        negated: true,
+        position: 42,
+      },
+    ]);
+
+    expectParseError('file:', {
+      code: 'MISSING_VALUE',
       position: 5,
       operator: 'file',
-      messageIncludes: 'operator not available yet',
+    });
+    expectParseError('file:exe', {
+      code: 'INVALID_VALUE',
+      position: 5,
+      operator: 'file',
     });
   });
 

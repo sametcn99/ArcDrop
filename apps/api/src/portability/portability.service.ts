@@ -4,13 +4,16 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { IsNull } from 'typeorm';
-import type { ContentType } from '@api/database/entities/bookmark.entity';
+import type { ContentType, StorageKind } from '@api/database/entities/bookmark.entity';
 import { Collection } from '@api/database/entities/collection.entity';
 import { queryRows } from '@api/database/query-rows';
 import { BookmarksService } from '@api/bookmarks/bookmarks.service';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
+import { FileStorageService } from '@api/files/file-storage.service';
+import { sanitizeFileName } from '@api/files/file-types';
 import type { DataSource } from 'typeorm';
 import type { ExportBookmark, ExportCollection } from './export/export-document';
 import {
@@ -24,6 +27,7 @@ import {
   renderHighlightsTxt,
   type ExportHighlight,
 } from './export/export-highlights';
+import { createZipBuffer, type ZipWriteEntry } from './export/zip-writer';
 import { emptyParsedImport, type ParsedImport } from './import/import-model';
 import {
   detectJsonDialect,
@@ -39,6 +43,8 @@ import { ImportSummaryDto } from './portability.dto';
 
 /** Keyset page size while streaming bookmarks out of the database. */
 const EXPORT_BATCH = 500;
+
+export const ARCDROP_BUNDLE_FORMAT = 'arcdrop/export-bundle/v1';
 
 export interface ExportScope {
   collectionId: string;
@@ -59,14 +65,35 @@ export interface HighlightsDownload {
   filename: string;
 }
 
+export interface ExportBundleManifestFile {
+  bookmarkId: string;
+  title: string | null;
+  fileName: string;
+  fileMime: string;
+  fileSize: number;
+  archivePath: string;
+  sha256: string;
+}
+
+export interface ExportBundleManifest {
+  format: typeof ARCDROP_BUNDLE_FORMAT;
+  exportedAt: string;
+  exportFormat: 'json' | 'csv' | 'html' | 'txt';
+  scope: { collectionId: string; collectionPath: string[] } | null;
+  fileCount: number;
+  files: ExportBundleManifestFile[];
+}
+
 /**
- * Portability (plan M8, M10): data in and out, user-scoped.
+ * Portability (plan M8, M10, M18): data in and out, user-scoped.
  *
  * - Export streams in batches (keyset pagination on bookmark id) for
  *   json/csv/txt; HTML buffers the rows it needs for the folder tree
- *   (personal-scale libraries — documented in the README). Every export
- *   covers the ACTIVE library only (the trash auto-purges per D17 and is
- *   not portable data), and identities travel as tag NAMES + collection
+ *   (personal-scale libraries — documented in the README). When
+ *   `includeFiles=true`, produces a ZIP bundle containing `export.<format>`,
+ *   `manifest.json`, and every active uploaded file (`files/<bookmarkId>-<name>`).
+ *   Every export covers the ACTIVE library only (the trash auto-purges per D17
+ *   and is not portable data), and identities travel as tag NAMES + collection
  *   PATHS so another instance can re-link them.
  * - Import acquires the per-user lock (ONE concurrent import; a second is
  *   a 409), parses with pure functions (per-item reasons), and upserts
@@ -81,9 +108,10 @@ export class PortabilityService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly bookmarksService: BookmarksService,
     private readonly upsert: ImportUpsertService,
+    private readonly fileStorage: FileStorageService,
   ) {}
 
-  // -- export -------------------------------------------------------------------
+  // -- export -----------------------------------------------------------------
 
   /**
    * Resolves the export scope. Unknown or TRASHED scope collections are
@@ -157,6 +185,7 @@ export class PortabilityService {
     format: 'json' | 'csv' | 'html' | 'txt',
     scope: ExportScope | null,
     exportedAt: string = new Date().toISOString(),
+    archivePathByBookmarkId?: ReadonlyMap<string, string>,
   ): AsyncGenerator<string> {
     const { entries: collections, pathsById } = await this.exportCollections(user.id, scope);
     const tagNames = await this.exportTagNames(user.id, scope);
@@ -166,7 +195,7 @@ export class PortabilityService {
       let first = true;
       for await (const batch of this.exportBookmarkBatches(user, scope)) {
         for (const entry of batch) {
-          const bookmark = this.toExportBookmark(entry, pathsById);
+          const bookmark = this.toExportBookmark(entry, pathsById, archivePathByBookmarkId);
           yield (first ? '' : ',') + JSON.stringify(bookmark);
           first = false;
         }
@@ -179,7 +208,7 @@ export class PortabilityService {
       yield 'url,title,excerpt,note,tags,collections,createdAt,updatedAt\r\n';
       for await (const batch of this.exportBookmarkBatches(user, scope)) {
         for (const entry of batch) {
-          yield csvRowOf(this.toExportBookmark(entry, pathsById)) + '\r\n';
+          yield csvRowOf(this.toExportBookmark(entry, pathsById, archivePathByBookmarkId)) + '\r\n';
         }
       }
       return;
@@ -187,7 +216,11 @@ export class PortabilityService {
 
     if (format === 'txt') {
       for await (const batch of this.exportBookmarkBatches(user, scope)) {
-        for (const entry of batch) yield `${String(entry.row['url'])}\n`;
+        for (const entry of batch) {
+          if (entry.row['url'] !== null) {
+            yield `${String(entry.row['url'])}\n`;
+          }
+        }
       }
       return;
     }
@@ -196,7 +229,9 @@ export class PortabilityService {
     // rows are buffered (personal-scale — documented in the README).
     const all: ExportBookmark[] = [];
     for await (const batch of this.exportBookmarkBatches(user, scope)) {
-      for (const entry of batch) all.push(this.toExportBookmark(entry, pathsById));
+      for (const entry of batch) {
+        all.push(this.toExportBookmark(entry, pathsById, archivePathByBookmarkId));
+      }
     }
     yield* renderNetscapeDocument(htmlTreeOf(collections, all));
   }
@@ -212,6 +247,101 @@ export class PortabilityService {
     let body = '';
     for await (const chunk of this.exportChunks(user, format, scope, exportedAt)) body += chunk;
     return { exportedAt, body };
+  }
+
+  /**
+   * Builds a ZIP bundle (M18 / D19, Raindrop parity G17) containing:
+   * - `export.<format>`: the standard export document (with `file.archivePath`
+   *   populated on file bookmarks in JSON exports),
+   * - `manifest.json`: structured manifest with bookmark id, filename, MIME,
+   *   size, `archivePath`, and SHA-256 digest per file,
+   * - `files/<bookmarkId>-<sanitizedFileName>`: exact original uploaded bytes.
+   */
+  async exportZipBundle(
+    user: RequestUser,
+    format: 'json' | 'csv' | 'html' | 'txt',
+    collectionId: string | undefined,
+    preResolvedScope?: ExportScope | null,
+  ): Promise<{ exportedAt: string; zipBuffer: Buffer; manifest: ExportBundleManifest }> {
+    const scope =
+      preResolvedScope !== undefined
+        ? preResolvedScope
+        : await this.resolveScope(user.id, collectionId);
+    const exportedAt = new Date().toISOString();
+    const modifiedAt = new Date(exportedAt);
+
+    const fileEntries: ZipWriteEntry[] = [];
+    const manifestFiles: ExportBundleManifestFile[] = [];
+    const archivePathByBookmarkId = new Map<string, string>();
+
+    for await (const batch of this.exportBookmarkBatches(user, scope)) {
+      for (const entry of batch) {
+        const row = entry.row;
+        if (row['storage_kind'] !== 'file' || row['file_ref'] === null) continue;
+
+        const bookmarkId = String(row['id']);
+        const fileRef = String(row['file_ref']);
+        const fileName = sanitizeFileName(
+          row['file_name'] === null ? fileRef : String(row['file_name']),
+        );
+        const fileMime =
+          row['file_mime'] === null ? 'application/octet-stream' : String(row['file_mime']);
+        const fileSize = Number(row['file_size'] ?? 0);
+
+        const bytes = await this.fileStorage.readBuffer(fileRef);
+        if (bytes === null) continue;
+
+        const archivePath = `files/${bookmarkId}-${fileName}`;
+        const sha256 = createHash('sha256').update(bytes).digest('hex');
+
+        archivePathByBookmarkId.set(bookmarkId, archivePath);
+        fileEntries.push({ name: archivePath, bytes, modifiedAt });
+        manifestFiles.push({
+          bookmarkId,
+          title: row['title'] === null ? null : String(row['title']),
+          fileName,
+          fileMime,
+          fileSize,
+          archivePath,
+          sha256,
+        });
+      }
+    }
+
+    let documentBody = '';
+    for await (const chunk of this.exportChunks(
+      user,
+      format,
+      scope,
+      exportedAt,
+      archivePathByBookmarkId,
+    )) {
+      documentBody += chunk;
+    }
+
+    const manifest: ExportBundleManifest = {
+      format: ARCDROP_BUNDLE_FORMAT,
+      exportedAt,
+      exportFormat: format,
+      scope:
+        scope === null
+          ? null
+          : { collectionId: scope.collectionId, collectionPath: scope.collectionPath },
+      fileCount: manifestFiles.length,
+      files: manifestFiles,
+    };
+
+    const zipBuffer = createZipBuffer([
+      { name: `export.${format}`, bytes: Buffer.from(documentBody, 'utf8'), modifiedAt },
+      {
+        name: 'manifest.json',
+        bytes: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'),
+        modifiedAt,
+      },
+      ...fileEntries,
+    ]);
+
+    return { exportedAt, zipBuffer, manifest };
   }
 
   /**
@@ -416,14 +546,31 @@ export class PortabilityService {
       highlights: ExportHighlight[];
     },
     pathsById: ReadonlyMap<string, string[]>,
+    archivePathByBookmarkId?: ReadonlyMap<string, string>,
   ): ExportBookmark {
     const row = entry.row;
+    const bookmarkId = String(row['id']);
+    const storageKind: StorageKind = row['storage_kind'] === 'file' ? 'file' : 'url';
     const paths = entry.collectionIds
       .map((id) => pathsById.get(id))
       .filter((path): path is string[] => path !== undefined)
       .sort((a, b) => a.join('\u0000').localeCompare(b.join('\u0000')));
+
+    const archivePath = archivePathByBookmarkId?.get(bookmarkId);
+    const fileMeta =
+      storageKind === 'file' && row['file_ref'] !== null
+        ? {
+            ref: String(row['file_ref']),
+            name: String(row['file_name'] ?? row['file_ref']),
+            mime: String(row['file_mime'] ?? 'application/octet-stream'),
+            size: Number(row['file_size'] ?? 0),
+            ...(archivePath !== undefined ? { archivePath } : {}),
+          }
+        : undefined;
+
     return {
-      url: String(row['url']),
+      ...(storageKind === 'file' ? { storageKind, file: fileMeta } : {}),
+      url: row['url'] === null ? null : String(row['url']),
       title: row['title'] === null ? null : String(row['title']),
       excerpt: row['excerpt'] === null ? null : String(row['excerpt']),
       note: row['note'] === null ? null : String(row['note']),
@@ -459,7 +606,7 @@ export class PortabilityService {
     );
   }
 
-  // -- per-bookmark highlights export (G4) --------------------------------------
+  // -- per-bookmark highlights export (G4) ------------------------------------
 
   /**
    * The highlights download for one bookmark (owned; trash state included —
@@ -506,7 +653,7 @@ export class PortabilityService {
     };
   }
 
-  // -- import ---------------------------------------------------------------------
+  // -- import -----------------------------------------------------------------
 
   /**
    * The per-user import lock. Returns the RELEASER, or `null` when the

@@ -19,8 +19,10 @@ import { MAX_COLLECTIONS_PER_BOOKMARK } from '@api/collections/collections.dto';
 import {
   CACHE_STATUSES,
   CONTENT_TYPES,
+  STORAGE_KINDS,
   type CacheStatus,
   type ContentType,
+  type StorageKind,
 } from '@api/database/entities/bookmark.entity';
 
 export const MAX_PAGE_SIZE = 200;
@@ -48,13 +50,38 @@ export type BulkMoveMode = (typeof BULK_MOVE_MODES)[number];
 export const BOOKMARK_SORTS = ['updated', 'created', 'title', 'manual'] as const;
 export type BookmarkSort = (typeof BOOKMARK_SORTS)[number];
 
-/** Query-string boolean: `true/1` → true, `false/0/''` → false, else invalid. */
+/** Query-string / form-data boolean: `true/1` → true, `false/0/''` → false, else invalid. */
 const toBoolean = ({ value }: { value: unknown }): unknown => {
   if (value === 'true' || value === true || value === 1 || value === '1') return true;
   if (value === 'false' || value === false || value === 0 || value === '0' || value === '') {
     return false;
   }
   return value; // garbage stays non-boolean and fails @IsBoolean
+};
+
+/** Multipart form fields arrive as strings or string arrays; normalize string lists cleanly. */
+const toStringList = ({ value }: { value: unknown }): unknown => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return undefined;
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        if (Array.isArray(parsed)) {
+          return parsed.map((item) => String(item).trim()).filter(Boolean);
+        }
+      } catch {
+        return trimmed; // invalid JSON fails @IsArray cleanly
+      }
+    }
+    return trimmed
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return value;
 };
 
 export class CreateBookmarkDto {
@@ -150,6 +177,71 @@ export class CreateBookmarkBodyDto {
 }
 
 /**
+ * Multipart form fields accepted alongside `file` on `POST /bookmarks/file` (M18).
+ */
+export class CreateFileBookmarkBodyDto {
+  @ApiPropertyOptional({ maxLength: 512, description: 'Defaults to filename stem when omitted' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  title?: string;
+
+  @ApiPropertyOptional({ maxLength: 2000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  excerpt?: string;
+
+  @ApiPropertyOptional({ maxLength: 10_000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10_000)
+  note?: string;
+
+  @ApiPropertyOptional({ default: false })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  favorite?: boolean;
+
+  @ApiPropertyOptional({
+    type: [String],
+    maxItems: MAX_TAGS_PER_BOOKMARK,
+    description: 'Tags to attach (JSON array string or comma-separated or repeated form field)',
+  })
+  @IsOptional()
+  @Transform(toStringList)
+  @IsArray()
+  @ArrayMaxSize(MAX_TAGS_PER_BOOKMARK)
+  @IsString({ each: true })
+  @MinLength(1, { each: true, message: 'tag names must not be empty' })
+  @MaxLength(MAX_TAG_NAME_LENGTH, { each: true })
+  tags?: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'uuid',
+    maxItems: MAX_COLLECTIONS_PER_BOOKMARK,
+    description: 'Active owned collection UUIDs to attach (JSON array string or comma-separated)',
+  })
+  @IsOptional()
+  @Transform(toStringList)
+  @IsArray()
+  @ArrayMaxSize(MAX_COLLECTIONS_PER_BOOKMARK)
+  @IsUUID(undefined, { each: true })
+  collectionIds?: string[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'date-time',
+    description: 'Optional one-time reminder timestamp in UTC ISO-8601 format',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  reminderAt?: string | null;
+}
+
+/**
  * Quick-add query parameters for `POST /bookmarks?url=…&title=…&collection=…`
  * (plan M10, Raindrop parity G2 — RSS share targets & browser share sheets).
  */
@@ -201,7 +293,8 @@ export class QuickAddBookmarkQueryDto {
 
 /**
  * PUT semantics: provided fields replace (explicit `null` clears), absent
- * fields stay. A `url` change re-runs the decomposition (D12).
+ * fields stay. A `url` change re-runs the decomposition (D12). File-backed
+ * bookmarks reject `url` changes with 400 (use delete + re-upload instead).
  */
 export class UpdateBookmarkDto {
   @ApiPropertyOptional({ maxLength: 2048 })
@@ -320,10 +413,10 @@ export class BulkBookmarksResponseDto {
 
 export class ListBookmarksQueryDto {
   /**
-   * Search query using the M11/M12/M14/M17 operator grammar (D10/D19). Plain
+   * Search query using the M11/M12/M14/M17/M18 operator grammar (D10/D19). Plain
    * terms run hybrid PostgreSQL FTS (`simple` config across title, excerpt,
-   * note, extracted page/PDF archive content, and highlights) plus prefix `:*`
-   * and ILIKE fallback for URLs, tags, and short/punctuation tokens.
+   * note, extracted page/PDF/EPUB/text archive content, and highlights) plus
+   * prefix `:*` and ILIKE fallback for URLs, tags, and short/punctuation tokens.
    */
   @ApiPropertyOptional({
     maxLength: 500,
@@ -335,10 +428,11 @@ export class ListBookmarksQueryDto {
       'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable with `-`), ' +
       '`type:<article|image|video|audio|document|book|link>`, ' +
       '`cache.status:<pending|ready|failed|invalid-origin|skipped>`, ' +
+      '`file:<true|false|ext|mime>` (e.g. `file:true`, `file:pdf`, `file:md`, `file:image`), ' +
       '`favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, ' +
       '`created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), ' +
       'and `match:OR` (OR positive terms; exclusions stay ANDed); ' +
-      'Reserved (`file:`) and unknown operators fail with 400 BAD_REQUEST.',
+      'unknown operators fail with 400 BAD_REQUEST.',
   })
   @IsOptional()
   @IsString()
@@ -349,7 +443,7 @@ export class ListBookmarksQueryDto {
   @ApiPropertyOptional({
     maxLength: 500,
     description:
-      'Alias for `search` — accepts the same M11/M12/M14/M17 search operator grammar. ' +
+      'Alias for `search` — accepts the same M11/M12/M14/M17/M18 search operator grammar. ' +
       'Provide either `search` or `q`, not both.',
   })
   @IsOptional()
@@ -403,6 +497,15 @@ export class ListBookmarksQueryDto {
   @Transform(toBoolean)
   @IsBoolean()
   reminder?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Filter by storage kind (`true` = uploaded files only, `false` = URL bookmarks only)',
+  })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  file?: boolean;
 
   @ApiPropertyOptional({ enum: CONTENT_TYPES, description: 'Filter by detected content type' })
   @IsOptional()
@@ -587,8 +690,14 @@ export class BookmarkDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
 
-  @ApiProperty({ description: 'Stored verbatim (D12)' })
-  url!: string;
+  @ApiProperty({ enum: STORAGE_KINDS, description: 'Backing storage kind (M18: url | file)' })
+  storageKind!: StorageKind;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Stored verbatim for URL bookmarks; null for file items (D12/M18)',
+  })
+  url!: string | null;
 
   @ApiProperty({ nullable: true })
   title!: string | null;
@@ -602,7 +711,7 @@ export class BookmarkDto {
   @ApiProperty({ description: 'Star/favorite flag (M10)' })
   favorite!: boolean;
 
-  @ApiProperty({ enum: CONTENT_TYPES, description: 'Detected content type (M10)' })
+  @ApiProperty({ enum: CONTENT_TYPES, description: 'Detected content type (M10/M18)' })
   contentType!: ContentType;
 
   @ApiProperty({ nullable: true, description: 'Populated by metadata fetching from M6' })
@@ -611,8 +720,30 @@ export class BookmarkDto {
   @ApiProperty({ nullable: true, description: 'Populated by icon fetching from M6' })
   iconRef!: string | null;
 
-  @ApiProperty({ type: BookmarkUrlPartsDto, description: 'Derived on every url write (D12)' })
-  urlParts!: BookmarkUrlPartsDto;
+  @ApiProperty({
+    type: BookmarkUrlPartsDto,
+    nullable: true,
+    description: 'Derived on every url write (D12); null for file-backed bookmarks (M18)',
+  })
+  urlParts!: BookmarkUrlPartsDto | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Uploaded file storage reference under /files (M18)',
+  })
+  fileRef!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'Sanitized original upload filename (M18)' })
+  fileName!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Validated canonical MIME type of uploaded file (M18)',
+  })
+  fileMime!: string | null;
+
+  @ApiProperty({ nullable: true, description: 'Uploaded file size in bytes (M18)' })
+  fileSize!: number | null;
 
   @ApiProperty({ type: [TagDto] })
   tags!: TagDto[];

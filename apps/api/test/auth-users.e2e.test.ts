@@ -59,6 +59,8 @@ interface SettingsView {
   changeLogRetentionDays: number;
   brokenLinkCheckMode: 'off' | 'basic' | 'default' | 'strict';
   archiveMaxBytes: number;
+  fileMaxBytes: number;
+  monthlyUploadQuotaBytes: number;
 }
 
 interface CallResult<T> {
@@ -191,6 +193,8 @@ describe('Auth & users (e2e)', () => {
         changeLogRetentionDays: 90,
         brokenLinkCheckMode: 'default',
         archiveMaxBytes: 70 * 1024 * 1024,
+        fileMaxBytes: 300 * 1024 * 1024,
+        monthlyUploadQuotaBytes: 10 * 1024 * 1024 * 1024,
       });
     });
 

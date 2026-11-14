@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Bookmark,
@@ -6,7 +6,7 @@ import {
   type ContentType,
 } from '@api/database/entities/bookmark.entity';
 import { ChangeLogService } from '@api/change-log/change-log.service';
-import { IsNull, LessThanOrEqual, type Repository } from 'typeorm';
+import { IsNull, LessThanOrEqual, Not, type Repository } from 'typeorm';
 import { AppConfigService } from '@api/config/app-config.service';
 import { SettingsService } from '@api/settings/settings.service';
 import { ArchiveStorageService } from './archive-storage.service';
@@ -94,6 +94,9 @@ export function computeNextRetryAt(retryCount: number, now: Date = new Date()): 
  * Completion writes through `ChangeLogService.transact` (its OWN transaction):
  * the row update and one `bookmark:update` ChangeEvent commit together, and the
  * M5 bus fans the event out to connected devices only after commit.
+ *
+ * File-backed bookmarks (`storageKind = 'file'`) never enter this network
+ * pipeline — they are extracted locally from disk on upload (M18).
  */
 @Injectable()
 export class MetadataFetchService {
@@ -121,14 +124,20 @@ export class MetadataFetchService {
 
   /**
    * `POST /bookmarks/{id}/reindex` — validates ownership + active state
-   * (404 otherwise, same trash rules as PUT) and schedules a `refresh` run
-   * that re-extracts metadata, icons, and the permanent archive copy.
+   * (404 otherwise, same trash rules as PUT), refuses file-backed bookmarks (400),
+   * and schedules a `refresh` run that re-extracts metadata, icons, and the
+   * permanent archive copy.
    */
   async reindex(userId: string, bookmarkId: string): Promise<{ id: string; status: 'scheduled' }> {
     const row = await this.bookmarks.findOneBy({ id: bookmarkId, userId });
     if (!row) throw new NotFoundException('Bookmark not found');
     if (row.deletedAt) {
       throw new NotFoundException('Bookmark not found among the active bookmarks');
+    }
+    if (row.storageKind === 'file' || row.url === null) {
+      throw new BadRequestException(
+        'File-backed bookmarks are indexed locally on upload and cannot be re-fetched from a URL',
+      );
     }
     this.scheduleEnrichment(userId, row.id, row.url, 'refresh');
     return { id: row.id, status: 'scheduled' };
@@ -147,6 +156,8 @@ export class MetadataFetchService {
 
     const due = await this.bookmarks.find({
       where: {
+        storageKind: 'url',
+        url: Not(IsNull()),
         cacheStatus: 'failed',
         cacheNextRetryAt: LessThanOrEqual(now),
         deletedAt: IsNull(),
@@ -159,6 +170,7 @@ export class MetadataFetchService {
     let succeeded = 0;
     let failed = 0;
     for (const row of due) {
+      if (!row.url) continue;
       const outcome = await this.enrich(row.userId, row.id, row.url, 'refresh');
       if (outcome === 'updated' || outcome === 'noop') {
         const refreshed = await this.bookmarks.findOne({
@@ -187,12 +199,12 @@ export class MetadataFetchService {
   ): Promise<EnrichmentOutcome> {
     if (!this.config.metadataEnabled) return 'skipped';
 
-    // Never fetch or archive trashed/missing bookmarks.
+    // Never fetch or archive trashed/missing/file-backed bookmarks.
     const initialRow = await this.bookmarks.findOne({
       where: { id: bookmarkId, userId },
-      select: { id: true, deletedAt: true, cacheRetryCount: true },
+      select: { id: true, storageKind: true, deletedAt: true, cacheRetryCount: true },
     });
-    if (!initialRow || initialRow.deletedAt) return 'skipped';
+    if (!initialRow || initialRow.deletedAt || initialRow.storageKind !== 'url') return 'skipped';
 
     const now = new Date();
     const archiveMaxBytes = await this.settings.get('archiveMaxBytes');
@@ -361,7 +373,7 @@ export class MetadataFetchService {
 
     const outcome = await this.changeLog.transact(async (manager, record) => {
       const row = await manager.findOne(Bookmark, { where: { id: bookmarkId, userId } });
-      if (!row || row.deletedAt) {
+      if (!row || row.deletedAt || row.storageKind !== 'url') {
         return 'skipped' as const;
       }
 

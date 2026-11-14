@@ -176,6 +176,7 @@ async function bootApp(): Promise<{ app: INestApplication; baseUrl: string }> {
 }
 
 async function wipeData(dataSource: DataSource): Promise<void> {
+  await dataSource.query('DELETE FROM upload_usage');
   await dataSource.query('DELETE FROM notification_outbox');
   await dataSource.query('DELETE FROM audit_log_entries');
   await dataSource.query('DELETE FROM personal_access_tokens');
@@ -287,12 +288,14 @@ async function waitFor(
   throw new Error('expected change notification did not arrive within the deadline');
 }
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering, M17 archive. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering, M17 archive, M18 file uploads. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
   'getBookmarkArchive',
   'createBookmark',
+  'uploadBookmarkFile',
+  'getFile',
   'updateBookmark',
   'deleteBookmark',
   'restoreBookmark',
@@ -762,7 +765,7 @@ describe('MCP server (e2e)', () => {
         }
       ).tools;
       const mutationTools = toolList.filter((t) => t.annotations.readOnlyHint === false);
-      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 14); // 14 read tools
+      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 15); // 15 read tools
 
       let checked = 0;
       for (const tool of mutationTools) {
@@ -779,7 +782,7 @@ describe('MCP server (e2e)', () => {
         expect(text).toContain(tool.name);
         checked += 1;
       }
-      expect(checked).toBe(27);
+      expect(checked).toBe(28);
 
       // read tools DO run for the same token
       const read = await mcpPost(

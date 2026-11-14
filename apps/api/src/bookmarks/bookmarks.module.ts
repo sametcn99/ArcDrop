@@ -7,6 +7,7 @@ import { Highlight } from '@api/database/entities/highlight.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import { ChangeLogModule } from '@api/change-log/change-log.module';
 import { CollectionsModule } from '@api/collections/collections.module';
+import { FilesModule } from '@api/files/files.module';
 import { MetadataModule } from '@api/metadata/metadata.module';
 import { SettingsModule } from '@api/settings/settings.module';
 import { BookmarksController } from './bookmarks.controller';
@@ -21,14 +22,16 @@ import { TrashPurgeService } from './trash-purge.service';
 import { UrlDecompositionService } from './url-decomposition.service';
 
 /**
- * Bookmarks core (plan M3, enriched M10/M13): CRUD + trash/restore + bulk,
- * highlights, tags, search/paging/stats, the trash-purge job and URL decomposition.
+ * Bookmarks core (plan M3, enriched M10/M13/M18): CRUD + file uploads +
+ * trash/restore + bulk, highlights, tags, search/paging/stats, the
+ * trash-purge job and URL decomposition.
  */
 @Module({
   imports: [
     TypeOrmModule.forFeature([Bookmark, BookmarkTag, BookmarkCollection, Highlight, Tag]),
     ChangeLogModule,
     CollectionsModule,
+    FilesModule,
     MetadataModule,
     SettingsModule,
   ],
