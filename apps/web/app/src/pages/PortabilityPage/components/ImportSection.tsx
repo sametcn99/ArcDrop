@@ -148,11 +148,7 @@ export function ImportSection({
                   label={`${selectedFile.name} (${formatByteSize(selectedFile.size)})`}
                   variant="outlined"
                 />
-                <Button
-                  size="small"
-                  disabled={importing}
-                  onClick={() => inputRef.current?.click()}
-                >
+                <Button size="small" disabled={importing} onClick={() => inputRef.current?.click()}>
                   {PORTABILITY_PAGE_STRINGS.importChangeFileLabel}
                 </Button>
                 <Button

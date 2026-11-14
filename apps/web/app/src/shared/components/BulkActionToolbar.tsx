@@ -36,10 +36,7 @@ import type {
 } from '../../api/schemas/bookmarks';
 import type { CollectionNode } from '../../api/schemas/collections';
 import { toApiError } from '../../api/schemas/problem';
-import {
-  selectSortedCollections,
-  useLibraryStore,
-} from '../../stores/libraryStore';
+import { selectSortedCollections, useLibraryStore } from '../../stores/libraryStore';
 import {
   executeBulkBookmarksAction,
   formatBulkSummaryMessage,
@@ -225,12 +222,7 @@ export function BulkActionToolbar({
     );
   };
 
-  if (
-    selectedCount === 0 &&
-    !summaryMessage &&
-    !inlineError &&
-    !rateLimitState
-  ) {
+  if (selectedCount === 0 && !summaryMessage && !inlineError && !rateLimitState) {
     if (visibleBookmarkIds.length === 0) {
       return null;
     }
@@ -265,7 +257,11 @@ export function BulkActionToolbar({
               spacing={1}
               sx={{ alignItems: { md: 'center' }, justifyContent: 'space-between' }}
             >
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}>
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
+              >
                 <Chip
                   size="small"
                   color="primary"
@@ -296,7 +292,11 @@ export function BulkActionToolbar({
                 </Button>
               </Stack>
 
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}>
+              <Stack
+                direction="row"
+                spacing={1}
+                sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
+              >
                 {context === 'library' ? (
                   <>
                     <Button
@@ -452,7 +452,11 @@ export function BulkActionToolbar({
               : `${SHARED_BULK_STRINGS.rateLimitPrefix} ${SHARED_BULK_STRINGS.rateLimitGenericWait}`}
           </Typography>
           {rateLimitState.detail ? (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ display: 'block', mt: 0.25 }}
+            >
               {rateLimitState.detail}
             </Typography>
           ) : null}
@@ -537,20 +541,14 @@ export function BulkActionToolbar({
               )}
             </Box>
 
-            {moveValidationError ? (
-              <Alert severity="error">{moveValidationError}</Alert>
-            ) : null}
+            {moveValidationError ? <Alert severity="error">{moveValidationError}</Alert> : null}
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button disabled={busy} onClick={() => setMoveDialogOpen(false)}>
             {SHARED_BULK_STRINGS.cancelLabel}
           </Button>
-          <Button
-            variant="contained"
-            disabled={busy}
-            onClick={() => void handleSubmitMove()}
-          >
+          <Button variant="contained" disabled={busy} onClick={() => void handleSubmitMove()}>
             {SHARED_BULK_STRINGS.moveSubmitLabel}
           </Button>
         </DialogActions>
@@ -586,11 +584,7 @@ export function BulkActionToolbar({
           <Button disabled={busy} onClick={() => setTagsDialogOpen(false)}>
             {SHARED_BULK_STRINGS.cancelLabel}
           </Button>
-          <Button
-            variant="contained"
-            disabled={busy}
-            onClick={() => void handleSubmitTags()}
-          >
+          <Button variant="contained" disabled={busy} onClick={() => void handleSubmitTags()}>
             {SHARED_BULK_STRINGS.tagsApplyLabel}
           </Button>
         </DialogActions>

@@ -60,9 +60,7 @@ function applyLocalTagMutations(
         const lower = trimmed.toLowerCase();
         if (existingLowers.has(lower)) continue;
         existingLowers.add(lower);
-        const knownTag = Object.values(store.tagsById).find(
-          (t) => t.name.toLowerCase() === lower,
-        );
+        const knownTag = Object.values(store.tagsById).find((t) => t.name.toLowerCase() === lower);
         additions.push({
           id: knownTag?.id ?? `local-${lower}`,
           name: knownTag?.name ?? trimmed,

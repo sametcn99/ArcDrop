@@ -60,7 +60,10 @@ function DuplicateCandidateCard({
       }}
     >
       <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+        <Stack
+          direction="row"
+          sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1 }}
+        >
           <Chip
             size="small"
             color={isOriginal ? 'primary' : 'default'}
@@ -101,19 +104,15 @@ function DuplicateCandidateCard({
 
         <Divider sx={{ my: 0.5 }} />
 
-        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}>
+        <Stack
+          direction="row"
+          sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1 }}
+        >
           <FormControlLabel
             control={
-              <Radio
-                size="small"
-                checked={isKept}
-                disabled={disabled}
-                onChange={onSelectKeep}
-              />
+              <Radio size="small" checked={isKept} disabled={disabled} onChange={onSelectKeep} />
             }
-            label={
-              <Typography variant="body2">{HEALTH_PAGE_STRINGS.keepRadioLabel}</Typography>
-            }
+            label={<Typography variant="body2">{HEALTH_PAGE_STRINGS.keepRadioLabel}</Typography>}
           />
 
           {!isKept ? (
@@ -140,9 +139,7 @@ function DuplicateCandidateCard({
 function DuplicateGroupCard({ group, resolving, onResolve }: DuplicateGroupCardProps) {
   const candidates = useMemo(() => [group.original, ...group.extras], [group]);
   const [keepId, setKeepId] = useState<string>(group.original.id);
-  const [trashIds, setTrashIds] = useState<string[]>(() =>
-    group.extras.map((extra) => extra.id),
-  );
+  const [trashIds, setTrashIds] = useState<string[]>(() => group.extras.map((extra) => extra.id));
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const handleSelectKeep = (nextKeepId: string) => {
@@ -160,9 +157,7 @@ function DuplicateGroupCard({ group, resolving, onResolve }: DuplicateGroupCardP
   const handleToggleTrash = (id: string) => {
     if (id === keepId) return;
     setValidationError(null);
-    setTrashIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
-    );
+    setTrashIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
   };
 
   const mergedTags = useMemo<TagSummary[]>(() => {
@@ -190,11 +185,7 @@ function DuplicateGroupCard({ group, resolving, onResolve }: DuplicateGroupCardP
   };
 
   return (
-    <Paper
-      variant="outlined"
-      data-testid={`duplicate-group-${group.normalizedUrl}`}
-      sx={{ p: 2 }}
-    >
+    <Paper variant="outlined" data-testid={`duplicate-group-${group.normalizedUrl}`} sx={{ p: 2 }}>
       <Stack spacing={2}>
         <Stack
           direction={{ xs: 'column', sm: 'row' }}
@@ -251,10 +242,12 @@ function DuplicateGroupCard({ group, resolving, onResolve }: DuplicateGroupCardP
           sx={{ p: 1.5, bgcolor: 'background.default' }}
         >
           <Stack spacing={1}>
-            <Typography variant="subtitle2">
-              {HEALTH_PAGE_STRINGS.mergePreviewHeading}
-            </Typography>
-            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}>
+            <Typography variant="subtitle2">{HEALTH_PAGE_STRINGS.mergePreviewHeading}</Typography>
+            <Stack
+              direction="row"
+              spacing={0.75}
+              sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
+            >
               <Typography variant="caption" color="text.secondary">
                 {HEALTH_PAGE_STRINGS.mergePreviewTagsLabel}
               </Typography>
@@ -264,7 +257,13 @@ function DuplicateGroupCard({ group, resolving, onResolve }: DuplicateGroupCardP
                 </Typography>
               ) : (
                 mergedTags.map((tag) => (
-                  <Chip key={tag.id} size="small" color="primary" variant="outlined" label={`#${tag.name}`} />
+                  <Chip
+                    key={tag.id}
+                    size="small"
+                    color="primary"
+                    variant="outlined"
+                    label={`#${tag.name}`}
+                  />
                 ))
               )}
             </Stack>
@@ -303,11 +302,7 @@ export interface DuplicatesSectionProps {
   ) => Promise<ResolveDuplicatesResponse | null>;
 }
 
-export function DuplicatesSection({
-  groups,
-  resolvingUrl,
-  onResolve,
-}: DuplicatesSectionProps) {
+export function DuplicatesSection({ groups, resolvingUrl, onResolve }: DuplicatesSectionProps) {
   if (groups.length === 0) {
     return (
       <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }} data-testid="duplicates-empty">

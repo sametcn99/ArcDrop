@@ -18,6 +18,5 @@ export type Settings = z.infer<typeof settingsSchema>;
 
 // Compile-time structural alignment checks against generated OpenAPI schemas.
 const _settingsCheck: components['schemas']['SettingsDto'] | undefined = undefined as
-  | Settings
-  | undefined;
+  Settings | undefined;
 void _settingsCheck;

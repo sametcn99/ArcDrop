@@ -61,7 +61,11 @@ export default function HealthPage() {
       </Stack>
 
       {resolvedBanner ? (
-        <Alert severity="success" onClose={dismissResolvedBanner} data-testid="health-resolved-alert">
+        <Alert
+          severity="success"
+          onClose={dismissResolvedBanner}
+          data-testid="health-resolved-alert"
+        >
           {resolvedBanner}
         </Alert>
       ) : null}

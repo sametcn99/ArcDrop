@@ -31,13 +31,13 @@ export type ResolveDuplicatesResponse = z.infer<typeof resolveDuplicatesResponse
 const _duplicateGroupCheck: components['schemas']['DuplicateGroupDto'] | undefined = undefined as
   DuplicateGroup | undefined;
 const _duplicateGroupsResponseCheck:
-  | components['schemas']['DuplicateGroupsResponseDto']
-  | undefined = undefined as DuplicateGroupsResponse | undefined;
+  components['schemas']['DuplicateGroupsResponseDto'] | undefined = undefined as
+  DuplicateGroupsResponse | undefined;
 const _resolveDuplicatesRequestCheck: components['schemas']['ResolveDuplicatesDto'] | undefined =
   undefined as ResolveDuplicatesRequest | undefined;
 const _resolveDuplicatesResponseCheck:
-  | components['schemas']['ResolveDuplicatesResponseDto']
-  | undefined = undefined as ResolveDuplicatesResponse | undefined;
+  components['schemas']['ResolveDuplicatesResponseDto'] | undefined = undefined as
+  ResolveDuplicatesResponse | undefined;
 void _duplicateGroupCheck;
 void _duplicateGroupsResponseCheck;
 void _resolveDuplicatesRequestCheck;

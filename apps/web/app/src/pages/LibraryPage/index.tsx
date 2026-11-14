@@ -78,10 +78,7 @@ export default function LibraryPage() {
         onClearFilters={clearFilters}
       />
 
-      <BulkActionToolbar
-        visibleBookmarkIds={items.map((item) => item.id)}
-        context="library"
-      />
+      <BulkActionToolbar visibleBookmarkIds={items.map((item) => item.id)} context="library" />
 
       {showPageError ? (
         <Alert

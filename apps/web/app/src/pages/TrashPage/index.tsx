@@ -152,18 +152,18 @@ export default function TrashPage() {
             const isItemBusy = busyItemId === bookmark.id || purgingAll;
 
             return (
-              <Card
-                key={bookmark.id}
-                variant="outlined"
-                data-testid={`trash-item-${bookmark.id}`}
-              >
+              <Card key={bookmark.id} variant="outlined" data-testid={`trash-item-${bookmark.id}`}>
                 <CardContent sx={{ py: 1.75, '&:last-child': { pb: 1.75 } }}>
                   <Stack
                     direction={{ xs: 'column', sm: 'row' }}
                     spacing={1.5}
                     sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
                   >
-                    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'flex-start', minWidth: 0, flexGrow: 1 }}>
+                    <Stack
+                      direction="row"
+                      spacing={1.5}
+                      sx={{ alignItems: 'flex-start', minWidth: 0, flexGrow: 1 }}
+                    >
                       <Checkbox
                         size="small"
                         checked={checked}
@@ -204,7 +204,12 @@ export default function TrashPage() {
                           {title}
                         </Link>
                         {sourceLabel ? (
-                          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            noWrap
+                            sx={{ display: 'block' }}
+                          >
                             {sourceLabel}
                           </Typography>
                         ) : null}

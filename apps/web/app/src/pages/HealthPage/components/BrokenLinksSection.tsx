@@ -43,7 +43,11 @@ export function BrokenLinksSection({
       </Alert>
 
       {items.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }} data-testid="broken-links-empty">
+        <Paper
+          variant="outlined"
+          sx={{ p: 4, textAlign: 'center' }}
+          data-testid="broken-links-empty"
+        >
           <Typography variant="h6">{HEALTH_PAGE_STRINGS.brokenEmptyTitle}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             {HEALTH_PAGE_STRINGS.brokenEmptyDescription}

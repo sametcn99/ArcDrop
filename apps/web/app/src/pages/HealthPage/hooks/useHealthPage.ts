@@ -151,9 +151,7 @@ export function useHealthPage() {
     try {
       await reindexBookmarkAction(bookmarkId);
       setBrokenBookmarks((prev) =>
-        prev.map((item) =>
-          item.id === bookmarkId ? { ...item, cacheStatus: 'pending' } : item,
-        ),
+        prev.map((item) => (item.id === bookmarkId ? { ...item, cacheStatus: 'pending' } : item)),
       );
     } finally {
       setRecheckingId(null);

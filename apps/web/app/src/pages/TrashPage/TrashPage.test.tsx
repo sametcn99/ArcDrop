@@ -66,9 +66,7 @@ describe('TrashPage', () => {
       http.post('*/api/v1/bookmarks/:id/restore', ({ params }) => {
         const id = String(params.id);
         restoredIds.push(id);
-        return HttpResponse.json(
-          makeMockBookmark({ id, title: 'Trashed Alpha', deletedAt: null }),
-        );
+        return HttpResponse.json(makeMockBookmark({ id, title: 'Trashed Alpha', deletedAt: null }));
       }),
       http.post('*/api/v1/bookmarks/bulk', async ({ request }) => {
         const body = (await request.json()) as { action: string; ids: string[] };

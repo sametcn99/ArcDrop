@@ -27,13 +27,7 @@ export interface ExportDialogProps {
 
 const EXPORT_FORMATS: ExportFormat[] = ['json', 'csv', 'html', 'txt'];
 
-export function ExportDialog({
-  open,
-  exporting,
-  error,
-  onClose,
-  onSubmit,
-}: ExportDialogProps) {
+export function ExportDialog({ open, exporting, error, onClose, onSubmit }: ExportDialogProps) {
   const collectionsById = useLibraryStore((s) => s.collectionsById);
   const collections = useMemo(
     () =>

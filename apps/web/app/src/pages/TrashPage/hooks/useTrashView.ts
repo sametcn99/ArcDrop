@@ -58,16 +58,12 @@ export function useTrashView() {
         }
         const incomingIds = res.items.map((item) => item.id);
         setTrashedIds((prev) =>
-          append
-            ? [...prev, ...incomingIds.filter((id) => !prev.includes(id))]
-            : incomingIds,
+          append ? [...prev, ...incomingIds.filter((id) => !prev.includes(id))] : incomingIds,
         );
         setTotalCount(res.totalCount);
         setPage(res.page);
         setHasMore(
-          append
-            ? targetPage * res.pageSize < res.totalCount
-            : incomingIds.length < res.totalCount,
+          append ? targetPage * res.pageSize < res.totalCount : incomingIds.length < res.totalCount,
         );
         hasFetchedOnceRef.current = true;
       } catch (err) {

@@ -15,7 +15,8 @@ export const PORTABILITY_PAGE_STRINGS = {
   importStartLabel: 'Start import',
   importUploadingLabel: 'Importing bookmarks...',
   importBusyTitle: 'Another import is currently running',
-  importBusyFallback: 'An import job is already in progress for your account. Wait a moment and retry.',
+  importBusyFallback:
+    'An import job is already in progress for your account. Wait a moment and retry.',
   importRetryLabel: 'Retry import',
   importSummaryTitle: 'Import summary',
   importCreatedLabel: 'Created',

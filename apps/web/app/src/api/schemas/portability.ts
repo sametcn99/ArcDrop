@@ -31,18 +31,15 @@ export type HighlightsExportFormat = z.infer<typeof highlightsExportFormatSchema
 
 // Compile-time structural alignment checks against generated OpenAPI schemas.
 const _exportDataCheck: components['schemas']['ExportDataDto'] | undefined = undefined as
-  | z.infer<typeof exportDataRequestSchema>
-  | undefined;
+  z.infer<typeof exportDataRequestSchema> | undefined;
 const _importSummaryEntryCheck: components['schemas']['ImportSummaryEntryDto'] | undefined =
   undefined as ImportSummaryEntry | undefined;
 const _importSummaryCheck: components['schemas']['ImportSummaryDto'] | undefined = undefined as
-  | ImportSummary
-  | undefined;
+  ImportSummary | undefined;
 type _HighlightsFormatParam =
   operations['exportBookmarkHighlights']['parameters']['query']['format'];
 const _highlightsFormatCheck: _HighlightsFormatParam | undefined = undefined as
-  | HighlightsExportFormat
-  | undefined;
+  HighlightsExportFormat | undefined;
 void _exportDataCheck;
 void _importSummaryEntryCheck;
 void _importSummaryCheck;

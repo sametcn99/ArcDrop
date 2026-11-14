@@ -101,9 +101,7 @@ describe('PortabilityPage', () => {
     const createObjectUrlSpy = vi
       .spyOn(URL, 'createObjectURL')
       .mockReturnValue('blob:arcdrop-export-test');
-    const revokeObjectUrlSpy = vi
-      .spyOn(URL, 'revokeObjectURL')
-      .mockImplementation(() => undefined);
+    const revokeObjectUrlSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
 
     const exportCol = makeMockCollection({ id: 'col-export', title: 'Export Scope' });
 
@@ -167,9 +165,7 @@ describe('PortabilityPage', () => {
     const createObjectUrlSpy = vi
       .spyOn(URL, 'createObjectURL')
       .mockReturnValue('blob:arcdrop-highlights-test');
-    const revokeObjectUrlSpy = vi
-      .spyOn(URL, 'revokeObjectURL')
-      .mockImplementation(() => undefined);
+    const revokeObjectUrlSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
 
     server.use(
       http.get('*/api/v1/bookmarks', () =>
