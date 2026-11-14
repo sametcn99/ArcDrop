@@ -6,6 +6,10 @@ import {
 } from '@nestjs/common';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import { ChangeLogService, type ChangeRecorder } from '@api/change-log/change-log.service';
+import {
+  lockUserForMembershipAppend,
+  nextMembershipOrder,
+} from '@api/collections/membership-order';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
 import { BookmarkCollection } from '@api/database/entities/bookmark-collection.entity';
 import { BookmarkTag } from '@api/database/entities/bookmark-tag.entity';
@@ -185,6 +189,12 @@ export class BulkBookmarksService {
       }
     }
 
+    if (removals.length > 0 || additions.length > 0) {
+      // Take the user row lock before touching bookmark_collections so
+      // MAX(order)+1 appends serialize cleanly with concurrent requests.
+      await lockUserForMembershipAppend(manager, userId);
+    }
+
     if (removals.length > 0) {
       await queryRows(
         manager,
@@ -197,11 +207,26 @@ export class BulkBookmarksService {
     }
 
     if (additions.length > 0) {
+      const nextOrderByCollection = new Map<string, number>();
+      const values: Array<{ bookmarkId: string; collectionId: string; order: number }> = [];
+      for (const addition of additions) {
+        let nextOrder = nextOrderByCollection.get(addition.collectionId);
+        if (nextOrder === undefined) {
+          nextOrder = await nextMembershipOrder(manager, addition.collectionId);
+        }
+        values.push({
+          bookmarkId: addition.bookmarkId,
+          collectionId: addition.collectionId,
+          order: nextOrder,
+        });
+        nextOrderByCollection.set(addition.collectionId, nextOrder + 1);
+      }
+
       await manager
         .createQueryBuilder()
         .insert()
         .into(BookmarkCollection)
-        .values(additions)
+        .values(values)
         .orIgnore()
         .execute();
     }

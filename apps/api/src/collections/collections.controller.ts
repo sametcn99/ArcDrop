@@ -34,6 +34,7 @@ import {
   DeleteEmptyCollectionsResponseDto,
   MergeCollectionsDto,
   MergeCollectionsResponseDto,
+  ReorderCollectionBookmarksDto,
   ReorderCollectionsDto,
   SortCollectionsResponseDto,
   UpdateCollectionDto,
@@ -41,7 +42,7 @@ import {
 import { CollectionsService } from './collections.service';
 
 /**
- * Collection surface (plan M4, extended M13). All routes are bearer-authenticated
+ * Collection surface (plan M4, extended M13/M16). All routes are bearer-authenticated
  * (global guard) and user-scoped. Static paths (`tree`, `order`, `merge`,
  * `sort-alphabetical`, `delete-empty`) are declared ahead of the `:id` routes
  * so Nest never mistakes them for ids.
@@ -240,5 +241,28 @@ export class CollectionsController {
     @Param() params: CollectionIdParamDto,
   ): Promise<CollectionDto> {
     return this.collections.restore(user, params.id);
+  }
+
+  @Patch(':id/bookmarks/order')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    operationId: 'reorderCollectionBookmarks',
+    summary: 'Set explicit manual positions for bookmarks inside one collection (plan D21)',
+    description:
+      'Assigns `order` on the membership rows (`bookmark_collections`) for the ' +
+      'listed bookmarks inside `{id}`; unspecified members keep their existing ' +
+      'positions. Order is membership-scoped per collection (plan D21), so a ' +
+      'bookmark belonging to multiple collections maintains an independent slot in ' +
+      'each. Refuses duplicate ids (400), trashed/unknown collections (404), and ' +
+      'trashed or non-member bookmarks (404). Touched memberships record ' +
+      '`bookmark:update` change events without bumping `bookmarks.updatedAt`.',
+  })
+  @ApiNoContentResponse({ description: 'Positions applied' })
+  async reorderBookmarks(
+    @CurrentUser() user: RequestUser,
+    @Param() params: CollectionIdParamDto,
+    @Body() dto: ReorderCollectionBookmarksDto,
+  ): Promise<void> {
+    await this.collections.reorderBookmarks(user, params.id, dto);
   }
 }

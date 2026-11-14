@@ -24,6 +24,7 @@ import {
   CreateCollectionDto,
   DeleteCollectionQueryDto,
   MergeCollectionsDto,
+  ReorderCollectionBookmarksDto,
   ReorderCollectionsDto,
   ReplaceBookmarkCollectionsDto,
   UpdateCollectionDto,
@@ -125,11 +126,11 @@ export function buildToolCatalog(deps: {
     portability,
   } = deps;
   return [
-    // -- bookmarks (M3/M6/M10/M11/M12/M13/M14) --------------------------------
+    // -- bookmarks (M3/M6/M10/M11/M12/M13/M14/M16) ----------------------------
     define(
       'listBookmarks',
       'GET',
-      'Search / filter / page bookmarks (including broken-link fields lastCheckedAt/brokenReason/brokenAt and reminder fields reminderAt/remindedAt). `search` (or alias `q`) parses the canonical M11/M12/M14 operator grammar: `word`, `"exact phrase"` (across title/excerpt/note/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`file:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, reminder, type, updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
+      'Search / filter / page bookmarks (including broken-link fields lastCheckedAt/brokenReason/brokenAt and reminder fields reminderAt/remindedAt). `search` (or alias `q`) parses the canonical M11/M12/M14 operator grammar: `word`, `"exact phrase"` (across title/excerpt/note/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`file:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, reminder, type, updatedSince; sorted by updated-desc (default), created-desc, title-asc, or manual (membership order asc NULLS LAST; requires collectionId per D21); pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
       [ListBookmarksQueryDto],
       (user, [query]) => bookmarks.list(user, query as ListBookmarksQueryDto),
     ),
@@ -194,7 +195,7 @@ export function buildToolCatalog(deps: {
     define(
       'replaceBookmarkCollections',
       'PUT',
-      'Set a bookmark’s exact collection membership (plan D5): the bookmark ends up in exactly the listed collections. Every id must be an active owned collection. Returns { collections: [{ id, title }] }.',
+      'Set a bookmark’s exact collection membership (plan D5): the bookmark ends up in exactly the listed collections (new memberships append at MAX(order)+1; existing keep theirs). Every id must be an active owned collection. Returns { collections: [{ id, title }] }.',
       [BookmarkIdParamDto, ReplaceBookmarkCollectionsDto],
       (user, [p, dto]) =>
         collections.syncBookmarkCollections(
@@ -296,7 +297,7 @@ export function buildToolCatalog(deps: {
       },
     ),
 
-    // -- collections (M4/M13) ----------------------------------------------
+    // -- collections (M4/M13/M16) ------------------------------------------
     define(
       'listCollections',
       'GET',
@@ -361,6 +362,20 @@ export function buildToolCatalog(deps: {
       [ReorderCollectionsDto],
       async (user, [dto]) => {
         await collections.reorder(user, dto as ReorderCollectionsDto);
+        return undefined;
+      },
+    ),
+    define(
+      'reorderCollectionBookmarks',
+      'PATCH',
+      'Set explicit manual positions for bookmarks inside one active collection (plan D21 / M16): id + items = [{ bookmarkId, order }] with order ≥ 0. Unspecified members keep their positions; manual order is membership-scoped per collection so other collections are unaffected. Accepts only active member bookmarks (404 otherwise) and records bookmark:update events for touched memberships.',
+      [CollectionIdParamDto, ReorderCollectionBookmarksDto],
+      async (user, [p, dto]) => {
+        await collections.reorderBookmarks(
+          user,
+          (p as CollectionIdParamDto).id,
+          dto as ReorderCollectionBookmarksDto,
+        );
         return undefined;
       },
     ),

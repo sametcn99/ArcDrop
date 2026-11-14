@@ -23,11 +23,13 @@ import type {
   DeleteEmptyCollectionsResponseDto,
   MergeCollectionsDto,
   MergeCollectionsResponseDto,
+  ReorderCollectionBookmarksDto,
   ReorderCollectionsDto,
   SortCollectionsResponseDto,
   UpdateCollectionDto,
 } from './collections.dto';
 import { findRecursivelyEmptyCollectionIds, planAlphabeticalSort } from './collection-bulk-helpers';
+import { lockUserForMembershipAppend, nextMembershipOrder } from './membership-order';
 import { buildCollectionTree, compareSiblings, type CollectionTreeRow } from './tree-builder';
 
 /**
@@ -39,10 +41,11 @@ import { buildCollectionTree, compareSiblings, type CollectionTreeRow } from './
 const MAX_TREE_WALK = 10_000;
 
 /**
- * Collections domain (plan M4, D5, extended M13): hierarchical folders, the
+ * Collections domain (plan M4, D5, extended M13/M16): hierarchical folders, the
  * nested tree with direct bookmark counts, exact membership sync, cycle
- * protection, sibling ordering, and transactional bulk merge/sort/delete-empty
- * — all user-scoped and change-logged (plan D4).
+ * protection, sibling ordering, membership-scoped bookmark manual ordering
+ * (plan D21), and transactional bulk merge/sort/delete-empty — all user-scoped
+ * and change-logged (plan D4).
  *
  * A row another user owns simply does not exist (404, never 403). Trash is
  * the plain-`deletedAt` discipline shared with bookmarks:
@@ -370,10 +373,99 @@ export class CollectionsService {
   }
 
   /**
+   * Explicit manual positions for bookmarks inside one active collection
+   * (`PATCH /collections/{id}/bookmarks/order`, plan D21 / M16). Unspecified
+   * members keep their current `order`; rows whose value does not change
+   * record no event. Accepts only active bookmarks that currently belong to
+   * `{id}` (404 otherwise), and leaves `bookmarks.updatedAt` untouched so
+   * `sort=updated` is never scrambled by drag-and-drop reordering.
+   */
+  async reorderBookmarks(
+    user: RequestUser,
+    collectionId: string,
+    dto: ReorderCollectionBookmarksDto,
+  ): Promise<void> {
+    const bookmarkIds = dto.items.map((item) => item.bookmarkId);
+    if (new Set(bookmarkIds).size !== bookmarkIds.length) {
+      throw new BadRequestException('Duplicate bookmarkId in the order payload');
+    }
+
+    await this.changeLog.transact(async (manager, record) => {
+      const collection = await manager.findOne(Collection, {
+        where: { id: collectionId, userId: user.id },
+      });
+      if (!collection) throw new NotFoundException('Collection not found');
+      if (collection.deletedAt !== null) {
+        throw new NotFoundException('Collection not found among the active collections');
+      }
+
+      // Take the user lock before updating bookmark_collections so all
+      // membership mutations share the same global lock hierarchy.
+      await lockUserForMembershipAppend(manager, user.id);
+
+      const rows = await queryRows(
+        manager,
+        `SELECT bc.bookmark_id AS bookmark_id,
+                bc."order" AS current_order,
+                b.deleted_at AS deleted_at
+           FROM bookmark_collections bc
+           JOIN bookmarks b ON b.id = bc.bookmark_id
+          WHERE bc.collection_id = $1::uuid
+            AND bc.bookmark_id = ANY($2::uuid[])
+            AND b.user_id = $3::uuid`,
+        [collectionId, bookmarkIds, user.id],
+      );
+      const byId = new Map(
+        rows.map((row) => [
+          String(row.bookmark_id),
+          {
+            order:
+              row.current_order === null || row.current_order === undefined
+                ? null
+                : Number(row.current_order),
+            deletedAt: row.deleted_at ?? null,
+          },
+        ]),
+      );
+
+      for (const item of dto.items) {
+        const found = byId.get(item.bookmarkId);
+        if (!found) {
+          throw new NotFoundException(
+            `Bookmark is not a member of collection ${collectionId}: ${item.bookmarkId}`,
+          );
+        }
+        if (found.deletedAt !== null) {
+          throw new NotFoundException(
+            `Bookmark not found among the active bookmarks: ${item.bookmarkId}`,
+          );
+        }
+      }
+
+      const touchedBookmarkIds: string[] = [];
+      for (const item of dto.items) {
+        const found = byId.get(item.bookmarkId)!;
+        if (found.order === item.order) continue;
+        await manager.update(
+          BookmarkCollection,
+          { bookmarkId: item.bookmarkId, collectionId },
+          { order: item.order },
+        );
+        touchedBookmarkIds.push(item.bookmarkId);
+      }
+
+      for (const bookmarkId of touchedBookmarkIds) {
+        await record(user.id, { entity: 'bookmark', entityId: bookmarkId, action: 'update' });
+      }
+    });
+  }
+
+  /**
    * Merges `sourceIds` into `targetId` in one transaction (`POST /collections/merge`):
    * reparents non-source direct children of sources into `targetId`, moves all
-   * bookmark memberships into `targetId` (preserving existing target memberships),
-   * and soft-trashes `sourceIds`. Refuses merging into own descendant (409).
+   * bookmark memberships into `targetId` (preserving existing target memberships
+   * and appending new ones at `MAX(order) + 1`), and soft-trashes `sourceIds`.
+   * Refuses merging into own descendant (409).
    */
   async merge(user: RequestUser, dto: MergeCollectionsDto): Promise<MergeCollectionsResponseDto> {
     const uniqueSourceIds = dedupeIds(dto.sourceIds);
@@ -432,6 +524,10 @@ export class CollectionsService {
         throw new Error(`Collection parent chain exceeded ${MAX_TREE_WALK} steps — corrupt data`);
       }
 
+      // Take the user row lock before any collection/membership writes so
+      // target membership MAX(order)+1 scans serialize against concurrent adds.
+      await lockUserForMembershipAppend(manager, user.id);
+
       const now = new Date();
       const directChildren = await manager.find(Collection, {
         where: { userId: user.id, parentId: In(uniqueSourceIds) },
@@ -473,25 +569,41 @@ export class CollectionsService {
 
       const membershipRows = await queryRows(
         manager,
-        `SELECT DISTINCT bookmark_id
+        `SELECT bookmark_id
            FROM bookmark_collections
-          WHERE collection_id = ANY($1::uuid[])`,
+          WHERE collection_id = ANY($1::uuid[])
+          GROUP BY bookmark_id
+          ORDER BY MIN("order") ASC NULLS LAST, MIN(created_at) ASC, bookmark_id ASC`,
         [uniqueSourceIds],
       );
       const affectedBookmarkIds = membershipRows.map((r) => String(r.bookmark_id));
       if (affectedBookmarkIds.length > 0) {
-        await manager
-          .createQueryBuilder()
-          .insert()
-          .into(BookmarkCollection)
-          .values(
-            affectedBookmarkIds.map((bookmarkId) => ({
-              bookmarkId,
-              collectionId: target.id,
-            })),
-          )
-          .orIgnore()
-          .execute();
+        const existingTargetRows = await queryRows(
+          manager,
+          `SELECT bookmark_id
+             FROM bookmark_collections
+            WHERE collection_id = $1::uuid
+              AND bookmark_id = ANY($2::uuid[])`,
+          [target.id, affectedBookmarkIds],
+        );
+        const alreadyInTarget = new Set(existingTargetRows.map((r) => String(r.bookmark_id)));
+        const toInsertIds = affectedBookmarkIds.filter((bid) => !alreadyInTarget.has(bid));
+        if (toInsertIds.length > 0) {
+          let nextOrder = await nextMembershipOrder(manager, target.id);
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(BookmarkCollection)
+            .values(
+              toInsertIds.map((bookmarkId) => ({
+                bookmarkId,
+                collectionId: target.id,
+                order: nextOrder++,
+              })),
+            )
+            .orIgnore()
+            .execute();
+        }
         await manager.delete(BookmarkCollection, { collectionId: In(uniqueSourceIds) });
         await manager.update(
           Bookmark,
@@ -594,10 +706,12 @@ export class CollectionsService {
 
   /**
    * Replaces a bookmark's exact collection set (plan D5 — many-to-many):
-   * memberships to listed collections are ensured, memberships to absent
-   * ones are removed, and every collection whose set actually changed
-   * records a `collection:update` on top of the bookmark's own
-   * `bookmark:update` (the multi-event convention — M5 devices refetch).
+   * memberships to listed collections are ensured (new memberships append at
+   * `MAX(order) + 1` within each collection; existing memberships keep their
+   * current `order`), memberships to absent ones are removed, and every
+   * collection whose set actually changed records a `collection:update` on top
+   * of the bookmark's own `bookmark:update` (the multi-event convention — M5
+   * devices refetch).
    *
    * Refuses trashed bookmarks (the trash is read-only except for restore)
    * and unknown/inactive/foreign collections (404).
@@ -628,6 +742,11 @@ export class CollectionsService {
         if (!collection) throw new NotFoundException(`Collection not found: ${cid}`);
       }
 
+      // Record FIRST: takes the caller's `users` row lock so concurrent
+      // membership appends into the same collection serialize cleanly and
+      // never pick the same `MAX(order) + 1` slot (M4 / M16).
+      await record(user.id, { entity: 'bookmark', entityId: bookmarkId, action: 'update' });
+
       const current = await manager.find(BookmarkCollection, {
         where: { bookmarkId },
       });
@@ -640,13 +759,12 @@ export class CollectionsService {
         await manager.delete(BookmarkCollection, { bookmarkId, collectionId: In(toRemove) });
       }
       if (toAdd.length > 0) {
-        await manager.insert(
-          BookmarkCollection,
-          toAdd.map((cid) => ({ bookmarkId, collectionId: cid })),
-        );
+        for (const cid of toAdd) {
+          const order = await nextMembershipOrder(manager, cid);
+          await manager.insert(BookmarkCollection, { bookmarkId, collectionId: cid, order });
+        }
       }
 
-      await record(user.id, { entity: 'bookmark', entityId: bookmarkId, action: 'update' });
       for (const cid of new Set([...toRemove, ...toAdd])) {
         await record(user.id, { entity: 'collection', entityId: cid, action: 'update' });
       }

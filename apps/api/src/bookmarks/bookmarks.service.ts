@@ -11,6 +11,7 @@ import type { EntityManager, Repository } from 'typeorm';
 import { In, IsNull, Not } from 'typeorm';
 import { ChangeLogService } from '@api/change-log/change-log.service';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
+import { nextMembershipOrder } from '@api/collections/membership-order';
 import {
   BookmarkDto,
   BookmarkListDto,
@@ -31,9 +32,9 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 /**
  * Bookmark CRUD, trash/restore, server-side search + paging and stats
  * (plan M3, D10/D12/D13/D17; enriched M10; operator grammar M11;
- * broken-link state M12; reminders M14). Every route is user-scoped — a row
- * another user owns simply does not exist (404, never 403: existence is not
- * leaked).
+ * broken-link state M12; reminders M14; manual collection sort M16/D21).
+ * Every route is user-scoped — a row another user owns simply does not exist
+ * (404, never 403: existence is not leaked).
  *
  * Every mutation runs through `ChangeLogService.transact` so the ChangeEvent
  * is appended in the mutation's own transaction with a gapless per-user seq,
@@ -64,12 +65,19 @@ export class BookmarksService {
   }
 
   /**
-   * Search + filters + paging (plan D10, M10, M11, M12, M14). Defaults: active
-   * set (trashed excluded), sort by `updatedAt` desc, pageSize 20 clamped to 200.
+   * Search + filters + paging (plan D10, M10, M11, M12, M14, M16). Defaults:
+   * active set (trashed excluded), sort by `updatedAt` desc, pageSize 20
+   * clamped to 200. `sort=manual` requires `collectionId` (D21: manual order
+   * is membership-scoped per collection) and orders `order ASC NULLS LAST`.
    */
   async list(user: RequestUser, query: ListBookmarksQueryDto): Promise<BookmarkListDto> {
     if (query.search !== undefined && query.q !== undefined) {
       throw new BadRequestException('Provide either "search" or "q", not both');
+    }
+    if (query.sort === 'manual' && query.collectionId === undefined) {
+      throw new BadRequestException(
+        'sort=manual requires collectionId — manual order is membership-scoped per collection (D21)',
+      );
     }
 
     const page = query.page ?? 1;
@@ -148,13 +156,22 @@ export class BookmarksService {
       // Active from M4 (D5): membership is membership — the bookmark lists
       // if it has a row in bookmark_collections, regardless of the
       // collection's own trash state (documented in the README).
-      qb.andWhere(
-        `EXISTS (
-          SELECT 1 FROM bookmark_collections bc
-           WHERE bc.bookmark_id = b.id AND bc.collection_id = :collectionId
-        )`,
-        { collectionId: query.collectionId },
-      );
+      if (query.sort === 'manual') {
+        qb.innerJoin(
+          BookmarkCollection,
+          'bc_sort',
+          'bc_sort.bookmarkId = b.id AND bc_sort.collectionId = :sortCollectionId',
+          { sortCollectionId: query.collectionId },
+        );
+      } else {
+        qb.andWhere(
+          `EXISTS (
+            SELECT 1 FROM bookmark_collections bc
+             WHERE bc.bookmark_id = b.id AND bc.collection_id = :collectionId
+          )`,
+          { collectionId: query.collectionId },
+        );
+      }
     }
 
     const totalCount = await qb.getCount();
@@ -166,11 +183,22 @@ export class BookmarksService {
       case 'title':
         qb.orderBy('LOWER(b.title)', 'ASC');
         break;
+      case 'manual':
+        qb.orderBy('bc_sort.order', 'ASC', 'NULLS LAST');
+        qb.addOrderBy('bc_sort.createdAt', 'ASC');
+        break;
       default:
         qb.orderBy('b.updatedAt', 'DESC');
     }
     qb.addOrderBy('b.id', 'ASC'); // stable paging tie-breaker
-    qb.skip((page - 1) * pageSize).take(pageSize);
+
+    if (query.sort === 'manual') {
+      // Safe because bc_sort joins 1:1 on the composite PK (bookmark_id, collection_id)
+      // and avoids TypeORM's distinctAlias subquery rewrite on joined ORDER BY columns.
+      qb.offset((page - 1) * pageSize).limit(pageSize);
+    } else {
+      qb.skip((page - 1) * pageSize).take(pageSize);
+    }
 
     const rows = await qb.getMany();
     const tags = await this.tagsForBookmarks(rows.map((row) => row.id));
@@ -213,7 +241,7 @@ export class BookmarksService {
    *
    * When `collectionRef` is supplied (quick-add `?collection=`), resolves the
    * active owned collection by UUID or title and attaches the bookmark to it
-   * in the same transaction.
+   * at `MAX(order) + 1` in the same transaction.
    *
    * After the commit, the M6/M10 metadata pipeline is scheduled fire-and-forget:
    * the response below never waits for the fetch, and failures are silent.
@@ -265,12 +293,16 @@ export class BookmarksService {
         updatedAt: now,
       });
       await manager.insert(Bookmark, entity);
+      // Record bookmark:create BEFORE computing nextMembershipOrder so the
+      // users row lock serializes concurrent quick-adds into the same collection.
       await record(user.id, { entity: 'bookmark', entityId: entity.id, action: 'create' });
 
       if (targetCollection) {
+        const order = await nextMembershipOrder(manager, targetCollection.id);
         await manager.insert(BookmarkCollection, {
           bookmarkId: entity.id,
           collectionId: targetCollection.id,
+          order,
         });
         await record(user.id, {
           entity: 'collection',
@@ -353,7 +385,11 @@ export class BookmarksService {
     return result;
   }
 
-  /** Soft-deletes to the trash (D17). Trashed/unknown ids are 404. */
+  /**
+   * Soft-deletes to the trash (D17). Trashed/unknown ids are 404.
+   * Membership rows in `bookmark_collections` (including manual `order` slots)
+   * stay intact so restoring returns the bookmark to its prior position (M16).
+   */
   async trash(user: RequestUser, id: string): Promise<void> {
     await this.changeLog.transact(async (manager, record) => {
       const result = await manager.update(
@@ -366,7 +402,7 @@ export class BookmarksService {
     });
   }
 
-  /** Moves a trashed bookmark back to the active set. Active ids are 404. */
+  /** Moves a trashed bookmark back to the active set (preserving its collection order slots). Active ids are 404. */
   async restore(user: RequestUser, id: string): Promise<BookmarkDto> {
     return this.changeLog.transact(async (manager, record) => {
       const result = await manager.update(

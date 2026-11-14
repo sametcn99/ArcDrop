@@ -27,7 +27,7 @@ describe('dtoSchema (M7 parity foundation)', () => {
   it('derives the bookmark list query DTO with its enum + bounds', () => {
     const schema = dtoSchema(ListBookmarksQueryDto);
     const properties = schema['properties'] as Record<string, Record<string, unknown>>;
-    expect(properties['sort']?.['enum']).toEqual(['updated', 'created', 'title']);
+    expect(properties['sort']?.['enum']).toEqual(['updated', 'created', 'title', 'manual']);
     // pageSize > 200 is CLAMPED by the service (never refused) — so the
     // validation-derived schema carries the minimum but no maximum.
     expect(properties['pageSize']?.['minimum']).toBe(1);

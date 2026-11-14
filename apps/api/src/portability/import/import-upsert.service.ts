@@ -8,6 +8,10 @@ import { Collection } from '@api/database/entities/collection.entity';
 import { Highlight } from '@api/database/entities/highlight.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import { ChangeLogService, type ChangeRecorder } from '@api/change-log/change-log.service';
+import {
+  lockUserForMembershipAppend,
+  nextMembershipOrder,
+} from '@api/collections/membership-order';
 import { TagsService } from '@api/bookmarks/tags.service';
 import { UrlDecompositionService } from '@api/bookmarks/url-decomposition.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
@@ -310,6 +314,10 @@ export class ImportUpsertService {
     collectionCache: PathCache,
     record: ChangeRecorder,
   ): Promise<void> {
+    // Lock users row before updating bookmarks / inserting bookmark_collections
+    // so concurrent requests never invert lock order or collide on membership order.
+    await lockUserForMembershipAppend(manager, user.id);
+
     // -- field merge: LWW on updatedAt, empty never overwrites --------------
     const patch: Partial<Bookmark> = { ...pickFieldPatch(row, item) };
     const itemUpdatedAtMs =
@@ -418,8 +426,8 @@ export class ImportUpsertService {
 
   /**
    * Ensures every membership path exists (creating collections on demand)
-   * and is attached. Existing memberships are never removed. Returns true
-   * when memberships were added.
+   * and is attached at `MAX(order) + 1`. Existing memberships are never
+   * removed. Returns true when memberships were added.
    */
   private async applyCollections(
     manager: EntityManager,
@@ -441,7 +449,8 @@ export class ImportUpsertService {
         record,
       );
       if (collectionId === null || targetIds.has(collectionId)) continue;
-      await manager.insert(BookmarkCollection, { bookmarkId, collectionId });
+      const order = await nextMembershipOrder(manager, collectionId);
+      await manager.insert(BookmarkCollection, { bookmarkId, collectionId, order });
       targetIds.add(collectionId);
       added = true;
     }

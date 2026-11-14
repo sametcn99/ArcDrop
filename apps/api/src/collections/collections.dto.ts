@@ -20,7 +20,7 @@ export const MAX_COLLECTION_ICON_LENGTH = 255;
 export const MAX_COLLECTION_COLOR_LENGTH = 32;
 /** Cap for one bookmark's collection set (`PUT /bookmarks/{id}/collections`). */
 export const MAX_COLLECTIONS_PER_BOOKMARK = 100;
-/** Cap for one reorder batch (`PATCH /collections/order`). */
+/** Cap for one reorder batch (`PATCH /collections/order`, `PATCH /collections/{id}/bookmarks/order`). */
 export const MAX_ORDER_ITEMS = 1000;
 /** Cap for one collection merge batch (`POST /collections/merge`). */
 export const MAX_BULK_COLLECTION_IDS = 500;
@@ -107,6 +107,34 @@ export class ReorderCollectionsDto {
   @ValidateNested({ each: true })
   @Type(() => CollectionOrderItemDto)
   items!: CollectionOrderItemDto[];
+}
+
+export class BookmarkOrderItemDto {
+  @ApiProperty({ format: 'uuid' })
+  @IsUUID()
+  bookmarkId!: string;
+
+  /** Position within this collection; smaller sorts earlier. `≥ 0`. */
+  @ApiProperty({ minimum: 0 })
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  order!: number;
+}
+
+/**
+ * Explicit manual positions for the listed bookmarks inside one collection
+ * (plan D21, M16). Unspecified members keep their current `order`. Duplicate
+ * `bookmarkId` values in one payload are a validation error.
+ */
+export class ReorderCollectionBookmarksDto {
+  @ApiProperty({ type: [BookmarkOrderItemDto], minItems: 1, maxItems: MAX_ORDER_ITEMS })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(MAX_ORDER_ITEMS)
+  @ValidateNested({ each: true })
+  @Type(() => BookmarkOrderItemDto)
+  items!: BookmarkOrderItemDto[];
 }
 
 export class ReplaceBookmarkCollectionsDto {

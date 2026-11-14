@@ -287,7 +287,7 @@ async function waitFor(
   throw new Error('expected change notification did not arrive within the deadline');
 }
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -315,6 +315,7 @@ const EXPECTED_TOOLS = [
   'deleteCollection',
   'restoreCollection',
   'reorderCollections',
+  'reorderCollectionBookmarks',
   'mergeCollections',
   'sortCollectionsAlphabetical',
   'deleteEmptyCollections',
@@ -777,7 +778,7 @@ describe('MCP server (e2e)', () => {
         expect(text).toContain(tool.name);
         checked += 1;
       }
-      expect(checked).toBe(26);
+      expect(checked).toBe(27);
 
       // read tools DO run for the same token
       const read = await mcpPost(
@@ -1096,6 +1097,94 @@ describe('MCP server (e2e)', () => {
       expect(
         (hlAfter.message?.result?.['structuredContent'] as { items: unknown[] }).items,
       ).toEqual([]);
+    });
+
+    it('M16 MCP tools: reorderCollectionBookmarks + listBookmarks sort=manual (D21)', async () => {
+      const col = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(200, 'tools/call', {
+          name: 'createCollection',
+          arguments: { title: 'MCP Manual Sort' },
+        }),
+        sessionId,
+      );
+      const collectionId = (col.message?.result?.['structuredContent'] as { id: string }).id;
+
+      const b1Res = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(201, 'tools/call', {
+          name: 'createBookmark',
+          arguments: { url: 'https://example.com/mcp-order-1', title: 'First' },
+        }),
+        sessionId,
+      );
+      const b2Res = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(202, 'tools/call', {
+          name: 'createBookmark',
+          arguments: { url: 'https://example.com/mcp-order-2', title: 'Second' },
+        }),
+        sessionId,
+      );
+      const b1 = (b1Res.message?.result?.['structuredContent'] as { id: string }).id;
+      const b2 = (b2Res.message?.result?.['structuredContent'] as { id: string }).id;
+
+      await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(203, 'tools/call', {
+          name: 'replaceBookmarkCollections',
+          arguments: { id: b1, collectionIds: [collectionId] },
+        }),
+        sessionId,
+      );
+      await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(204, 'tools/call', {
+          name: 'replaceBookmarkCollections',
+          arguments: { id: b2, collectionIds: [collectionId] },
+        }),
+        sessionId,
+      );
+
+      // Reorder via MCP tool: b2 -> 0, b1 -> 5
+      const reordered = await mcpPost(
+        baseUrl,
+        alicePat.token,
+        rpcRequest(205, 'tools/call', {
+          name: 'reorderCollectionBookmarks',
+          arguments: {
+            id: collectionId,
+            items: [
+              { bookmarkId: b2, order: 0 },
+              { bookmarkId: b1, order: 5 },
+            ],
+          },
+        }),
+        sessionId,
+      );
+      expect(reordered.message?.error).toBeUndefined();
+      expect(reordered.message?.result?.['isError']).toBeUndefined();
+
+      // List via read-only PAT with sort=manual
+      const listed = await mcpPost(
+        baseUrl,
+        aliceReadOnlyPat.token,
+        rpcRequest(206, 'tools/call', {
+          name: 'listBookmarks',
+          arguments: { collectionId, sort: 'manual' },
+        }),
+        readOnlySession,
+      );
+      expect(listed.message?.error).toBeUndefined();
+      const items = (
+        listed.message?.result?.['structuredContent'] as { items: Array<{ id: string }> }
+      ).items;
+      expect(items.map((item) => item.id)).toEqual([b2, b1]);
     });
   });
 

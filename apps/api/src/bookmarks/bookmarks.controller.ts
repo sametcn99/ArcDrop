@@ -58,7 +58,7 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 
 /**
- * Bookmark surface (plan M3, extended M10/M11/M12/M13/M14). All routes are
+ * Bookmark surface (plan M3, extended M10/M11/M12/M13/M14/M16). All routes are
  * bearer-authenticated (global guard) and user-scoped; `GET /bookmarks/tags`
  * and `PUT /bookmarks/{id}/tags` expose tags, `GET/POST /bookmarks/{id}/highlights`
  * expose highlights, and `POST /bookmarks/bulk` executes transactional bulk ops.
@@ -85,6 +85,7 @@ export class BookmarksController {
       '(plan D12). Saving the same URL twice creates two bookmarks (plan D13). ' +
       'Supports quick-add query params (`?url=…&title=…&collection=…`) for RSS readers ' +
       'and share sheets using the same validation and metadata pipeline. ' +
+      'When `collection` is supplied, the new membership appends at `MAX(order) + 1`. ' +
       'Optional `reminderAt` is stored in UTC (clients render local time).',
   })
   @ApiCreatedResponse({ type: BookmarkDto })
@@ -125,7 +126,8 @@ export class BookmarksController {
       'and unknown operators return `400 BAD_REQUEST` with character position. ' +
       'Composes with `collectionId` (membership is membership), `tag`, `domain`, `favorite`, `broken`, `reminder`, `type`, ' +
       '`unassignedOnly`, `trashed`, and `updatedSince` via AND. ' +
-      '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc (default), `createdAt` desc or `title` asc.',
+      '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc (default), `createdAt` desc, `title` asc, ' +
+      'or `manual` (membership `order` asc NULLS LAST; requires `collectionId` because manual order is membership-scoped per collection per D21 — returns `400 BAD_REQUEST` without `collectionId`).',
   })
   @ApiOkResponse({ type: BookmarkListDto })
   list(
@@ -164,7 +166,7 @@ export class BookmarksController {
     operationId: 'bulkBookmarks',
     summary: 'Run a transactional bulk operation over bookmarks (max 500 ids)',
     description:
-      'Executes `move` (`assign` | `union` collection memberships), `addTags`, ' +
+      'Executes `move` (`assign` | `union` collection memberships; new memberships append at `MAX(order) + 1`), `addTags`, ' +
       '`removeTags`, `trash`, `restore`, or `delete` (hard delete strictly for ' +
       'already-trashed ids, preserving M4 two-phase semantics) in a single ' +
       'change-logged transaction. Any invalid/missing id or state conflict rolls ' +
@@ -212,7 +214,9 @@ export class BookmarksController {
   @ApiOperation({
     operationId: 'deleteBookmark',
     summary: 'Move a bookmark to the trash (soft delete)',
-    description: 'Hard deletion happens in the daily retention sweep (plan D17).',
+    description:
+      'Soft-deletes the bookmark (`deletedAt` set) while preserving its collection memberships and manual `order` slots ' +
+      '(restoring returns it to the same slots). Hard deletion (purge) happens in the daily retention sweep (plan D17) or bulk delete and removes membership rows and slots via cascade.',
   })
   @ApiNoContentResponse({ description: 'Moved to trash' })
   async delete(
@@ -227,6 +231,8 @@ export class BookmarksController {
   @ApiOperation({
     operationId: 'restoreBookmark',
     summary: 'Restore a bookmark from the trash',
+    description:
+      'Restores a trashed bookmark to the active set; preserved collection memberships keep their prior manual `order` slots.',
   })
   @ApiOkResponse({ type: BookmarkDto })
   restore(
@@ -286,9 +292,10 @@ export class BookmarksController {
     operationId: 'replaceBookmarkCollections',
     summary: 'Replace the bookmark’s exact collection set (plan D5)',
     description:
-      'The bookmark ends up in exactly the listed collections — memberships ' +
-      'are ensured for listed ids, removed for absent ones. A bookmark may ' +
-      'live in several collections. Every collection whose set actually ' +
+      'The bookmark ends up in exactly the listed collections — existing memberships ' +
+      'keep their manual `order` slots, newly added memberships append at `MAX(order) + 1`, ' +
+      'and absent ones are removed. A bookmark may live in several collections with ' +
+      'independent manual order slots per collection (plan D21). Every collection whose set actually ' +
       'changed records a `collection:update` on top of the bookmark’s own ' +
       '`bookmark:update`. Refuses trashed bookmarks and unknown/inactive ' +
       'collections (404). Returns the resulting membership set.',

@@ -28,7 +28,7 @@ const stubs = {} as {
   portability: PortabilityService;
 };
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications, M16 manual ordering. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -58,6 +58,7 @@ const EXPECTED_TOOLS = [
   'deleteCollection',
   'restoreCollection',
   'reorderCollections',
+  'reorderCollectionBookmarks',
   'mergeCollections',
   'sortCollectionsAlphabetical',
   'deleteEmptyCollections',
@@ -71,7 +72,7 @@ const EXPECTED_TOOLS = [
   'exportBookmarkHighlights',
 ] as const;
 
-describe('MCP tool catalog (M7/M12/M13/M14)', () => {
+describe('MCP tool catalog (M7/M12/M13/M14/M16)', () => {
   const catalog = buildToolCatalog(stubs);
   const byName = new Map(catalog.map((tool) => [tool.name, tool]));
 
@@ -138,6 +139,13 @@ describe('MCP tool catalog (M7/M12/M13/M14)', () => {
         >
       )['maxItems'],
     ).toBe(50);
+
+    // composite tool (M16): collection id + items body merged flat.
+    const reorderBookmarks = toolInputSchema(byName.get('reorderCollectionBookmarks')!) as Record<
+      string,
+      unknown
+    >;
+    expect((reorderBookmarks['required'] as string[]).sort()).toEqual(['id', 'items'].sort());
   });
 
   it('argument-less tools publish an empty object schema', () => {

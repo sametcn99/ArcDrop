@@ -40,6 +40,9 @@ export type BulkBookmarkAction = (typeof BULK_BOOKMARK_ACTIONS)[number];
 export const BULK_MOVE_MODES = ['assign', 'union'] as const;
 export type BulkMoveMode = (typeof BULK_MOVE_MODES)[number];
 
+export const BOOKMARK_SORTS = ['updated', 'created', 'title', 'manual'] as const;
+export type BookmarkSort = (typeof BOOKMARK_SORTS)[number];
+
 /** Query-string boolean: `true/1` → true, `false/0/''` → false, else invalid. */
 const toBoolean = ({ value }: { value: unknown }): unknown => {
   if (value === 'true' || value === true || value === 1 || value === '1') return true;
@@ -327,7 +330,7 @@ export class ListBookmarksQueryDto {
       '`type:<article|image|video|audio|document|book|link>`, ' +
       '`favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, ' +
       '`created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), ' +
-      'and `match:OR` (OR positive terms; exclusions stay ANDed). ' +
+      'and `match:OR` (OR positive terms; exclusions stay ANDed); ' +
       'Reserved (`file:`) and unknown operators fail with 400 BAD_REQUEST.',
   })
   @IsOptional()
@@ -405,10 +408,16 @@ export class ListBookmarksQueryDto {
   @MaxLength(253)
   domain?: string;
 
-  @ApiPropertyOptional({ enum: ['updated', 'created', 'title'], default: 'updated' })
+  @ApiPropertyOptional({
+    enum: BOOKMARK_SORTS,
+    default: 'updated',
+    description:
+      'Sort order: `updated` (default, updatedAt desc), `created` (createdAt desc), ' +
+      '`title` (case-insensitive asc), or `manual` (membership order asc NULLS LAST; requires `collectionId`, D21).',
+  })
   @IsOptional()
-  @IsIn(['updated', 'created', 'title'])
-  sort?: 'updated' | 'created' | 'title';
+  @IsIn(BOOKMARK_SORTS)
+  sort?: BookmarkSort;
 
   @ApiPropertyOptional({ minimum: 1, default: DEFAULT_PAGE_SIZE })
   @IsOptional()

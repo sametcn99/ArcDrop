@@ -5,6 +5,10 @@ import { BookmarkCollection } from '@api/database/entities/bookmark-collection.e
 import { BookmarkTag } from '@api/database/entities/bookmark-tag.entity';
 import { ChangeLogService } from '@api/change-log/change-log.service';
 import { BookmarksService, toBookmarkDto } from '@api/bookmarks/bookmarks.service';
+import {
+  lockUserForMembershipAppend,
+  nextMembershipOrder,
+} from '@api/collections/membership-order';
 import { In, IsNull, type Repository } from 'typeorm';
 import type {
   DuplicateGroupDto,
@@ -78,7 +82,8 @@ export class DuplicatesService {
    * Resolves duplicates in a single change-logged transaction:
    * 1. Validates `keepId` and every `trashIds` entry are active and owned by `userId`
    *    (and `keepId` is not in `trashIds`).
-   * 2. Merges unique tags and collection memberships from `trashIds` into `keepId`.
+   * 2. Merges unique tags and collection memberships from `trashIds` into `keepId`
+   *    (appending new memberships at `MAX(order) + 1`).
    * 3. Soft-deletes (trashes) every bookmark in `trashIds` (`deletedAt = now`).
    * 4. Records change events for the keeper (when modified), affected collections,
    *    and every trashed duplicate so sync cursors converge completely.
@@ -114,6 +119,10 @@ export class DuplicatesService {
           throw new NotFoundException(`Bookmark not found: ${trashId}`);
         }
       }
+
+      // Take the user lock before writing tags/collections/bookmarks so
+      // membership appends serialize cleanly with concurrent requests.
+      await lockUserForMembershipAppend(manager, userId);
 
       // 1. Merge tags from trashIds -> keepId
       const existingTagRows = await manager.find(BookmarkTag, {
@@ -160,13 +169,16 @@ export class DuplicatesService {
         }
       }
       if (colsToAdd.length > 0) {
-        await manager
-          .createQueryBuilder()
-          .insert()
-          .into(BookmarkCollection)
-          .values(colsToAdd.map((collectionId) => ({ bookmarkId: dto.keepId, collectionId })))
-          .orIgnore()
-          .execute();
+        for (const collectionId of colsToAdd) {
+          const order = await nextMembershipOrder(manager, collectionId);
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(BookmarkCollection)
+            .values({ bookmarkId: dto.keepId, collectionId, order })
+            .orIgnore()
+            .execute();
+        }
       }
 
       // 3. Trash extras

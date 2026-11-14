@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M15 — 2FA & account lifecycle (**Wave 2: M0–M15**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (39 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`); plus M15 TOTP 2FA with single-use recovery codes, two-step login (`TOTP_REQUIRED`), password-confirmed `POST /me/reset-data` & `DELETE /me`, and documented export→import account transfer. **Next:** Wave 2 — M16 (manual ordering).
+**Status:** M16 — Manual ordering (**Wave 2: M0–M16**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (40 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`); plus M15 TOTP 2FA with single-use recovery codes, two-step login (`TOTP_REQUIRED`), password-confirmed `POST /me/reset-data` & `DELETE /me`, and documented export→import account transfer; plus M16 membership-scoped manual bookmark ordering (`bookmark_collections.order`, `PATCH /collections/{id}/bookmarks/order`, `GET /bookmarks?sort=manual&collectionId=`). **Next:** Wave 2 — M17 (archive & full-text search).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -127,8 +127,10 @@ generated migrations.
   `M14RemindersNotifications1794632472998` (`bookmarks.reminder_at`,
   `bookmarks.reminded_at`, `IX_bookmarks_user_reminder_at`,
   `IX_bookmarks_reminder_due`, `notification_outbox`, and `notification_type` enum),
-  and `M15TwoFactorAuth1794633718696` (`tfa_recovery_codes`, `users.totp_enabled`,
-  `users.totp_secret`, and `'tfa_challenge'` on `one_time_token_type`).
+  `M15TwoFactorAuth1794633718696` (`tfa_recovery_codes`, `users.totp_enabled`,
+  `users.totp_secret`, and `'tfa_challenge'` on `one_time_token_type`),
+  and `M16ManualOrdering1794634989570` (`bookmark_collections.order` nullable
+  integer `DEFAULT 0` + `IX_bookmark_collections_collection_order`).
   M5/M6/M8/M9/M11/M13 needed NO schema work.
 
 ### Migration workflow
@@ -213,7 +215,7 @@ Compose is hardened for self-hosting (M9): resource limits/reservations (`api`: 
   `tag` (exact, case-insensitive), `domain` (exact registrable domain,
   case-insensitive), `favorite` (`true`/`false`), `type` (`ContentType`),
   `unassignedOnly`, `trashed`, `sort` (updated-desc default | created-desc |
-  title-asc), `page` (≥1), `pageSize` (≥1, CLAMPED to 200 — a bigger value
+  title-asc | manual-asc (M16, requires `collectionId`)), `page` (≥1), `pageSize` (≥1, CLAMPED to 200 — a bigger value
   never 400s), `updatedSince` (ISO-8601, `updatedAt >`), and `collectionId`
   (uuid; membership filter, ACTIVE since M4 — see the collections section).
   Response: `{ items, totalCount, page, pageSize }`; `totalCount` is
@@ -506,7 +508,7 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 + M10–M14 catalog (39 tools):** bookmarks `listBookmarks` (incl. M11/M12/M14
+- **v1 + M10–M16 catalog (40 tools):** bookmarks `listBookmarks` (incl. M11/M12/M14
   `search`/`q` operator grammar, `favorite`, `type`, `broken`, and `reminder` filters + broken/reminder fields), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
   `favorite` toggle & `reminderAt`), `deleteBookmark` (trash), `restoreBookmark`,
   `bulkBookmarks` (M13: move/addTags/removeTags/trash/restore/delete),
@@ -516,7 +518,7 @@ like extra REST JSON bodies (DTO whitelist), never errors.
   `updateHighlight`, `deleteHighlight`; collections `listCollections`,
   `getCollectionTree`, `getCollection`, `createCollection`, `updateCollection`,
   `deleteCollection` (two-phase like REST), `restoreCollection`,
-  `reorderCollections`, `mergeCollections`, `sortCollectionsAlphabetical`,
+  `reorderCollections`, `reorderCollectionBookmarks` (M16), `mergeCollections`, `sortCollectionsAlphabetical`,
   `deleteEmptyCollections` (M13); tags `renameTag` (renames or MERGES, like
   `PUT /tags/{name}`), `deleteTag`; sync `getSyncState`, `listSyncChanges`,
   `createSyncTicket` (ws push — an agent can watch the library the same way a
@@ -1445,14 +1447,27 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 - **PAT isolation broadened to `/me/*`:** `PatScopeGuard` now blocks PATs across the entire `/me` controller prefix (`/me/tokens`, `/me/reset-data`, `DELETE /me`) in addition to `/auth/*` and `/admin/*`; e2e MCP parity excludes `/api/v1/me` & `/api/v1/me/*` so agent/token credentials can never mutate account lifecycle or mint/revoke credentials.
 - **`ProblemDetailsDto` + `ProblemJsonFilter` extension preservation:** Non-standard top-level problem extensions returned in `UnauthorizedException` payloads (`challenge`, `expiresAt` on `401 TOTP_REQUIRED`) are preserved verbatim alongside `code` and documented in OpenAPI `ProblemDetailsDto`.
 
-## Wave-2 Handoff (for M16+)
+## Manual ordering (M16 — D19, D21, Raindrop parity G8)
 
-M0–M15 are complete and green (**325 unit / 200 e2e tests across 54 test files**). Next is **M16 (Manual ordering — D21, parity G8)**:
+- **Why order lives on `bookmark_collections` (D21):** In ArcDrop, bookmarks belong to collections M:N rather than 1:N, so storing a single global `order` column on `bookmarks` would couple unrelated collections (dragging a bookmark in Collection A would scramble its position in Collection B). Storing `order` on the `bookmark_collections` join row gives each collection an independent manual order without inventing an unusable global order.
+- **Schema & pre-existing row migration (`M16ManualOrdering1794634989570`):** Adds nullable `bookmark_collections.order` (`integer DEFAULT 0`) and `IX_bookmark_collections_collection_order (collection_id, order)`. Existing memberships created before M16 receive `0` via the migration default (and any `NULL` order values sort `NULLS LAST` under `sort=manual` before falling back to `bc.created_at ASC, b.id ASC`).
+- **Append + concurrency serialization (`src/collections/membership-order.ts`):** Every new membership (quick-add `POST /bookmarks?collection=`, `PUT /bookmarks/{id}/collections`, `POST /bookmarks/bulk` move, `POST /collections/merge`, duplicates resolve, and `POST /data/import`) acquires the caller's `users` row lock (`ChangeLogService.record` or `lockUserForMembershipAppend`) first inside the transaction and computes `nextMembershipOrder` as `COALESCE(MAX("order"), -1) + 1` across **all** memberships in that collection (including trashed bookmarks). Parallel adds never deadlock (`users` → `bookmarks`/`collections` → `bookmark_collections`) and never collide on `(order, sync_seq)`. Existing memberships retain their slots across `PUT /bookmarks/{id}/collections`, `move` (`union`/`assign`), duplicates resolve, and `merge`.
+- **Reorder endpoint (`PATCH /api/v1/collections/{id}/bookmarks/order`, `operationId: reorderCollectionBookmarks`):** Accepts `{ items: [{ bookmarkId, order }] }` (1–1000 unique active members, integer `order >= 0`). Unspecified members keep their positions; any unknown, foreign, trashed, or non-member bookmark (or inactive/foreign collection) rejects the whole request with `404` (`400` on duplicate `bookmarkId` or invalid `order`) and zero partial writes. Emits `bookmark:update` change events **only** for memberships whose `order` value actually changed, leaving `bookmarks.updatedAt` untouched so manual dragging does not scramble `sort=updated`.
+- **List sorting contract (`GET /api/v1/bookmarks?sort=manual`):** Requires `collectionId` — omitting it returns `400 BAD_REQUEST` (`application/problem+json`) with a clear detail explaining that manual order is collection-scoped (D21). When provided, joins the membership row for `collectionId` and orders by `bc.order ASC NULLS LAST, bc.created_at ASC, b.id ASC`.
+- **Trash / restore / purge:** Soft-trashing a bookmark preserves its `bookmark_collections` rows and `order` slots; `POST /bookmarks/{id}/restore` returns it to its prior position in every collection (and concurrent adds while trashed append after the preserved slot). Hard deletion (single `DELETE /bookmarks/{id}` on trashed rows, `bulkBookmarks delete`, `TrashPurgeJob`, or `DELETE /me`) cascades and removes the membership row and its slot.
+- **MCP parity (`src/mcp/mcp-tool-catalog.ts`):** Adds `reorderCollectionBookmarks` (mutation, `idempotentHint: true`) and propagates `sort: 'manual'` into `listBookmarks` automatically via DTO schema generation (**40 tools total: 13 reads, 27 mutations**).
 
-- **Membership-scoped ordering (`D21`):** `bookmark_collections` (in `src/database/entities/bookmark-collection.entity.ts`) needs an `order` integer column via a new TypeORM migration added explicitly to `src/database/migrations/index.ts`. New memberships should append using `MAX(order) + 1` inside `ChangeLogService.transact` (same user `sync_seq` row-lock serialization pattern M4 uses for collection siblings).
-- **Query & validation contracts:** `GET /bookmarks?sort=manual` must require `collectionId` (`400 BAD_REQUEST` otherwise) and order by membership `order` (nulls last, tie-break cleanly). Preserve explicit `order` across bookmark trash → restore; delete/purge removes the membership row and slot.
-- **MCP catalog parity (`src/mcp/mcp-tool-catalog.ts`):** M16’s `PATCH /collections/{id}/bookmarks/order` is an authenticated non-admin library mutation — add its matching tool to `mcp-tool-catalog.ts` and keep `test/mcp.e2e.test.ts` parity green (note: `listBookmarks` DTO changes propagate automatically to MCP `tools/list` via `validationMetadatasToSchemas`).
-- **Reserved search operators & verification:** Only `file:` remains reserved in `src/bookmarks/search-query.parser.ts` (for M18). Keep entity/migration indexes explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
+## Decisions recorded (M16)
+
+- **Preserving `bookmarks.updatedAt` on manual reorder:** Reordering a bookmark inside a collection updates `bookmark_collections.order` and writes `bookmark:update` to `change_events`, but deliberately does **not** touch `bookmarks.updated_at` so drag-and-drop in one collection never changes `sort=updated` positions or `updatedSince` filters for unrelated collections.
+- **Keeping `order` nullable with `DEFAULT 0`:** Existing pre-M16 rows safely start at slot `0` (before newly appended `1, 2, ...` memberships), while keeping the column nullable guarantees `ORDER BY bc_sort.order ASC NULLS LAST` honors both pre-migration `0` rows and any null rows.
+
+## Wave-2 Handoff (for M17+)
+
+M0–M16 are complete and green (**325 unit / 207 e2e tests across 55 test files**). Next is **M17 (Archive & full-text search — D7, D19)**:
+
+- **Per-user full-text & archival search (`D7`):** Only `file:` remains reserved in `src/bookmarks/search-query.parser.ts` (for M18). M17 introduces permanent bookmark archive snapshots (HTML/reader content capture) and PostgreSQL full-text search integration.
+- **Standing conventions:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), maintain global lock order (`users` row lock first inside `ChangeLogService.transact`), use `queryRows()` for raw `RETURNING` SQL, mirror any new authenticated non-admin REST endpoints in `src/mcp/mcp-tool-catalog.ts`, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
 
 ## Decisions recorded (M4)
 
