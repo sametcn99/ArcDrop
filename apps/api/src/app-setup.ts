@@ -3,6 +3,7 @@ import { VersioningType } from '@nestjs/common';
 import type { Express, Request, Response } from 'express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { OpenAPIObject } from '@nestjs/swagger';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { Logger } from 'nestjs-pino';
 import type { AppConfig } from '@api/config/env.schema';
 import { AppConfigService } from '@api/config/app-config.service';
@@ -14,14 +15,18 @@ import pkg from '../package.json';
  * Shared application wiring — used by BOTH the production bootstrap
  * (`main.ts`) and the e2e test boots, so tests exercise the exact runtime
  * configuration: pino logger, `/api` prefix + URI versioning, the global
- * validation pipe, the CORS allowlist, shutdown hooks, the OpenAPI document
- * and the root-level infrastructure routes.
+ * validation pipe, the CORS allowlist, shutdown hooks, the ws adapter
+ * (M5's sync gateway — raw `ws`), the OpenAPI document and the root-level
+ * infrastructure routes.
  */
 export function setupApp(app: INestApplication, config: AppConfig): void {
   app.useLogger(app.get(Logger));
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(createValidationPipe());
+  // The sync ws gateway (M5) rides the same HTTP server via the raw-`ws`
+  // adapter. Must be set before init — same discipline as the routes below.
+  app.useWebSocketAdapter(new WsAdapter(app));
   if (config.cors.origins.length > 0) {
     app.enableCors({ origin: [...config.cors.origins] });
   }
@@ -52,6 +57,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addTag('Settings', 'Admin instance settings (plan D16)')
     .addTag('Bookmarks', 'Bookmark CRUD, trash/restore, search + paging, stats, per-bookmark tags')
     .addTag('Tags', 'Tag rename/merge and delete-detach (plan M3)')
+    .addTag('Sync', 'Change-log sync: state poll, cursor deltas, ws push + tickets (plan M5/D4)')
     // Bearer auth (plan D2): `Authorization: Bearer <access JWT>`.
     .addBearerAuth()
     .build();

@@ -2,14 +2,16 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M4 — collections (M1 foundation + first-run admin bootstrap, bearer JWT
-auth with rotating refresh tokens and reuse detection, sessions, admin user
-management with single-use invite/reset tokens, DB-backed instance settings,
-route throttling; M3 bookmark CRUD with URL decomposition, tags,
+**Status:** M5 — sync integration (M1 foundation + first-run admin bootstrap,
+bearer JWT auth with rotating refresh tokens and reuse detection, sessions,
+admin user management with single-use invite/reset tokens, DB-backed instance
+settings, route throttling; M3 bookmark CRUD with URL decomposition, tags,
 server-side search/paging/stats, trash with auto-purge, and the per-user
 change log; M4 hierarchical collections with the nested tree, membership
-sync, cycle protection, ordering — all change-logged). Next: M5 — sync
-integration (`/sync/state`, `/sync/changes`, ws gateway).
+sync, cycle protection, ordering — all change-logged; M5 the sync backbone:
+`/sync/state`, `/sync/changes` cursor deltas, the ws push gateway with
+one-time tickets, and the change-log retention job). Next: M6 — metadata &
+icons.
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, AI, portability, hardening & ops.
@@ -310,8 +312,8 @@ color, order, timestamps, deletedAt-as-plain-column)`. All rows are
   listed ids and removed for absent ones; a bookmark may live in several
   collections. Every listed id must be ACTIVE and owned (404 otherwise,
   dedupe first); trashed bookmarks are refused (the trash is read-only
-  except for restore — note `replaceTags` in M3 predates that rule and does
-  NOT refuse; left as-is). The response is the resulting membership set
+  except for restore — `replaceTags` used to predate that rule; M5
+  aligned it). The response is the resulting membership set
   (`{ collections: [{ id, title }] }` — BookmarkDto deliberately stayed
   frozen from M3). Events: the bookmark's own `bookmark:update` (always,
   even for a no-op set) plus `collection:update` for each collection whose
@@ -332,6 +334,110 @@ color, order, timestamps, deletedAt-as-plain-column)`. All rows are
   (`ALTER TYPE ... ADD VALUE IF NOT EXISTS`; the down() swaps the enum type
   back because PG cannot drop enum values — it deletes `collection` rows
   from `change_events` first, so revert is dev-only).
+
+## Sync integration (M5 — D4)
+
+The change log is the multi-device sync backbone (plan D4: "change log +
+cursor + ws push; ws messages are notifications, the REST delta is the
+source of truth"). Single instance, in-process bus fan-out — Redis
+scale-out is explicitly out of scope. All seqs are pg `bigint` and travel
+as DECIMAL STRINGS everywhere (events, ws payloads, cursors) — never JS
+numbers.
+
+### REST surface
+
+- **`GET /sync/state`** — `{ seq: "42" }`, the caller's current counter
+  (`users.sync_seq`). The cheap poll: compare against your persisted cursor
+  to decide whether pulling a delta is worth a round trip.
+- **`GET /sync/changes?since=&limit=`** — the delta. `since` is the last seq
+  the client holds ("I have everything ≤ since"; default `0`; decimal
+  string, digits only, ≤ 19 digits, no leading zeros — garbage is a 400
+  VALIDATION_FAILED problem+json). `limit` defaults to 100 and CLAMPS to
+  200 above that (same discipline as bookmark paging). The response is
+  `{ resyncRequired, changes, cursor }`:
+  - `changes` are events IN SEQ ORDER (ascending, gapless per user — this
+    is why a cursor alone reconstructs state even for multi-event
+    mutations like tag merges, which arrive as `tag:delete` + one
+    `bookmark:update` per affected bookmark). Each event is
+    `{ seq, entity, id, action, snapshot }`.
+  - `snapshot` is the entity's CURRENT row at PULL time: create/update
+    carry a full row — bookmarks reuse `BookmarkDto` exactly (including
+    `urlParts` and `tags`, via the same helper as the REST read paths),
+    tags/collections have their own snapshot shapes — and `null` for
+    `delete` tombstones (the row is gone; the event is the proof it died).
+    A missing row on create/update is served as a tombstone too
+    (defensively). Soft delete (trash) is NEVER a tombstone: the snapshot's
+    `deletedAt` carries that state. Because snapshots are current rows,
+    replaying in seq order converges even when an entity changed again
+    later — later events' snapshots simply win.
+  - `cursor` is the next cursor to persist: the last returned seq, or the
+    request's `since` when the page is empty. Pull `since=<cursor>` for the
+    next page; the notified seq is INCLUSIVE — a client holding cursor N
+    pulls `since=N` to receive N+1….
+  - **`resyncRequired: true`** means `since` predates the oldest retained
+    event (log compaction ate the gap) or the cursor is beyond the counter
+    (restored client state). The delta is WITHHELD — `changes` is empty and
+    `cursor` is the current seq. The client must refetch its lists
+    (`GET /bookmarks` incl. `trashed=true`, `GET /collections`) and adopt
+    the returned cursor; it is fully converged again after that.
+- **`POST /sync/ticket`** — mints `{ ticket, expiresAt }`: a 256-bit
+  one-time credential for the ws handshake (browsers cannot send an
+  `Authorization` header on websocket requests). Single use, 60-second
+  TTL, sha256-hashed at rest.
+
+### Change-log retention
+
+`ChangeLogRetentionService.purgeExpired()` deletes `change_events` rows
+older than the `changeLogRetentionDays` setting (default 90, min 1 via the
+settings validation); `ChangeLogRetentionJob` runs it daily at 04:00
+(staggered one hour behind the 03:00 trash purge). Failures are logged,
+never raised. The purge does NOT touch `users.sync_seq` (cursors stay
+valid absolute seqs), does NOT delete entity rows, and records NO events —
+it is log bookkeeping, not a data mutation. Clients inside or after the
+retained window keep pulling normally (`since+1 == oldest retained` is the
+exact continuity boundary); clients behind it get `resyncRequired`.
+
+### Websocket push — `/api/v1/sync/ws`
+
+- **Adapter: raw `ws`** via `@nestjs/platform-ws` (pinned to v11 — v12
+  requires Nest 12). Trade-off record: socket.io ships reconnection
+  built-in but locks every desktop/mobile client into its proprietary
+  protocol; raw `ws` is plain RFC 6455 that all four client platforms
+  speak natively. Reconnect is a CLIENT concern (contract below), rooms
+  are 30 lines of registry, and the payload stays inspectable. The gateway
+  rides the same HTTP server as the REST surface; the ws path is fixed as
+  `/api/v1/sync/ws` (ws gateways pass through neither the `api` prefix nor
+  URI versioning, so the full path is hardcoded).
+- **Auth: one-time ticket on the handshake query string**
+  (`…/sync/ws?ticket=<from POST /sync/ticket>`). Redeemed atomically
+  (single use even on the expiry path); missing/unknown/expired/replayed
+  tickets are rejected with ws close code **1008** before the connection
+  joins any room (`reason`: `sync ticket missing` /
+  `sync ticket invalid, expired or already used`). The store is a plain
+  in-memory Map: tickets are 60s-ephemeral by construction, a restart just
+  costs one re-mint, and v1 is single-instance anyway.
+- **Messages are notifications only:** each committed change is pushed to
+  the owning user's connections as `{ seq, entity, id, action }` — no
+  payload. On receipt the client pulls `GET /sync/changes?since=cursor`
+  (the REST delta is the source of truth). Events reach the bus strictly
+  after their transaction commits, so a ws client never hears about
+  rolled-back work.
+- **Rooms:** `ws` has no room concept; `SyncConnections` maps userId →
+  sockets and fan-out touches ONLY the owner's connections — cross-user
+  isolation is structural, not a filter.
+- **Heartbeat:** server pings every 30s at the PROTOCOL level; browsers
+  and `ws`-based clients answer pongs automatically (no client code). A
+  connection missing its pong is terminated. The channel is push-only —
+  client-sent frames are ignored.
+- **Client contract (what every client app must implement):**
+  1. `POST /sync/ticket` (bearer) → connect `?ticket=` → on message `{seq,
+…}` → pull `/sync/changes?since=cursor` → persist the returned cursor
+     → repeat until empty.
+  2. On close: reconnect with exponential backoff, re-minting the ticket
+     each attempt (a ticket is single-use; a stale one is refused 1008).
+  3. After any reconnect — or after seeing `resyncRequired` — reconcile
+     from the REST delta (or refetch lists on resync); never trust
+     received notifications as the change itself.
 
 ## Auth & sessions (M2 — D2, D3, D15, D16)
 
@@ -369,7 +475,7 @@ color, order, timestamps, deletedAt-as-plain-column)`. All rows are
   `registrationOpen` (default false), `trashRetentionDays` (30), `changeLogRetentionDays`
   (90). Secrets/infra stay env-only.
 
-## Module map (as of M4)
+## Module map (as of M5)
 
 ```
 src/
@@ -397,16 +503,77 @@ src/
   collections/             /collections flat list + tree + CRUD + restore + order;
                            cycle protection, two-phase delete, membership sync;
                            tree-builder.ts (pure, unit-tested)
+  sync/                    /sync/state + /sync/changes cursor deltas (snapshots at
+                           pull time, resyncRequired contract); /sync/ticket
+                           (one-time 60s ws tickets, in-memory store); ws gateway
+                           (raw `ws` adapter, per-user rooms, protocol heartbeat);
+                           change-log retention service + daily 04:00 job
 test/
   helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset)
   api-foundation.e2e.test.ts   full contract suite (two boots: default + metrics/CORS on)
   auth-users.e2e.test.ts       M2 lifecycle suite (main boot + isolated throttle boot)
   bookmarks.e2e.test.ts        M3 suite (lifecycle boot + isolated search/paging boot)
   collections.e2e.test.ts      M4 suite (lifecycle boot + isolated validation boot)
+  sync.e2e.test.ts             M5 suite (ws convergence, offline catch-up,
+                               resyncRequired, ticket paths, isolation, retention)
 ```
 
 Both `main.ts` and the e2e boots go through `app-setup.ts` — keep runtime behavior and
 tests in lockstep by wiring new app-level concerns THERE.
+
+## Decisions recorded (M5)
+
+- **The ws adapter is raw `ws` (`@nestjs/platform-ws`), not socket.io.**
+  Socket.io ships reconnection built-in but locks desktop and mobile
+  clients into its proprietary protocol; raw `ws` is RFC 6455 that
+  browsers, Node/Bun and mobile stacks speak natively. Reconnection is a
+  documented client concern, per-user "rooms" are the `SyncConnections`
+  registry, and the push payload stays plain JSON. `@nestjs/websockets` +
+  `@nestjs/platform-ws` are pinned to v11 (v12 requires Nest 12 — same
+  reason `@nestjs/swagger` stays on 11); `ws@8` joined the build's
+  `--external` list (its optional native deflate deps must not be
+  bundled).
+- **The delta's `snapshot` is the entity's CURRENT row at pull time,**
+  never a payload frozen in the event: `change_events` rows carry no data
+  by design, so `/sync/changes` re-reads entities — bookmarks serve the
+  exact `BookmarkDto` (reusing `BookmarksService.tagsForBookmarks`, so
+  every surface is byte-identical), `delete` events (and defensively,
+  missing rows) serve `null` tombstones, and trash travels as
+  `deletedAt`. Snapshots are batched: one query per entity type per page.
+- **`resyncRequired` is exact, not heuristic.** With gapless per-user
+  seqs, the first event a lagging client needs is `since+1` — so the rule
+  is `since+1 < oldestRetainedSeq` (compaction ate needed events), plus
+  two defensive cases: cursors beyond the counter, and "nothing retained
+  but the client lags the tip". The boundary case `since+1 == minSeq` is
+  served normally (e2e-proven). When resyncing, the delta is withheld
+  (empty `changes`) and the response hands the client the current seq as
+  its new cursor.
+- **ws tickets live in memory, not in the database.** They are 60s,
+  single-use, sha256-keyed (never stored raw); a restart costs a client
+  one reconnect + re-mint, and adding a table/migration for data that
+  must not outlive the process would be schema for nothing. Reuse-detection
+  (the DB-backed one-time tokens of D15) is for 24h credentials, not
+  60s ones.
+- **Rejections close with ws code 1008 + a reason string.** The upgrade
+  completes, then the gateway closes before any room membership — that is
+  the only rejection mechanism browsers can actually observe on a ws
+  handshake (they cannot read HTTP status codes of a failed upgrade).
+  One code, two reasons: missing vs invalid/expired/replayed (over-earning
+  distinctions would only help someone probing tickets).
+- **Retention (04:00, staggered from the 03:00 trash purge) deletes only
+  `change_events` rows.** `users.sync_seq` is untouched (cursors remain
+  absolute seqs), entity rows are untouched (tombstone state lives on
+  rows), and no events are recorded — log compaction is bookkeeping.
+  Clients older than the window are handled by `resyncRequired`, which is
+  exactly why compaction cannot break a live cursor.
+- **`replaceTags` now refuses trashed bookmarks (404)** — the M4 ride-along:
+  aligned with `PUT`/`DELETE` (M3) and the membership sync (M4). The trash
+  is read-only except for restore; a trashed bookmark's tag set stays
+  frozen until restore or purge. Verified with a new e2e assertion.
+- **`GET /sync/changes` clamps `limit` to 200** and validates `since` as a
+  canonical decimal string (≤ 19 digits, no leading zeros); a regex-valid
+  cursor beyond the pg bigint ceiling short-circuits to `resyncRequired`
+  BEFORE any SQL cast (no 500s from client-supplied cursors).
 
 ## Decisions recorded (M4)
 
@@ -439,8 +606,7 @@ tests in lockstep by wiring new app-level concerns THERE.
   writers, which is what makes concurrent sibling creates race-free.
 - **Membership sync refuses trashed bookmarks** (404 among active) — the
   trash is read-only except for restore. M3's `replaceTags` predates this
-  rule and still accepts them; left untouched to avoid a behavior change
-  outside this milestone's scope (M5 may want to align it).
+  rule and still accepts them; **M5 aligned it** (see the M5 decisions).
 - **`GET /bookmarks?collectionId=` is a PURE membership filter** since M4:
   collection trash state is irrelevant, trashed bookmarks are excluded by
   the normal trash scoping, and it composes with `unassignedOnly` (AND).
@@ -547,3 +713,6 @@ tests in lockstep by wiring new app-level concerns THERE.
   for the e2e job — same image as the compose bundle.
 - M2 added `@nestjs/throttler@6` and `@node-rs/argon2@2` as runtime deps and
   `@types/express-serve-static-core` as a dev dep.
+- M5 added `@nestjs/websockets@11`, `@nestjs/platform-ws@11` and `ws@8` as
+  runtime deps (`ws` is `--external` in the build) and `@types/ws` as a dev
+  dep.

@@ -391,6 +391,14 @@ describe('Bookmarks core (e2e)', () => {
       });
       expect(putInTrash.status).toBe(404);
 
+      // Tag replacement refuses trashed bookmarks too — aligned with the
+      // membership sync (M4); the trash is read-only except for restore.
+      const tagsInTrash = await call(baseUrl, 'PUT', `/bookmarks/${id}/tags`, {
+        bearer: admin.accessToken,
+        body: { tags: ['nope'] },
+      });
+      expect(tagsInTrash.status).toBe(404);
+
       // -- restore: back to the active set --
       const restored = await call<BookmarkView>(baseUrl, 'POST', `/bookmarks/${id}/restore`, {
         bearer: admin.accessToken,

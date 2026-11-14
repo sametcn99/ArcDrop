@@ -270,6 +270,12 @@ export class BookmarksService {
     return this.changeLog.transact(async (manager, record) => {
       const row = await manager.findOne(Bookmark, { where: { id, userId: user.id } });
       if (!row) throw new NotFoundException('Bookmark not found');
+      if (row.deletedAt) {
+        // The trash is read-only except for restore — aligned with PUT /
+        // DELETE (M3) and the membership sync (M4). Untagged trash keeps
+        // its tag set frozen until it is restored or purged.
+        throw new NotFoundException('Bookmark not found among the active bookmarks');
+      }
 
       const wanted = await this.tags.resolveTagNames(manager, user.id, names, record);
 
@@ -303,8 +309,12 @@ export class BookmarksService {
 
   // -- internals -------------------------------------------------------------
 
-  /** Tag views for a set of bookmarks — one query, grouped by bookmark id. */
-  private async tagsForBookmarks(
+  /**
+   * Tag views for a set of bookmarks — one query, grouped by bookmark id.
+   * Public so the sync module's snapshot assembly (M5) reuses the exact
+   * same tag view instead of duplicating the join.
+   */
+  async tagsForBookmarks(
     ids: readonly string[],
     manager?: EntityManager,
   ): Promise<Map<string, TagDto[]>> {
@@ -329,7 +339,12 @@ export class BookmarksService {
   }
 }
 
-function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
+/**
+ * Maps a `Bookmark` row to the wire shape. Exported so the sync module's
+ * snapshot assembly (M5) serves byte-identical bookmark payloads — the
+ * `BookmarkDto` shape has been frozen since M3.
+ */
+export function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
   return {
     id: row.id,
     url: row.url,
