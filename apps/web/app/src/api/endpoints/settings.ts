@@ -8,6 +8,12 @@ export function createSettingsApi(client: ApiClient = apiClient) {
         schema: settingsSchema,
       });
     },
+
+    async update(input: Settings): Promise<Settings> {
+      return client.put('/admin/settings', input, {
+        schema: settingsSchema,
+      });
+    },
   };
 }
 

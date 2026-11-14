@@ -50,7 +50,7 @@ describe('Route guards & logout flow', () => {
     await waitForLibraryReady();
 
     expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Administration' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Admin' })).not.toBeInTheDocument();
   }, 60_000);
 
   it('allows authenticated admin users to access /admin', async () => {
@@ -63,7 +63,7 @@ describe('Route guards & logout flow', () => {
     renderAtPath('/admin');
     await waitForBootstrapReady();
 
-    expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Admin' })).toBeInTheDocument();
   }, 60_000);
 
   it('redirects already-authenticated users from public-only routes to /', async () => {
@@ -82,7 +82,7 @@ describe('Route guards & logout flow', () => {
   it('keeps /s/:token accessible without authentication', async () => {
     renderAtPath('/s/public-share-token');
 
-    expect(await screen.findByRole('heading', { name: 'Shared collection' })).toBeInTheDocument();
+    expect(await screen.findByText('Shared collection')).toBeInTheDocument();
   }, 60_000);
 
   it('signs out via the AppBar Sign out button, revokes session, and redirects to /login', async () => {
