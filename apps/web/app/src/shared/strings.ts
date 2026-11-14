@@ -6,6 +6,8 @@ export const SHARED_BOOKMARK_STRINGS = {
   dragBookmarkLabel: 'Drag bookmark',
   moveBookmarkUpLabel: 'Move bookmark up',
   moveBookmarkDownLabel: 'Move bookmark down',
+  reminderBadgePrefix: 'Reminder',
+  reminderDueBadgeLabel: 'Reminder due',
 } as const;
 
 export const SHARED_COLLECTION_STRINGS = {
@@ -107,4 +109,66 @@ export const SHARED_COLLECTION_STRINGS = {
   toastShareDisabled: 'Public sharing disabled. Previous links are now invalid.',
   toastBookmarkAdded: 'Bookmark added to collection.',
   errorGeneric: 'Collection action failed.',
+} as const;
+
+export const SHARED_TAG_STRINGS = {
+  autocompleteLabel: 'Tags',
+  autocompletePlaceholder: 'Add tag and press Enter',
+  managerDialogTitle: 'Manage tags',
+  managerFilterLabel: 'Filter tags',
+  managerFilterPlaceholder: 'Search tags...',
+  managerEmptyTitle: 'No tags yet',
+  managerEmptyHint: 'Assign tags to bookmarks to organize and filter your library.',
+  managerNoMatches: 'No tags match your filter.',
+  managerCountSingular: '1 bookmark',
+  managerCountPluralSuffix: 'bookmarks',
+  managerRenameAction: 'Rename',
+  managerDeleteAction: 'Delete',
+  managerRenameLabel: 'New tag name',
+  managerRenameSave: 'Apply',
+  managerRenameCancel: 'Cancel',
+  managerMergeWarningPrefix: 'A tag named',
+  managerMergeWarningSuffix: 'already exists. Applying will merge both tags together.',
+  managerDeleteConfirmTitle: 'Delete tag?',
+  managerDeleteConfirmPrefix: 'Detach',
+  managerDeleteConfirmSuffix:
+    'from all bookmarks and delete this tag? Bookmarks themselves stay intact.',
+  managerDeleteCancel: 'Cancel',
+  managerDeleteConfirm: 'Delete tag',
+  managerClose: 'Close',
+  toastTagsUpdated: 'Tags updated.',
+  toastTagRenamed: 'Tag updated.',
+  toastTagDeleted: 'Tag deleted.',
+} as const;
+
+export const SHARED_NOTIFICATION_STRINGS = {
+  drawerTitle: 'Notifications',
+  closeLabel: 'Close notifications',
+  markAllReadLabel: 'Mark all read',
+  markReadLabel: 'Mark read',
+  unreadBadgeLabel: 'Unread',
+  emptyTitle: 'No notifications',
+  emptyHint: 'Scheduled bookmark reminders will appear here when due.',
+  untitledBookmark: 'Untitled bookmark',
+  reminderLabelPrefix: 'Reminder due',
+  openBookmarkLabel: 'Open bookmark',
+  toastAllRead: 'All notifications marked read.',
+} as const;
+
+export const SHARED_QUICK_ADD_STRINGS = {
+  dialogTitle: 'Quick add bookmark',
+  dialogDescription:
+    'Save a URL with optional title, collection, tags, and favorite flag. Duplicate URLs are allowed.',
+  urlLabel: 'URL',
+  urlPlaceholder: 'https://example.com/article',
+  titleLabel: 'Title',
+  titlePlaceholder: 'Optional title',
+  collectionLabel: 'Collection',
+  collectionNoneOption: 'None (Unassigned)',
+  tagsLabel: 'Tags',
+  favoriteLabel: 'Mark as favorite',
+  cancelLabel: 'Cancel',
+  submitLabel: 'Save bookmark',
+  submittingLabel: 'Saving...',
+  toastCreated: 'Bookmark saved.',
 } as const;

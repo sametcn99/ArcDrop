@@ -89,28 +89,72 @@ export const bookmarkStatsSchema = z.object({
   favorites: z.number().int().nonnegative(),
 });
 
+export const httpUrlSchema = z
+  .string()
+  .trim()
+  .url('Enter a valid http(s) URL')
+  .refine(
+    (val) => {
+      try {
+        const parsed = new URL(val);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    },
+    { message: 'URL must use http or https scheme' },
+  );
+
+export const createBookmarkRequestSchema = z.object({
+  url: httpUrlSchema.optional(),
+  title: z.string().max(512).optional(),
+  excerpt: z.string().max(4000).optional(),
+  note: z.string().max(20000).optional(),
+  favorite: z.boolean().default(false),
+  reminderAt: z.string().nullable().optional(),
+});
+
 export const updateBookmarkRequestSchema = z.object({
-  url: z
-    .string()
-    .trim()
-    .url('Enter a valid http(s) URL')
-    .refine(
-      (val) => {
-        try {
-          const parsed = new URL(val);
-          return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-        } catch {
-          return false;
-        }
-      },
-      { message: 'URL must use http or https scheme' },
-    )
-    .optional(),
+  url: httpUrlSchema.optional(),
   title: z.string().max(512).nullable().optional(),
   excerpt: z.string().max(4000).nullable().optional(),
   note: z.string().max(20000).nullable().optional(),
   favorite: z.boolean().optional(),
   reminderAt: z.string().nullable().optional(),
+});
+
+export const replaceBookmarkTagsRequestSchema = z.object({
+  tags: z.array(z.string().trim().min(1, 'Tag name cannot be empty').max(100)).max(50),
+});
+
+export const renameTagRequestSchema = z.object({
+  name: z.string().trim().min(1, 'Tag name is required').max(100),
+});
+
+export const highlightSchema = z.object({
+  id: z.string(),
+  bookmarkId: z.string(),
+  text: z.string(),
+  note: z.string().nullable(),
+  color: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export const highlightListResponseSchema = z.object({
+  items: z.array(highlightSchema),
+});
+
+export const createHighlightRequestSchema = z.object({
+  text: z.string().trim().min(1, 'Highlight text is required').max(10000),
+  note: z.string().max(10000).nullable().optional(),
+  color: z.string().max(32).nullable().optional(),
+});
+
+export const updateHighlightRequestSchema = z.object({
+  text: z.string().trim().min(1, 'Highlight text is required').max(10000).optional(),
+  note: z.string().max(10000).nullable().optional(),
+  color: z.string().max(32).nullable().optional(),
 });
 
 export const replaceBookmarkCollectionsRequestSchema = z.object({
@@ -161,7 +205,14 @@ export type TagUsage = z.infer<typeof tagUsageSchema>;
 export type Bookmark = z.infer<typeof bookmarkSchema>;
 export type BookmarkListResponse = z.infer<typeof bookmarkListResponseSchema>;
 export type BookmarkStats = z.infer<typeof bookmarkStatsSchema>;
+export type CreateBookmarkRequest = z.infer<typeof createBookmarkRequestSchema>;
 export type UpdateBookmarkRequest = z.infer<typeof updateBookmarkRequestSchema>;
+export type ReplaceBookmarkTagsRequest = z.infer<typeof replaceBookmarkTagsRequestSchema>;
+export type RenameTagRequest = z.infer<typeof renameTagRequestSchema>;
+export type Highlight = z.infer<typeof highlightSchema>;
+export type HighlightListResponse = z.infer<typeof highlightListResponseSchema>;
+export type CreateHighlightRequest = z.infer<typeof createHighlightRequestSchema>;
+export type UpdateHighlightRequest = z.infer<typeof updateHighlightRequestSchema>;
 export type ReplaceBookmarkCollectionsRequest = z.infer<
   typeof replaceBookmarkCollectionsRequestSchema
 >;
@@ -171,6 +222,7 @@ export type BulkBookmarksRequest = z.infer<typeof bulkBookmarksRequestSchema>;
 export type BulkBookmarksResponse = z.infer<typeof bulkBookmarksResponseSchema>;
 
 export type BookmarkListQuery = NonNullable<operations['listBookmarks']['parameters']['query']>;
+export type CreateBookmarkQuery = NonNullable<operations['createBookmark']['parameters']['query']>;
 
 // Compile-time structural alignment checks against generated OpenAPI schemas.
 const _urlPartsCheck: components['schemas']['BookmarkUrlPartsDto'] | undefined = undefined as
@@ -184,8 +236,22 @@ const _bookmarkListCheck: components['schemas']['BookmarkListDto'] | undefined =
   BookmarkListResponse | undefined;
 const _bookmarkStatsCheck: components['schemas']['BookmarkStatsDto'] | undefined = undefined as
   BookmarkStats | undefined;
+const _createBookmarkCheck: components['schemas']['CreateBookmarkBodyDto'] | undefined =
+  undefined as CreateBookmarkRequest | undefined;
 const _updateBookmarkCheck: components['schemas']['UpdateBookmarkDto'] | undefined = undefined as
   UpdateBookmarkRequest | undefined;
+const _replaceTagsCheck: components['schemas']['ReplaceBookmarkTagsDto'] | undefined = undefined as
+  ReplaceBookmarkTagsRequest | undefined;
+const _renameTagCheck: components['schemas']['RenameTagDto'] | undefined = undefined as
+  RenameTagRequest | undefined;
+const _highlightCheck: components['schemas']['HighlightDto'] | undefined = undefined as
+  Highlight | undefined;
+const _highlightListCheck: components['schemas']['HighlightListDto'] | undefined = undefined as
+  HighlightListResponse | undefined;
+const _createHighlightCheck: components['schemas']['CreateHighlightDto'] | undefined = undefined as
+  CreateHighlightRequest | undefined;
+const _updateHighlightCheck: components['schemas']['UpdateHighlightDto'] | undefined = undefined as
+  UpdateHighlightRequest | undefined;
 const _replaceCollectionsCheck: components['schemas']['ReplaceBookmarkCollectionsDto'] | undefined =
   undefined as ReplaceBookmarkCollectionsRequest | undefined;
 const _bookmarkCollectionsCheck: components['schemas']['BookmarkCollectionsDto'] | undefined =
@@ -200,7 +266,14 @@ void _tagUsageCheck;
 void _bookmarkCheck;
 void _bookmarkListCheck;
 void _bookmarkStatsCheck;
+void _createBookmarkCheck;
 void _updateBookmarkCheck;
+void _replaceTagsCheck;
+void _renameTagCheck;
+void _highlightCheck;
+void _highlightListCheck;
+void _createHighlightCheck;
+void _updateHighlightCheck;
 void _replaceCollectionsCheck;
 void _bookmarkCollectionsCheck;
 void _bulkBookmarksCheck;

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -270,5 +270,43 @@ describe('LibraryPage', () => {
     expect(
       screen.getByRole('button', { name: 'Remove from favorites: Optimistic Star Bookmark' }),
     ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('renders reminder badges on bookmark cards for scheduled and due reminders', async () => {
+    server.use(
+      http.get('*/api/v1/bookmarks', () =>
+        HttpResponse.json({
+          items: [
+            makeMockBookmark({
+              id: 'bm-sched',
+              title: 'Scheduled Bookmark',
+              reminderAt: '2026-11-20T09:00:00.000Z',
+              remindedAt: null,
+            }),
+            makeMockBookmark({
+              id: 'bm-due',
+              title: 'Due Bookmark',
+              reminderAt: '2026-11-14T08:00:00.000Z',
+              remindedAt: '2026-11-14T08:00:05.000Z',
+            }),
+          ],
+          totalCount: 2,
+          page: 1,
+          pageSize: 24,
+        }),
+      ),
+    );
+
+    renderLibraryAt('/');
+
+    const schedCard = await screen.findByTestId('bookmark-item-bm-sched');
+    expect(within(schedCard).getByTestId('bookmark-reminder-badge')).toHaveTextContent(
+      /Reminder:/i,
+    );
+
+    const dueCard = await screen.findByTestId('bookmark-item-bm-due');
+    expect(within(dueCard).getByTestId('bookmark-reminder-badge')).toHaveTextContent(
+      'Reminder due',
+    );
   });
 });

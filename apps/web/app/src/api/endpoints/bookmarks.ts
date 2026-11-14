@@ -13,6 +13,8 @@ import {
   type BookmarkStats,
   type BulkBookmarksRequest,
   type BulkBookmarksResponse,
+  type CreateBookmarkQuery,
+  type CreateBookmarkRequest,
   type TagUsage,
   type UpdateBookmarkRequest,
 } from '../schemas/bookmarks';
@@ -50,10 +52,36 @@ export function createBookmarksApi(client: ApiClient = apiClient) {
       });
     },
 
+    async create(input: CreateBookmarkRequest, query?: CreateBookmarkQuery): Promise<Bookmark> {
+      return client.post('/bookmarks', input, {
+        query: query
+          ? {
+              collection: query.collection,
+              url: query.url,
+              title: query.title,
+              excerpt: query.excerpt,
+              note: query.note,
+              favorite: query.favorite,
+            }
+          : undefined,
+        schema: bookmarkSchema,
+      });
+    },
+
     async update(id: string, input: UpdateBookmarkRequest): Promise<Bookmark> {
       return client.put(`/bookmarks/${encodeURIComponent(id)}`, input, {
         schema: bookmarkSchema,
       });
+    },
+
+    async replaceTags(id: string, tags: string[]): Promise<Bookmark> {
+      return client.put(
+        `/bookmarks/${encodeURIComponent(id)}/tags`,
+        { tags },
+        {
+          schema: bookmarkSchema,
+        },
+      );
     },
 
     async replaceCollections(

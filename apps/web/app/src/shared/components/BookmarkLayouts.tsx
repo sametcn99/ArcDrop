@@ -32,6 +32,7 @@ import { SHARED_BOOKMARK_STRINGS } from '../strings';
 import { BookmarkIconBadge } from './BookmarkIconBadge';
 import { ContentTypeChip } from './ContentTypeChip';
 import { FavoriteToggleButton } from './FavoriteToggleButton';
+import { ReminderBadge } from './ReminderBadge';
 import { TagChipList } from './TagChipList';
 
 export interface BookmarkLayoutsProps {
@@ -367,6 +368,10 @@ function ListLayout({
                         sx={{ mt: 1.25, alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
                       >
                         <ContentTypeChip contentType={bookmark.contentType} />
+                        <ReminderBadge
+                          reminderAt={bookmark.reminderAt}
+                          remindedAt={bookmark.remindedAt}
+                        />
                         <TagChipList tags={bookmark.tags} maxVisible={5} />
                       </Stack>
                     </Box>
@@ -541,6 +546,10 @@ function GridLayout({
                     sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
                   >
                     <ContentTypeChip contentType={bookmark.contentType} />
+                    <ReminderBadge
+                      reminderAt={bookmark.reminderAt}
+                      remindedAt={bookmark.remindedAt}
+                    />
                     <TagChipList tags={bookmark.tags} maxVisible={3} />
                   </Stack>
                 </CardContent>
@@ -639,7 +648,11 @@ function HeadlinesLayout({
                       spacing={0.75}
                       sx={{ alignItems: 'center', flexShrink: 0 }}
                     >
-                      <Box sx={{ display: { xs: 'none', md: 'inline-flex' } }}>
+                      <Box sx={{ display: { xs: 'none', md: 'inline-flex' }, gap: 0.75 }}>
+                        <ReminderBadge
+                          reminderAt={bookmark.reminderAt}
+                          remindedAt={bookmark.remindedAt}
+                        />
                         <ContentTypeChip contentType={bookmark.contentType} />
                       </Box>
                       <BookmarkDragAndOrderControls
@@ -805,6 +818,10 @@ function MoodboardLayout({
                     sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
                   >
                     <ContentTypeChip contentType={bookmark.contentType} />
+                    <ReminderBadge
+                      reminderAt={bookmark.reminderAt}
+                      remindedAt={bookmark.remindedAt}
+                    />
                     <TagChipList tags={bookmark.tags} />
                   </Stack>
                 </CardContent>

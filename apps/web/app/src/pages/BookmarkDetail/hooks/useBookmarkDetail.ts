@@ -1,18 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { bookmarksApi } from '../../../api/endpoints/bookmarks';
 import {
   updateBookmarkRequestSchema,
   type Bookmark,
+  type CreateHighlightRequest,
   type UpdateBookmarkRequest,
+  type UpdateHighlightRequest,
 } from '../../../api/schemas/bookmarks';
 import { toApiError } from '../../../api/schemas/problem';
 import {
+  replaceBookmarkTagsAction,
   restoreBookmarkAction,
   toggleBookmarkFavoriteAction,
   trashBookmarkAction,
   updateBookmarkDetailsAction,
 } from '../../../shared/actions/bookmarkActions';
-import { useLibraryStore } from '../../../stores/libraryStore';
+import {
+  createHighlightAction,
+  deleteHighlightAction,
+  loadBookmarkHighlightsAction,
+  updateHighlightAction,
+} from '../../../shared/actions/highlightActions';
+import { selectBookmarkHighlights, useLibraryStore } from '../../../stores/libraryStore';
 
 export interface BookmarkFormValues {
   title: string;
@@ -45,6 +54,22 @@ function normalizeNullableField(value: string): string | null {
 export function useBookmarkDetail(bookmarkId: string | undefined) {
   const bookmark = useLibraryStore((s) => (bookmarkId ? s.bookmarksById[bookmarkId] : undefined));
   const upsertBookmark = useLibraryStore((s) => s.upsertBookmark);
+  const highlightsMap = useLibraryStore((s) =>
+    bookmarkId ? s.highlightsByBookmarkId[bookmarkId] : undefined,
+  );
+  const highlightsLoaded = useLibraryStore((s) =>
+    bookmarkId ? Boolean(s.highlightsLoadedByBookmarkId[bookmarkId]) : false,
+  );
+
+  const highlights = useMemo(() => {
+    if (!bookmarkId || !highlightsMap) return [];
+    return selectBookmarkHighlights(
+      {
+        highlightsByBookmarkId: { [bookmarkId]: highlightsMap },
+      } as Parameters<typeof selectBookmarkHighlights>[0],
+      bookmarkId,
+    );
+  }, [bookmarkId, highlightsMap]);
 
   const [fetchErrorState, setFetchErrorState] = useState<{
     bookmarkId: string;
@@ -62,6 +87,24 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
   const [draftState, setDraftState] = useState<{
     bookmarkId: string;
     values: BookmarkFormValues;
+  } | null>(null);
+
+  const [tagsSaving, setTagsSaving] = useState(false);
+  const [tagsErrorState, setTagsErrorState] = useState<{
+    bookmarkId: string;
+    message: string;
+  } | null>(null);
+
+  const [reminderSaving, setReminderSaving] = useState(false);
+  const [reminderErrorState, setReminderErrorState] = useState<{
+    bookmarkId: string;
+    message: string;
+  } | null>(null);
+
+  const [highlightsBusy, setHighlightsBusy] = useState(false);
+  const [highlightsErrorState, setHighlightsErrorState] = useState<{
+    bookmarkId: string;
+    message: string;
   } | null>(null);
 
   useEffect(() => {
@@ -90,6 +133,30 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
     };
   }, [bookmark, bookmarkId, upsertBookmark]);
 
+  useEffect(() => {
+    if (!bookmarkId || !bookmark || highlightsLoaded) {
+      return;
+    }
+
+    let cancelled = false;
+    loadBookmarkHighlightsAction(bookmarkId)
+      .then(() => {
+        if (cancelled) return;
+        setHighlightsErrorState(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setHighlightsErrorState({
+          bookmarkId,
+          message: toApiError(err).detail,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookmark, bookmarkId, highlightsLoaded]);
+
   const isDirty = Boolean(bookmarkId && draftState?.bookmarkId === bookmarkId);
   const form: BookmarkFormValues =
     isDirty && draftState ? draftState.values : bookmark ? toFormValues(bookmark) : EMPTY_FORM;
@@ -103,6 +170,17 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
     bookmarkId && saveErrorState?.bookmarkId === bookmarkId ? saveErrorState.message : null;
   const fieldErrors =
     bookmarkId && fieldErrorState?.bookmarkId === bookmarkId ? fieldErrorState.errors : {};
+  const tagsError =
+    bookmarkId && tagsErrorState?.bookmarkId === bookmarkId ? tagsErrorState.message : null;
+  const reminderError =
+    bookmarkId && reminderErrorState?.bookmarkId === bookmarkId ? reminderErrorState.message : null;
+  const highlightsError =
+    bookmarkId && highlightsErrorState?.bookmarkId === bookmarkId
+      ? highlightsErrorState.message
+      : null;
+  const highlightsLoading = Boolean(
+    bookmarkId && bookmark && !highlightsLoaded && !highlightsError,
+  );
 
   const setField = (field: keyof BookmarkFormValues, value: string) => {
     if (!bookmarkId) return;
@@ -179,6 +257,84 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
     }
   };
 
+  const saveTags = async (tags: string[]): Promise<boolean> => {
+    if (!bookmark || !bookmarkId || tagsSaving) return false;
+    setTagsErrorState(null);
+    setTagsSaving(true);
+    try {
+      await replaceBookmarkTagsAction(bookmark.id, tags);
+      return true;
+    } catch (err) {
+      setTagsErrorState({ bookmarkId, message: toApiError(err).detail });
+      return false;
+    } finally {
+      setTagsSaving(false);
+    }
+  };
+
+  const saveReminder = async (reminderAt: string | null): Promise<boolean> => {
+    if (!bookmark || !bookmarkId || reminderSaving) return false;
+    setReminderErrorState(null);
+    setReminderSaving(true);
+    try {
+      await updateBookmarkDetailsAction(bookmark.id, { reminderAt });
+      return true;
+    } catch (err) {
+      setReminderErrorState({ bookmarkId, message: toApiError(err).detail });
+      return false;
+    } finally {
+      setReminderSaving(false);
+    }
+  };
+
+  const createHighlight = async (input: CreateHighlightRequest): Promise<boolean> => {
+    if (!bookmark || !bookmarkId || highlightsBusy) return false;
+    setHighlightsErrorState(null);
+    setHighlightsBusy(true);
+    try {
+      await createHighlightAction(bookmark.id, input);
+      return true;
+    } catch (err) {
+      setHighlightsErrorState({ bookmarkId, message: toApiError(err).detail });
+      return false;
+    } finally {
+      setHighlightsBusy(false);
+    }
+  };
+
+  const updateHighlight = async (
+    highlightId: string,
+    input: UpdateHighlightRequest,
+  ): Promise<boolean> => {
+    if (!bookmark || !bookmarkId || highlightsBusy) return false;
+    setHighlightsErrorState(null);
+    setHighlightsBusy(true);
+    try {
+      await updateHighlightAction(highlightId, input);
+      return true;
+    } catch (err) {
+      setHighlightsErrorState({ bookmarkId, message: toApiError(err).detail });
+      return false;
+    } finally {
+      setHighlightsBusy(false);
+    }
+  };
+
+  const deleteHighlight = async (highlightId: string): Promise<boolean> => {
+    if (!bookmark || !bookmarkId || highlightsBusy) return false;
+    setHighlightsErrorState(null);
+    setHighlightsBusy(true);
+    try {
+      await deleteHighlightAction(bookmark.id, highlightId);
+      return true;
+    } catch (err) {
+      setHighlightsErrorState({ bookmarkId, message: toApiError(err).detail });
+      return false;
+    } finally {
+      setHighlightsBusy(false);
+    }
+  };
+
   const toggleFavorite = async () => {
     if (!bookmark) return;
     try {
@@ -228,6 +384,19 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
     setField,
     resetEdits,
     save,
+    tagsSaving,
+    tagsError,
+    saveTags,
+    reminderSaving,
+    reminderError,
+    saveReminder,
+    highlights,
+    highlightsLoading,
+    highlightsBusy,
+    highlightsError,
+    createHighlight,
+    updateHighlight,
+    deleteHighlight,
     toggleFavorite,
     trash,
     restore,

@@ -12,6 +12,7 @@ import {
   parseViewKey,
   useLibraryStore,
 } from '../stores/libraryStore';
+import { useNotificationsStore } from '../stores/notificationsStore';
 import { useSyncStore } from '../stores/syncStore';
 import { useUiStore } from '../stores/uiStore';
 
@@ -382,6 +383,7 @@ export function createSyncEngine(deps: SyncEngineDeps = {}) {
           message: frame.title ? `Reminder: ${frame.title}` : 'Bookmark reminder due',
           severity: 'info',
         });
+        useNotificationsStore.getState().handleLiveReminderFrame(frame);
         return;
       }
 

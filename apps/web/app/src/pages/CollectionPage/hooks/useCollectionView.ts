@@ -160,23 +160,24 @@ export function useCollectionView() {
     if (existingView && !existingView.loading) {
       return;
     }
-    if (inFlightViewKeysRef.current.has(viewKey)) {
+    const inFlightViewKeys = inFlightViewKeysRef.current;
+    if (inFlightViewKeys.has(viewKey)) {
       return;
     }
 
-    inFlightViewKeysRef.current.add(viewKey);
+    inFlightViewKeys.add(viewKey);
     setViewLoading(viewKey, true, false);
     let cancelled = false;
     void bookmarksApi
       .list(buildCollectionListQuery(collectionId, sort, 1))
       .then((res) => {
-        inFlightViewKeysRef.current.delete(viewKey);
+        inFlightViewKeys.delete(viewKey);
         if (!cancelled) {
           hydrateView(viewKey, res, false);
         }
       })
       .catch((err) => {
-        inFlightViewKeysRef.current.delete(viewKey);
+        inFlightViewKeys.delete(viewKey);
         if (cancelled) return;
         const apiErr = toApiError(err);
         if (apiErr instanceof ApiError && apiErr.status === 404) {
@@ -186,7 +187,7 @@ export function useCollectionView() {
       });
     return () => {
       cancelled = true;
-      inFlightViewKeysRef.current.delete(viewKey);
+      inFlightViewKeys.delete(viewKey);
     };
   }, [
     collectionId,

@@ -8,14 +8,22 @@ import Divider from '@mui/material/Divider';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import type { FormEvent } from 'react';
-import type { Bookmark } from '../../../api/schemas/bookmarks';
+import { useMemo, useState, type FormEvent } from 'react';
+import type {
+  Bookmark,
+  CreateHighlightRequest,
+  Highlight,
+  UpdateHighlightRequest,
+} from '../../../api/schemas/bookmarks';
 import { BookmarkIconBadge } from '../../../shared/components/BookmarkIconBadge';
 import { ContentTypeChip } from '../../../shared/components/ContentTypeChip';
 import { FavoriteToggleButton } from '../../../shared/components/FavoriteToggleButton';
-import { TagChipList } from '../../../shared/components/TagChipList';
+import { TagAutocompleteInput } from '../../../shared/components/TagAutocompleteInput';
 import type { BookmarkFormValues } from '../hooks/useBookmarkDetail';
 import { BOOKMARK_DETAIL_STRINGS } from '../strings';
+import { HighlightsSection } from './HighlightsSection';
+import { MarkdownNoteEditor } from './MarkdownNoteEditor';
+import { ReminderSection } from './ReminderSection';
 
 export interface BookmarkDetailFormProps {
   bookmark: Bookmark;
@@ -27,6 +35,19 @@ export interface BookmarkDetailFormProps {
   onFieldChange: (field: keyof BookmarkFormValues, value: string) => void;
   onReset: () => void;
   onSave: () => Promise<boolean>;
+  tagsSaving: boolean;
+  tagsError: string | null;
+  onSaveTags: (tags: string[]) => Promise<boolean>;
+  reminderSaving: boolean;
+  reminderError: string | null;
+  onSaveReminder: (reminderAt: string | null) => Promise<boolean>;
+  highlights: Highlight[];
+  highlightsLoading: boolean;
+  highlightsBusy: boolean;
+  highlightsError: string | null;
+  onCreateHighlight: (input: CreateHighlightRequest) => Promise<boolean>;
+  onUpdateHighlight: (highlightId: string, input: UpdateHighlightRequest) => Promise<boolean>;
+  onDeleteHighlight: (highlightId: string) => Promise<boolean>;
   onToggleFavorite: () => void;
   onTrash: () => void;
   onRestore: () => void;
@@ -42,12 +63,39 @@ export function BookmarkDetailForm({
   onFieldChange,
   onReset,
   onSave,
+  tagsSaving,
+  tagsError,
+  onSaveTags,
+  reminderSaving,
+  reminderError,
+  onSaveReminder,
+  highlights,
+  highlightsLoading,
+  highlightsBusy,
+  highlightsError,
+  onCreateHighlight,
+  onUpdateHighlight,
+  onDeleteHighlight,
   onToggleFavorite,
   onTrash,
   onRestore,
 }: BookmarkDetailFormProps) {
   const isTrashed = bookmark.deletedAt !== null;
   const isFile = bookmark.storageKind === 'file';
+
+  const currentTagNames = useMemo(() => bookmark.tags.map((tag) => tag.name), [bookmark.tags]);
+  const tagSyncKey = `${bookmark.id}|${currentTagNames.join('\0')}`;
+  const [tagDraftState, setTagDraftState] = useState<{
+    syncKey: string;
+    tags: string[];
+  } | null>(null);
+
+  const tagDraft =
+    tagDraftState && tagDraftState.syncKey === tagSyncKey ? tagDraftState.tags : currentTagNames;
+
+  const tagsDirty =
+    tagDraft.length !== currentTagNames.length ||
+    tagDraft.some((tag, idx) => tag !== currentTagNames[idx]);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -172,32 +220,12 @@ export function BookmarkDetailForm({
           fullWidth
         />
 
-        <TextField
-          label={BOOKMARK_DETAIL_STRINGS.noteLabel}
+        <MarkdownNoteEditor
           value={form.note}
-          onChange={(e) => onFieldChange('note', e.target.value)}
-          error={Boolean(fieldErrors.note)}
-          helperText={fieldErrors.note}
+          onChange={(nextNote) => onFieldChange('note', nextNote)}
+          error={fieldErrors.note}
           disabled={saving || isTrashed}
-          multiline
-          minRows={4}
-          fullWidth
         />
-
-        <Box>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>
-            {BOOKMARK_DETAIL_STRINGS.tagsLabel}
-          </Typography>
-          {bookmark.tags.length > 0 ? (
-            <TagChipList tags={bookmark.tags} />
-          ) : (
-            <Typography variant="body2" color="text.secondary">
-              {BOOKMARK_DETAIL_STRINGS.noTagsLabel}
-            </Typography>
-          )}
-        </Box>
-
-        <Divider />
 
         <Stack
           direction="row"
@@ -231,6 +259,68 @@ export function BookmarkDetailForm({
             </Button>
           </Stack>
         </Stack>
+
+        <Divider />
+
+        <Stack spacing={1.25} data-testid="bookmark-tags-section">
+          <Typography variant="subtitle2">{BOOKMARK_DETAIL_STRINGS.tagsLabel}</Typography>
+          {tagsError ? <Alert severity="error">{tagsError}</Alert> : null}
+          <TagAutocompleteInput
+            value={tagDraft}
+            onChange={(nextTags) => setTagDraftState({ syncKey: tagSyncKey, tags: nextTags })}
+            disabled={tagsSaving || isTrashed}
+            helperText={isTrashed ? BOOKMARK_DETAIL_STRINGS.tagsTrashedHint : undefined}
+          />
+          {!isTrashed ? (
+            <Stack direction="row" spacing={1}>
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={tagsSaving || !tagsDirty}
+                onClick={() => {
+                  void onSaveTags(tagDraft).then((ok) => {
+                    if (ok) setTagDraftState(null);
+                  });
+                }}
+              >
+                {tagsSaving
+                  ? BOOKMARK_DETAIL_STRINGS.tagsSavingLabel
+                  : BOOKMARK_DETAIL_STRINGS.tagsSaveLabel}
+              </Button>
+              {tagsDirty ? (
+                <Button size="small" disabled={tagsSaving} onClick={() => setTagDraftState(null)}>
+                  {BOOKMARK_DETAIL_STRINGS.tagsResetLabel}
+                </Button>
+              ) : null}
+            </Stack>
+          ) : null}
+        </Stack>
+
+        <Divider />
+
+        <ReminderSection
+          reminderAt={bookmark.reminderAt}
+          remindedAt={bookmark.remindedAt}
+          busy={reminderSaving}
+          error={reminderError}
+          isTrashed={isTrashed}
+          onSaveReminder={onSaveReminder}
+        />
+
+        <Divider />
+
+        <HighlightsSection
+          highlights={highlights}
+          loading={highlightsLoading}
+          busy={highlightsBusy}
+          error={highlightsError}
+          isTrashed={isTrashed}
+          onCreate={onCreateHighlight}
+          onUpdate={onUpdateHighlight}
+          onDelete={onDeleteHighlight}
+        />
+
+        <Divider />
 
         <Stack spacing={0.25}>
           <Typography variant="caption" color="text.secondary">

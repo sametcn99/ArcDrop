@@ -55,6 +55,10 @@ export const appRoutes: RouteObject[] = [
             element: withSuspense(<LibraryPage />),
           },
           {
+            path: 'quick-add',
+            element: withSuspense(<LibraryPage />),
+          },
+          {
             path: 'collections/:collectionId',
             element: withSuspense(<CollectionPage />),
           },

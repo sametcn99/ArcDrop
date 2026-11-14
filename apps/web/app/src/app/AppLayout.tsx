@@ -1,4 +1,5 @@
 import AccountCircleOutlinedIcon from '@mui/icons-material/AccountCircleOutlined';
+import AddOutlinedIcon from '@mui/icons-material/AddOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
 import AllInboxOutlinedIcon from '@mui/icons-material/AllInboxOutlined';
 import BookmarksOutlinedIcon from '@mui/icons-material/BookmarksOutlined';
@@ -7,8 +8,10 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import DeleteOutlineOutlinedIcon from '@mui/icons-material/DeleteOutlineOutlined';
 import HealthAndSafetyOutlinedIcon from '@mui/icons-material/HealthAndSafetyOutlined';
 import ImportExportOutlinedIcon from '@mui/icons-material/ImportExportOutlined';
+import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import MenuIcon from '@mui/icons-material/Menu';
+import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
 import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import StarBorderOutlinedIcon from '@mui/icons-material/StarBorderOutlined';
@@ -27,6 +30,7 @@ import {
 } from '@dnd-kit/core';
 import { arrayMove, sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import AppBar from '@mui/material/AppBar';
+import Badge from '@mui/material/Badge';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
@@ -48,7 +52,7 @@ import Toolbar from '@mui/material/Toolbar';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
-import { Link as RouterLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { Link as RouterLink, Outlet, useLocation, useNavigate, useParams } from 'react-router';
 import { syncEngine } from '../api/sync-engine';
 import {
   addBookmarkToCollectionAction,
@@ -56,13 +60,18 @@ import {
   reorderCollectionBookmarksAction,
   reorderSiblingCollectionsAction,
 } from '../shared/actions/collectionActions';
+import { fetchNotificationsAction } from '../shared/actions/notificationActions';
 import { CollectionTreeSidebar } from '../shared/components/CollectionTreeSidebar';
+import { NotificationsDrawer } from '../shared/components/NotificationsDrawer';
+import { QuickAddDialog, type QuickAddInitialValues } from '../shared/components/QuickAddDialog';
 import { SyncStatusIndicator } from '../shared/components/SyncStatusIndicator';
+import { TagManagerDialog } from '../shared/components/TagManagerDialog';
 import { ThemeSwitcher } from '../shared/components/ThemeSwitcher';
 import { AppDndContext, type DragItemData, type DropTargetData } from '../shared/hooks/useAppDnd';
 import { getSiblingCollections } from '../shared/utils/collectionTree';
 import { useAuthStore } from '../stores/authStore';
 import { useLibraryStore } from '../stores/libraryStore';
+import { useNotificationsStore } from '../stores/notificationsStore';
 import { useUiStore } from '../stores/uiStore';
 import { APP_STRINGS } from './strings';
 
@@ -76,11 +85,42 @@ const collisionDetection: CollisionDetection = (args) => {
   return closestCenter(args);
 };
 
+function parseQuickAddSearchParams(
+  search: string,
+  fallbackCollectionId?: string,
+): QuickAddInitialValues {
+  const params = new URLSearchParams(search);
+  const url = params.get('url') ?? undefined;
+  const title = params.get('title') ?? undefined;
+  const collection = params.get('collection') ?? fallbackCollectionId ?? undefined;
+  const rawTags = params.getAll('tags');
+  const tags: string[] = [];
+  for (const entry of rawTags) {
+    for (const part of entry.split(',')) {
+      const trimmed = part.trim();
+      if (trimmed && !tags.includes(trimmed)) {
+        tags.push(trimmed);
+      }
+    }
+  }
+  const favoriteRaw = params.get('favorite');
+  const favorite = favoriteRaw === 'true' || favoriteRaw === '1';
+  return {
+    url,
+    title,
+    collection,
+    tags: tags.length > 0 ? tags : undefined,
+    favorite,
+  };
+}
+
 export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [desktopOpen, setDesktopOpen] = useState(true);
   const [signingOut, setSigningOut] = useState(false);
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null);
+  const [tagManagerOpen, setTagManagerOpen] = useState(false);
+  const [quickAddDialogOpen, setQuickAddDialogOpen] = useState(false);
   const [activeDrag, setActiveDrag] = useState<DragItemData | null>(null);
   const [manualSortContext, setManualSortContext] = useState<{
     collectionId: string;
@@ -117,10 +157,26 @@ export function AppLayout() {
   const authStatus = useAuthStore((s) => s.status);
   const logout = useAuthStore((s) => s.logout);
   const stats = useLibraryStore((s) => s.stats);
+  const tagCount = useLibraryStore((s) => Object.keys(s.tagsById).length);
+  const unreadNotifications = useNotificationsStore((s) => s.unreadCount);
+  const setNotificationsDrawerOpen = useNotificationsStore((s) => s.setDrawerOpen);
   const enqueueSnackbar = useUiStore((s) => s.enqueueSnackbar);
 
   const location = useLocation();
   const navigate = useNavigate();
+  const { collectionId: routeCollectionId } = useParams<{ collectionId: string }>();
+
+  const isQuickAddRoute = location.pathname === '/quick-add';
+  const effectiveQuickAddOpen = quickAddDialogOpen || isQuickAddRoute;
+  const quickAddInitialValues = useMemo(
+    () =>
+      isQuickAddRoute
+        ? parseQuickAddSearchParams(location.search, routeCollectionId)
+        : routeCollectionId
+          ? { collection: routeCollectionId }
+          : undefined,
+    [isQuickAddRoute, location.search, routeCollectionId],
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -132,6 +188,7 @@ export function AppLayout() {
       return;
     }
     void syncEngine.start();
+    void fetchNotificationsAction().catch(() => undefined);
     return () => {
       syncEngine.stop();
     };
@@ -155,6 +212,13 @@ export function AppLayout() {
 
   const handleCloseAccountMenu = () => {
     setAccountAnchor(null);
+  };
+
+  const handleCloseQuickAdd = () => {
+    setQuickAddDialogOpen(false);
+    if (isQuickAddRoute) {
+      navigate('/', { replace: true });
+    }
   };
 
   const handleSignOut = async () => {
@@ -384,6 +448,21 @@ export function AppLayout() {
       <List dense>
         <ListItem disablePadding>
           <ListItemButton
+            onClick={() => {
+              setTagManagerOpen(true);
+              handleCloseMobileDrawer();
+            }}
+          >
+            <ListItemIcon>
+              <LocalOfferOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={APP_STRINGS.navManageTags} />
+            <Chip size="small" label={tagCount} variant="outlined" />
+          </ListItemButton>
+        </ListItem>
+
+        <ListItem disablePadding>
+          <ListItemButton
             component={RouterLink}
             to="/health"
             selected={location.pathname === '/health'}
@@ -533,6 +612,45 @@ export function AppLayout() {
               <Box sx={{ flexGrow: 1, display: { xs: 'none', sm: 'block' } }} />
 
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <Button
+                  color="inherit"
+                  size="small"
+                  variant="outlined"
+                  startIcon={<AddOutlinedIcon />}
+                  onClick={() => setQuickAddDialogOpen(true)}
+                  sx={{ display: { xs: 'none', sm: 'inline-flex' }, whiteSpace: 'nowrap' }}
+                >
+                  {APP_STRINGS.quickAddLabel}
+                </Button>
+                <Tooltip title={APP_STRINGS.quickAddLabel}>
+                  <IconButton
+                    color="inherit"
+                    size="small"
+                    aria-label={APP_STRINGS.quickAddLabel}
+                    onClick={() => setQuickAddDialogOpen(true)}
+                    sx={{ display: { xs: 'inline-flex', sm: 'none' } }}
+                  >
+                    <AddOutlinedIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+
+                <Tooltip title={APP_STRINGS.notificationsButtonLabel}>
+                  <IconButton
+                    color="inherit"
+                    size="small"
+                    aria-label={APP_STRINGS.notificationsButtonLabel}
+                    onClick={() => setNotificationsDrawerOpen(true)}
+                  >
+                    <Badge
+                      badgeContent={unreadNotifications}
+                      color="error"
+                      data-testid="notifications-unread-badge"
+                    >
+                      <NotificationsOutlinedIcon fontSize="small" />
+                    </Badge>
+                  </IconButton>
+                </Tooltip>
+
                 <SyncStatusIndicator />
                 <ThemeSwitcher label={APP_STRINGS.themeSwitcherLabel} />
 
@@ -646,6 +764,14 @@ export function AppLayout() {
             <Outlet />
           </Box>
         </Box>
+
+        <TagManagerDialog open={tagManagerOpen} onClose={() => setTagManagerOpen(false)} />
+        <NotificationsDrawer />
+        <QuickAddDialog
+          open={effectiveQuickAddOpen}
+          onClose={handleCloseQuickAdd}
+          initialValues={quickAddInitialValues}
+        />
 
         <DragOverlay>
           {dragOverlayLabel ? (

@@ -1,7 +1,8 @@
 import { http, HttpResponse } from 'msw';
 import type { AuthSession, Session, User } from '../../api/schemas/auth';
-import type { Bookmark, BookmarkStats, TagUsage } from '../../api/schemas/bookmarks';
+import type { Bookmark, BookmarkStats, Highlight, TagUsage } from '../../api/schemas/bookmarks';
 import type { Collection, CollectionNode } from '../../api/schemas/collections';
+import type { Notification } from '../../api/schemas/notifications';
 import type { ProblemDetails } from '../../api/schemas/problem';
 
 export function makeMockUser(overrides: Partial<User> = {}): User {
@@ -117,6 +118,37 @@ export function makeMockTagUsage(overrides: Partial<TagUsage> = {}): TagUsage {
     id: 'tag-1',
     name: 'architecture',
     count: 2,
+    ...overrides,
+  };
+}
+
+export function makeMockHighlight(overrides: Partial<Highlight> = {}): Highlight {
+  return {
+    id: 'hl-1',
+    bookmarkId: 'bm-1',
+    text: 'Self-hosted bookmarking platform with real-time sync.',
+    note: null,
+    color: 'amber',
+    createdAt: '2026-11-14T00:12:00.000Z',
+    updatedAt: '2026-11-14T00:12:00.000Z',
+    ...overrides,
+  };
+}
+
+export function makeMockNotification(overrides: Partial<Notification> = {}): Notification {
+  const bookmarkId = overrides.bookmarkId ?? 'bm-1';
+  return {
+    id: 'notif-1',
+    type: 'reminder',
+    bookmarkId,
+    payload: {
+      bookmarkId: bookmarkId ?? 'bm-1',
+      title: 'ArcDrop Architecture Guide',
+      url: 'https://arcdrop.test/docs/architecture',
+      reminderAt: '2026-11-14T12:00:00.000Z',
+    },
+    createdAt: '2026-11-14T12:00:01.000Z',
+    readAt: null,
     ...overrides,
   };
 }
@@ -335,6 +367,21 @@ export const libraryHandlers = [
     );
   }),
 
+  http.put('*/api/v1/tags/:name', async ({ params, request }) => {
+    const body = (await request.json()) as { name: string };
+    return HttpResponse.json(
+      {
+        id: `tag-${String(params.name).toLowerCase()}`,
+        name: body.name,
+      },
+      { status: 200 },
+    );
+  }),
+
+  http.delete('*/api/v1/tags/:name', () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   http.post('*/api/v1/bookmarks/bulk', async ({ request }) => {
     const body = (await request.json()) as {
       action: 'move' | 'addTags' | 'removeTags' | 'trash' | 'restore' | 'delete';
@@ -376,6 +423,35 @@ export const libraryHandlers = [
     );
   }),
 
+  http.post('*/api/v1/bookmarks', async ({ request }) => {
+    const url = new URL(request.url);
+    const body = (await request.json()) as {
+      url?: string;
+      title?: string;
+      excerpt?: string;
+      note?: string;
+      favorite?: boolean;
+      reminderAt?: string | null;
+    };
+    const resolvedUrl = body.url ?? url.searchParams.get('url') ?? 'https://arcdrop.test/new';
+    const resolvedTitle = body.title ?? url.searchParams.get('title') ?? null;
+    const resolvedFavorite =
+      body.favorite ?? (url.searchParams.get('favorite') === 'true' ? true : false);
+    return HttpResponse.json(
+      makeMockBookmark({
+        id: 'bm-created',
+        url: resolvedUrl,
+        title: resolvedTitle,
+        excerpt: body.excerpt ?? null,
+        note: body.note ?? null,
+        favorite: resolvedFavorite,
+        reminderAt: body.reminderAt ?? null,
+        tags: [],
+      }),
+      { status: 201 },
+    );
+  }),
+
   http.get('*/api/v1/bookmarks/:id', ({ params }) => {
     const id = String(params.id);
     const match = makeDefaultBookmarkFixtures().find((item) => item.id === id);
@@ -392,6 +468,21 @@ export const libraryHandlers = [
         ...existing,
         ...body,
         updatedAt: '2026-11-14T03:00:00.000Z',
+      },
+      { status: 200 },
+    );
+  }),
+
+  http.put('*/api/v1/bookmarks/:id/tags', async ({ params, request }) => {
+    const id = String(params.id);
+    const body = (await request.json()) as { tags: string[] };
+    const existing =
+      makeDefaultBookmarkFixtures().find((item) => item.id === id) ?? makeMockBookmark({ id });
+    return HttpResponse.json(
+      {
+        ...existing,
+        tags: body.tags.map((name, idx) => ({ id: `tag-${idx + 1}`, name })),
+        updatedAt: '2026-11-14T03:02:00.000Z',
       },
       { status: 200 },
     );
@@ -418,6 +509,74 @@ export const libraryHandlers = [
         deletedAt: null,
         updatedAt: '2026-11-14T03:05:00.000Z',
       }),
+      { status: 200 },
+    );
+  }),
+
+  http.get('*/api/v1/bookmarks/:id/highlights', () => {
+    return HttpResponse.json({ items: [] }, { status: 200 });
+  }),
+
+  http.post('*/api/v1/bookmarks/:id/highlights', async ({ params, request }) => {
+    const bookmarkId = String(params.id);
+    const body = (await request.json()) as {
+      text: string;
+      note?: string | null;
+      color?: string | null;
+    };
+    return HttpResponse.json(
+      makeMockHighlight({
+        id: 'hl-created',
+        bookmarkId,
+        text: body.text,
+        note: body.note ?? null,
+        color: body.color ?? null,
+      }),
+      { status: 201 },
+    );
+  }),
+
+  http.put('*/api/v1/highlights/:id', async ({ params, request }) => {
+    const id = String(params.id);
+    const body = (await request.json()) as {
+      text?: string;
+      note?: string | null;
+      color?: string | null;
+    };
+    return HttpResponse.json(
+      makeMockHighlight({
+        id,
+        text: body.text ?? 'Updated highlight',
+        note: body.note ?? null,
+        color: body.color ?? null,
+        updatedAt: '2026-11-14T03:15:00.000Z',
+      }),
+      { status: 200 },
+    );
+  }),
+
+  http.delete('*/api/v1/highlights/:id', () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get('*/api/v1/notifications', () => {
+    return HttpResponse.json(
+      {
+        items: [],
+        totalCount: 0,
+        page: 1,
+        pageSize: 50,
+      },
+      { status: 200 },
+    );
+  }),
+
+  http.post('*/api/v1/notifications/read', async ({ request }) => {
+    const body = (await request.json()) as { ids?: string[]; all?: boolean };
+    return HttpResponse.json(
+      {
+        updated: body.all ? 1 : (body.ids?.length ?? 0),
+      },
       { status: 200 },
     );
   }),

@@ -1,8 +1,100 @@
 import { bookmarksApi } from '../../api/endpoints/bookmarks';
-import type { Bookmark, UpdateBookmarkRequest } from '../../api/schemas/bookmarks';
+import { collectionsApi } from '../../api/endpoints/collections';
+import { tagsApi } from '../../api/endpoints/tags';
+import type {
+  Bookmark,
+  CreateBookmarkQuery,
+  CreateBookmarkRequest,
+  UpdateBookmarkRequest,
+} from '../../api/schemas/bookmarks';
 import { toApiError } from '../../api/schemas/problem';
 import { useLibraryStore } from '../../stores/libraryStore';
 import { useUiStore } from '../../stores/uiStore';
+import { SHARED_QUICK_ADD_STRINGS, SHARED_TAG_STRINGS } from '../strings';
+
+export interface CreateBookmarkActionInput {
+  body: CreateBookmarkRequest;
+  query?: CreateBookmarkQuery;
+  tags?: string[];
+}
+
+export async function createBookmarkAction(input: CreateBookmarkActionInput): Promise<Bookmark> {
+  try {
+    let created = await bookmarksApi.create(input.body, input.query);
+    if (input.tags && input.tags.length > 0) {
+      created = await bookmarksApi.replaceTags(created.id, input.tags);
+    }
+
+    const store = useLibraryStore.getState();
+    store.upsertBookmark(created);
+
+    const collectionParam = input.query?.collection?.trim();
+    if (collectionParam) {
+      const matchedCollection = Object.values(store.collectionsById).find(
+        (col) =>
+          col.id === collectionParam ||
+          col.title.trim().toLowerCase() === collectionParam.toLowerCase(),
+      );
+      if (matchedCollection) {
+        store.addBookmarkToCollectionViews(matchedCollection.id, created);
+      }
+    }
+
+    void Promise.all([
+      bookmarksApi
+        .stats()
+        .then((stats) => useLibraryStore.getState().hydrateStats(stats))
+        .catch(() => undefined),
+      collectionsApi
+        .list()
+        .then((res) => useLibraryStore.getState().hydrateCollections(res.items))
+        .catch(() => undefined),
+      tagsApi
+        .list()
+        .then((tags) => useLibraryStore.getState().hydrateTags(tags))
+        .catch(() => undefined),
+    ]);
+
+    useUiStore.getState().enqueueSnackbar({
+      message: SHARED_QUICK_ADD_STRINGS.toastCreated,
+      severity: 'success',
+    });
+    return created;
+  } catch (err) {
+    const apiErr = toApiError(err);
+    useUiStore.getState().enqueueSnackbar({
+      message: apiErr.detail || 'Could not create bookmark.',
+      severity: 'error',
+    });
+    throw apiErr;
+  }
+}
+
+export async function replaceBookmarkTagsAction(
+  bookmarkId: string,
+  tags: string[],
+): Promise<Bookmark> {
+  try {
+    const updated = await bookmarksApi.replaceTags(bookmarkId, tags);
+    useLibraryStore.getState().upsertBookmark(updated);
+    void tagsApi
+      .list()
+      .then((list) => useLibraryStore.getState().hydrateTags(list))
+      .catch(() => undefined);
+    useUiStore.getState().enqueueSnackbar({
+      message: SHARED_TAG_STRINGS.toastTagsUpdated,
+      severity: 'success',
+    });
+    return updated;
+  } catch (err) {
+    const apiErr = toApiError(err);
+    useUiStore.getState().enqueueSnackbar({
+      message: apiErr.detail || 'Could not update tags.',
+      severity: 'error',
+    });
+    throw apiErr;
+  }
+}
 
 export async function toggleBookmarkFavoriteAction(bookmark: Bookmark): Promise<Bookmark> {
   const nextFavorite = !bookmark.favorite;

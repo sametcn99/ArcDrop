@@ -4,6 +4,8 @@ import type {
   BookmarkListResponse,
   BookmarkSort,
   BookmarkStats,
+  Highlight,
+  TagSummary,
   TagUsage,
 } from '../api/schemas/bookmarks';
 import type { Collection, CollectionSnapshot } from '../api/schemas/collections';
@@ -30,6 +32,7 @@ export interface LibraryState {
   collectionsById: Record<string, Collection>;
   tagsById: Record<string, TagUsage>;
   highlightsByBookmarkId: Record<string, Record<string, HighlightSnapshot>>;
+  highlightsLoadedByBookmarkId: Record<string, boolean>;
   stats: BookmarkStats;
   views: Record<string, LibraryViewState>;
   activeViewKey: string;
@@ -46,6 +49,11 @@ export interface LibraryState {
   hydrateCollections: (collections: Collection[]) => void;
   hydrateTags: (tags: TagUsage[]) => void;
   hydrateStats: (stats: BookmarkStats) => void;
+  hydrateHighlights: (bookmarkId: string, highlights: Highlight[]) => void;
+  upsertHighlight: (highlight: Highlight) => void;
+  removeHighlight: (bookmarkId: string, highlightId: string) => void;
+  renameOrMergeTagInLibrary: (currentName: string, survivingTag: TagSummary) => void;
+  removeTagFromLibrary: (tagName: string) => void;
   upsertBookmark: (bookmark: Bookmark) => void;
   beginOptimisticBookmark: (id: string, patch: Partial<Bookmark>) => void;
   commitOptimisticBookmark: (id: string, confirmed: Bookmark) => void;
@@ -255,6 +263,7 @@ function createInitialLibraryState() {
     collectionsById: {} as Record<string, Collection>,
     tagsById: {} as Record<string, TagUsage>,
     highlightsByBookmarkId: {} as Record<string, Record<string, HighlightSnapshot>>,
+    highlightsLoadedByBookmarkId: {} as Record<string, boolean>,
     stats: { ...INITIAL_STATS },
     views: {} as Record<string, LibraryViewState>,
     activeViewKey: buildLibraryViewKey('all', 'updated'),
@@ -368,6 +377,108 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   hydrateStats(stats) {
     set({ stats });
+  },
+
+  hydrateHighlights(bookmarkId, highlights) {
+    set((state) => {
+      const nextMap: Record<string, HighlightSnapshot> = {};
+      for (const highlight of highlights) {
+        nextMap[highlight.id] = highlight;
+      }
+      return {
+        highlightsByBookmarkId: {
+          ...state.highlightsByBookmarkId,
+          [bookmarkId]: nextMap,
+        },
+        highlightsLoadedByBookmarkId: {
+          ...state.highlightsLoadedByBookmarkId,
+          [bookmarkId]: true,
+        },
+      };
+    });
+  },
+
+  upsertHighlight(highlight) {
+    set((state) => {
+      const existingForBookmark = state.highlightsByBookmarkId[highlight.bookmarkId] ?? {};
+      return {
+        highlightsByBookmarkId: {
+          ...state.highlightsByBookmarkId,
+          [highlight.bookmarkId]: {
+            ...existingForBookmark,
+            [highlight.id]: highlight,
+          },
+        },
+      };
+    });
+  },
+
+  removeHighlight(bookmarkId, highlightId) {
+    set((state) => {
+      const existingForBookmark = state.highlightsByBookmarkId[bookmarkId];
+      if (!existingForBookmark || !existingForBookmark[highlightId]) {
+        return state;
+      }
+      const nextForBookmark = { ...existingForBookmark };
+      delete nextForBookmark[highlightId];
+      return {
+        highlightsByBookmarkId: {
+          ...state.highlightsByBookmarkId,
+          [bookmarkId]: nextForBookmark,
+        },
+      };
+    });
+  },
+
+  renameOrMergeTagInLibrary(currentName, survivingTag) {
+    const normalizedSource = currentName.trim().toLowerCase();
+    set((state) => {
+      const nextBookmarks: Record<string, Bookmark> = { ...state.bookmarksById };
+      for (const [id, bookmark] of Object.entries(state.bookmarksById)) {
+        const hasMatch = bookmark.tags.some((tag) => tag.name.toLowerCase() === normalizedSource);
+        if (!hasMatch) continue;
+        const deduped: TagSummary[] = [];
+        const seenIds = new Set<string>();
+        for (const tag of bookmark.tags) {
+          const resolved = tag.name.toLowerCase() === normalizedSource ? survivingTag : tag;
+          if (!seenIds.has(resolved.id)) {
+            seenIds.add(resolved.id);
+            deduped.push(resolved);
+          }
+        }
+        nextBookmarks[id] = {
+          ...bookmark,
+          tags: deduped,
+        };
+      }
+      return { bookmarksById: nextBookmarks };
+    });
+  },
+
+  removeTagFromLibrary(tagName) {
+    const normalized = tagName.trim().toLowerCase();
+    set((state) => {
+      const nextBookmarks: Record<string, Bookmark> = { ...state.bookmarksById };
+      for (const [id, bookmark] of Object.entries(state.bookmarksById)) {
+        const filtered = bookmark.tags.filter((tag) => tag.name.toLowerCase() !== normalized);
+        if (filtered.length !== bookmark.tags.length) {
+          nextBookmarks[id] = {
+            ...bookmark,
+            tags: filtered,
+          };
+        }
+      }
+      const nextTags: Record<string, TagUsage> = {};
+      for (const [id, tag] of Object.entries(state.tagsById)) {
+        if (tag.name.toLowerCase() !== normalized) {
+          nextTags[id] = tag;
+        }
+      }
+      return {
+        bookmarksById: nextBookmarks,
+        tagsById: nextTags,
+      };
+    });
   },
 
   upsertBookmark(bookmark) {
@@ -650,6 +761,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const nextCollections = { ...state.collectionsById };
       const nextTags = { ...state.tagsById };
       const nextHighlights = { ...state.highlightsByBookmarkId };
+      const nextHighlightsLoaded = { ...state.highlightsLoadedByBookmarkId };
       const nextPending = { ...state.pendingOptimistic };
       const nextSelected = { ...state.selectedBookmarkIds };
       let nextViews = state.views;
@@ -674,6 +786,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             delete nextPending[change.id];
             delete nextSelected[change.id];
             delete nextHighlights[change.id];
+            delete nextHighlightsLoaded[change.id];
             nextViews = removeIdFromViews(nextViews, change.id);
             continue;
           }
@@ -771,6 +884,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         collectionsById: nextCollections,
         tagsById: nextTags,
         highlightsByBookmarkId: nextHighlights,
+        highlightsLoadedByBookmarkId: nextHighlightsLoaded,
         pendingOptimistic: nextPending,
         selectedBookmarkIds: nextSelected,
         views: nextViews,
@@ -833,6 +947,15 @@ export function selectSortedCollections(state: LibraryState): Collection[] {
 
 export function selectSortedTags(state: LibraryState): TagUsage[] {
   return Object.values(state.tagsById).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function selectBookmarkHighlights(
+  state: LibraryState,
+  bookmarkId: string,
+): HighlightSnapshot[] {
+  const map = state.highlightsByBookmarkId[bookmarkId];
+  if (!map) return [];
+  return Object.values(map).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function selectSelectedBookmarkIdsList(state: LibraryState): string[] {

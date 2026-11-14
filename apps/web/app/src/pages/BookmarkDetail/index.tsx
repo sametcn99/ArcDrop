@@ -28,6 +28,19 @@ export default function BookmarkDetailPage() {
     setField,
     resetEdits,
     save,
+    tagsSaving,
+    tagsError,
+    saveTags,
+    reminderSaving,
+    reminderError,
+    saveReminder,
+    highlights,
+    highlightsLoading,
+    highlightsBusy,
+    highlightsError,
+    createHighlight,
+    updateHighlight,
+    deleteHighlight,
     toggleFavorite,
     trash,
     restore,
@@ -52,7 +65,7 @@ export default function BookmarkDetailPage() {
       slotProps={{
         paper: {
           sx: {
-            width: { xs: '100%', sm: 460 },
+            width: { xs: '100%', sm: 480 },
             maxWidth: '100%',
           },
         },
@@ -113,6 +126,19 @@ export default function BookmarkDetailPage() {
               onFieldChange={setField}
               onReset={resetEdits}
               onSave={save}
+              tagsSaving={tagsSaving}
+              tagsError={tagsError}
+              onSaveTags={saveTags}
+              reminderSaving={reminderSaving}
+              reminderError={reminderError}
+              onSaveReminder={saveReminder}
+              highlights={highlights}
+              highlightsLoading={highlightsLoading}
+              highlightsBusy={highlightsBusy}
+              highlightsError={highlightsError}
+              onCreateHighlight={createHighlight}
+              onUpdateHighlight={updateHighlight}
+              onDeleteHighlight={deleteHighlight}
               onToggleFavorite={() => void toggleFavorite()}
               onTrash={() => void handleTrash()}
               onRestore={() => void restore()}
