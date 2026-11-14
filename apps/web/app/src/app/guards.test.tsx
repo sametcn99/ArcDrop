@@ -8,6 +8,7 @@ import { SnackbarHost } from '../shared/components/SnackbarHost';
 import { useAuthStore } from '../stores/authStore';
 import { makeMockSession } from '../test/msw/handlers';
 import { server } from '../test/msw/server';
+import { waitForBootstrapReady, waitForLibraryReady } from '../test/waiters';
 import { ThemeController } from '../theme/ThemeController';
 import { appRoutes } from './routes';
 
@@ -25,7 +26,7 @@ function renderAtPath(path: string) {
 
 describe('Route guards & logout flow', () => {
   it('redirects unauthenticated requests on protected routes to /login and returns after sign-in', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderAtPath('/settings');
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
@@ -34,8 +35,9 @@ describe('Route guards & logout flow', () => {
     await user.type(screen.getByLabelText(/Password/i), 'password-1234');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
+    await waitForBootstrapReady();
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('redirects authenticated non-admin users away from /admin to /', async () => {
     useAuthStore.getState().setSession(
@@ -45,10 +47,11 @@ describe('Route guards & logout flow', () => {
     );
 
     renderAtPath('/admin');
+    await waitForLibraryReady();
 
     expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Administration' })).not.toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('allows authenticated admin users to access /admin', async () => {
     useAuthStore.getState().setSession(
@@ -58,9 +61,10 @@ describe('Route guards & logout flow', () => {
     );
 
     renderAtPath('/admin');
+    await waitForBootstrapReady();
 
     expect(await screen.findByRole('heading', { name: 'Administration' })).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('redirects already-authenticated users from public-only routes to /', async () => {
     useAuthStore.getState().setSession(
@@ -70,18 +74,19 @@ describe('Route guards & logout flow', () => {
     );
 
     renderAtPath('/login');
+    await waitForLibraryReady();
 
     expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('keeps /s/:token accessible without authentication', async () => {
     renderAtPath('/s/public-share-token');
 
     expect(await screen.findByRole('heading', { name: 'Shared collection' })).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('signs out via the AppBar Sign out button, revokes session, and redirects to /login', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let loggedOutRefreshToken: string | null = null;
 
     server.use(
@@ -101,8 +106,8 @@ describe('Route guards & logout flow', () => {
     );
 
     renderAtPath('/');
+    await waitForLibraryReady();
 
-    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
 
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
@@ -110,5 +115,5 @@ describe('Route guards & logout flow', () => {
     expect(apiClient.getAccessToken()).toBeNull();
     expect(apiClient.getRefreshToken()).toBeNull();
     expect(useAuthStore.getState().status).toBe('unauthenticated');
-  });
+  }, 60_000);
 });

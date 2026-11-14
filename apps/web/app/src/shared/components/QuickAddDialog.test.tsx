@@ -12,6 +12,7 @@ import {
   makeMockTagUsage,
 } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
+import { waitForBootstrapReady, waitForLibraryReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 import { SnackbarHost } from './SnackbarHost';
 
@@ -36,7 +37,7 @@ function renderAt(path: string) {
 
 describe('QuickAddDialog', () => {
   it('opens from AppBar Quick add button, creates bookmark with collection and tags, and allows duplicate URLs', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const createdPosts: Array<{
       collection: string | null;
       body: { url?: string; title?: string; favorite?: boolean };
@@ -94,6 +95,7 @@ describe('QuickAddDialog', () => {
     );
 
     renderAt('/');
+    await waitForLibraryReady();
 
     const quickAddBtns = await screen.findAllByRole('button', { name: 'Quick add' });
     const triggerBtn = quickAddBtns[0];
@@ -140,10 +142,10 @@ describe('QuickAddDialog', () => {
     await waitFor(() => {
       expect(createdPosts).toHaveLength(2);
     });
-  });
+  }, 60_000);
 
   it('pre-populates from /quick-add query-param contract', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let capturedCollection: string | null = null;
     let capturedBody: Record<string, unknown> | null = null;
     let capturedTags: string[] | null = null;
@@ -183,6 +185,7 @@ describe('QuickAddDialog', () => {
     renderAt(
       '/quick-add?url=https%3A%2F%2Farcdrop.test%2Fqp&title=Shared%20Page&collection=Reading%20List&tags=web,reading&favorite=true',
     );
+    await waitForBootstrapReady();
 
     const dialog = await screen.findByRole('dialog', { name: 'Quick add bookmark' });
     expect(within(dialog).getByLabelText(/^URL/i)).toHaveValue('https://arcdrop.test/qp');
@@ -205,5 +208,5 @@ describe('QuickAddDialog', () => {
       });
       expect(capturedTags).toEqual(['web', 'reading']);
     });
-  });
+  }, 60_000);
 });

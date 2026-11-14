@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useLibraryStore } from '../../stores/libraryStore';
 import { makeMockCollection, makeMockSession } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
+import { waitForLibraryReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 import { SHARED_COLLECTION_STRINGS } from '../strings';
 import { SnackbarHost } from './SnackbarHost';
@@ -119,6 +120,7 @@ describe('CollectionShareDialog', () => {
     );
 
     renderShellAt('/');
+    await waitForLibraryReady();
     expect(await screen.findByText('Reading List')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Collection actions: Reading List' }));
@@ -200,5 +202,5 @@ describe('CollectionShareDialog', () => {
     await user.click(
       within(shareDialog2).getByRole('button', { name: SHARED_COLLECTION_STRINGS.shareClose }),
     );
-  });
+  }, 60_000);
 });

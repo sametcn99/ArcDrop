@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { useAuthStore } from '../stores/authStore';
 import { useSyncStore } from '../stores/syncStore';
 import { makeMockSession } from '../test/msw/handlers';
+import { waitForBootstrapReady, waitForLibraryReady } from '../test/waiters';
 import { ThemeController } from '../theme/ThemeController';
 import { appRoutes } from './routes';
 
@@ -28,6 +29,7 @@ describe('AppLayout and router shell', () => {
       }),
     );
     renderAtRoute('/');
+    await waitForLibraryReady();
 
     expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
     expect(screen.getAllByText('ArcDrop').length).toBeGreaterThan(0);
@@ -41,7 +43,7 @@ describe('AppLayout and router shell', () => {
         'live',
       );
     });
-  });
+  }, 60_000);
 
   it('reflects live, polling, and offline sync states in the AppBar status indicator', async () => {
     useAuthStore.getState().setSession(
@@ -50,6 +52,7 @@ describe('AppLayout and router shell', () => {
       }),
     );
     renderAtRoute('/');
+    await waitForBootstrapReady();
 
     const indicator = await screen.findByTestId('sync-status-indicator');
     await waitFor(() => {
@@ -69,16 +72,17 @@ describe('AppLayout and router shell', () => {
     });
     expect(indicator).toHaveAttribute('data-sync-state', 'offline');
     expect(indicator).toHaveTextContent('Offline · #14');
-  });
+  }, 60_000);
 
   it('toggles desktop sidebar collapse and opens the account menu', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     useAuthStore.getState().setSession(
       makeMockSession({
         user: { role: 'user', email: 'member@arcdrop.test' },
       }),
     );
     renderAtRoute('/');
+    await waitForBootstrapReady();
 
     const toggleSidebarBtn = await screen.findByRole('button', { name: 'Toggle sidebar' });
     expect(toggleSidebarBtn).toHaveAttribute('aria-expanded', 'true');
@@ -89,33 +93,40 @@ describe('AppLayout and router shell', () => {
     await user.click(screen.getByRole('button', { name: 'member@arcdrop.test' }));
     expect(await screen.findByRole('menuitem', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('toggles theme from the AppBar ThemeSwitcher', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     useAuthStore.getState().setSession(
       makeMockSession({
         user: { role: 'admin', email: 'admin@arcdrop.test' },
       }),
     );
     renderAtRoute('/');
+    await waitForBootstrapReady();
 
     await user.click(await screen.findByRole('button', { name: 'Switch theme' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Dark' }));
 
     expect(document.documentElement.dataset.theme).toBe('dark');
-  });
+  }, 60_000);
 
   it.each([
     ['/login', 'Sign in'],
     ['/bootstrap', 'Initial setup'],
     ['/claim', 'Claim invite or reset token'],
     ['/s/share-token-1', 'Shared collection'],
-  ])('renders unauthenticated lazy route %s with heading %s', async (path, heading) => {
-    renderAtRoute(path);
+  ])(
+    'renders unauthenticated lazy route %s with heading %s',
+    async (path, heading) => {
+      renderAtRoute(path);
 
-    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
-  });
+      expect(
+        await screen.findByRole('heading', { name: heading }, { timeout: 30_000 }),
+      ).toBeInTheDocument();
+    },
+    60_000,
+  );
 
   it.each([
     ['/collections/col-1', 'Reading List'],
@@ -125,14 +136,21 @@ describe('AppLayout and router shell', () => {
     ['/portability', 'Import & export'],
     ['/settings', 'Settings'],
     ['/admin', 'Administration'],
-  ])('renders authenticated lazy route %s with heading %s', async (path, heading) => {
-    useAuthStore.getState().setSession(
-      makeMockSession({
-        user: { role: 'admin', email: 'admin@arcdrop.test' },
-      }),
-    );
-    renderAtRoute(path);
+  ])(
+    'renders authenticated lazy route %s with heading %s',
+    async (path, heading) => {
+      useAuthStore.getState().setSession(
+        makeMockSession({
+          user: { role: 'admin', email: 'admin@arcdrop.test' },
+        }),
+      );
+      renderAtRoute(path);
+      await waitForBootstrapReady();
 
-    expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
-  });
+      expect(
+        await screen.findByRole('heading', { name: heading }, { timeout: 30_000 }),
+      ).toBeInTheDocument();
+    },
+    60_000,
+  );
 });

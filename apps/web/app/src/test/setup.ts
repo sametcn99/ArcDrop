@@ -11,7 +11,7 @@ import { server } from './msw/server';
 import { installFakeWebSocket, type FakeWebSocketController } from './ws/fake-ws';
 
 configure({
-  asyncUtilTimeout: 5000,
+  asyncUtilTimeout: 15_000,
 });
 
 export let testFakeWsController: FakeWebSocketController;

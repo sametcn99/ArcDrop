@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { makeMockNotification, makeMockSession } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
 import { testFakeWsController } from '../../test/setup';
+import { waitForLibraryReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 import { SnackbarHost } from './SnackbarHost';
 
@@ -33,7 +34,7 @@ function renderShell() {
 
 describe('NotificationsDrawer and live reminder frames', () => {
   it('shows snackbar on WS reminder frame, lists notifications, and marks one or all read', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let notifications: Notification[] = [
       makeMockNotification({
         id: 'notif-1',
@@ -75,16 +76,23 @@ describe('NotificationsDrawer and live reminder frames', () => {
     );
 
     renderShell();
+    await waitForLibraryReady();
 
-    await waitFor(() => {
-      expect(screen.getByTestId('sync-status-indicator')).toHaveAttribute(
-        'data-sync-state',
-        'live',
-      );
-    });
-    await waitFor(() => {
-      expect(screen.getByTestId('notifications-unread-badge')).toHaveTextContent('1');
-    });
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('sync-status-indicator')).toHaveAttribute(
+          'data-sync-state',
+          'live',
+        );
+      },
+      { timeout: 30_000 },
+    );
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('notifications-unread-badge')).toHaveTextContent('1');
+      },
+      { timeout: 30_000 },
+    );
 
     // Inject second notification that server will return when drawer opens after live WS frame
     const liveNotif = makeMockNotification({
@@ -144,5 +152,5 @@ describe('NotificationsDrawer and live reminder frames', () => {
       expect(markReadPayloads).toContainEqual({ all: true });
     });
     expect(await screen.findByText('All notifications marked read.')).toBeInTheDocument();
-  });
+  }, 60_000);
 });

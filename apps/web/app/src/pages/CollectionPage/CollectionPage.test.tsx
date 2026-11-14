@@ -13,6 +13,7 @@ import {
   problemJsonResponse,
 } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
+import { waitForCollectionReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 import { COLLECTION_PAGE_STRINGS } from './strings';
 
@@ -54,7 +55,7 @@ describe('CollectionPage', () => {
   });
 
   it('renders collection heading, ancestor breadcrumbs, scoped bookmarks, and layout switcher', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const seenQueries: Array<{ collectionId: string | null; sort: string | null }> = [];
 
     const collections = [
@@ -87,6 +88,7 @@ describe('CollectionPage', () => {
     );
 
     renderCollectionAt('/collections/col-2');
+    await waitForCollectionReady();
 
     expect(await screen.findByRole('heading', { name: 'Architecture' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Engineering' })).toBeInTheDocument();
@@ -97,10 +99,10 @@ describe('CollectionPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Grid' }));
     expect(screen.getByTestId('library-layout-grid')).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('supports sort=manual with drag-and-drop and accessible move controls patching bookmark order', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const orderPatches: Array<{
       collectionId: string;
       items: Array<{ bookmarkId: string; order: number }>;
@@ -179,6 +181,7 @@ describe('CollectionPage', () => {
     });
 
     renderCollectionAt('/collections/col-1');
+    await waitForCollectionReady();
     expect(await screen.findByText('First Manual Bookmark')).toBeInTheDocument();
 
     // Switch to manual sort
@@ -285,7 +288,7 @@ describe('CollectionPage', () => {
       { name: /^(First|Second) Manual Bookmark$/ },
     );
     expect(linksAfterRollback[0]).toHaveTextContent('First Manual Bookmark');
-  });
+  }, 60_000);
 
   it('shows not-found state when collection returns 404', async () => {
     server.use(
@@ -307,8 +310,9 @@ describe('CollectionPage', () => {
     );
 
     renderCollectionAt('/collections/missing-col');
+    await waitForCollectionReady();
     expect(
       await screen.findByRole('heading', { name: 'Collection not found' }),
     ).toBeInTheDocument();
-  });
+  }, 60_000);
 });

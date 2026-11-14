@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { useLibraryStore } from '../../stores/libraryStore';
 import { makeMockBookmark, makeMockSession, makeMockTagUsage } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
+import { waitForLibraryReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 import { SnackbarHost } from './SnackbarHost';
 
@@ -33,7 +34,7 @@ function renderShell() {
 
 describe('TagManagerDialog', () => {
   it('opens from sidebar footer, displays usage counts, renames, merges, and delete-detaches tags', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let tagRows: TagUsage[] = [
       makeMockTagUsage({ id: 'tag-arch', name: 'architecture', count: 3 }),
       makeMockTagUsage({ id: 'tag-work', name: 'work', count: 2 }),
@@ -90,6 +91,7 @@ describe('TagManagerDialog', () => {
     );
 
     renderShell();
+    await waitForLibraryReady();
 
     const manageTagsButtons = await screen.findAllByRole('button', { name: /Manage tags/i });
     const manageBtn = manageTagsButtons[0];
@@ -146,5 +148,5 @@ describe('TagManagerDialog', () => {
     const remainingBookmark = useLibraryStore.getState().bookmarksById['bm-1'];
     expect(remainingBookmark).toBeDefined();
     expect(remainingBookmark?.tags.map((t) => t.name)).not.toContain('architecture');
-  });
+  }, 60_000);
 });

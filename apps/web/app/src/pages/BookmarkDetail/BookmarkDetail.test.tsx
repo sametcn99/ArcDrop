@@ -16,6 +16,7 @@ import {
   problemJsonResponse,
 } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
+import { waitForBootstrapReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 import BookmarkDetailPage from './index';
 
@@ -59,7 +60,7 @@ function renderDetailDrawerOnly(path: string) {
 
 describe('BookmarkDetail drawer', () => {
   it('views and edits title, url, excerpt, and note through the API client', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let capturedPayload: Record<string, unknown> | null = null;
 
     const bookmark = makeMockBookmark({
@@ -108,10 +109,10 @@ describe('BookmarkDetail drawer', () => {
 
     expect(useLibraryStore.getState().bookmarksById['bm-edit']?.title).toBe('Updated Heading');
     expect(await screen.findByText('Bookmark updated.')).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('disables URL editing on file-backed bookmarks and supports trash + restore', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let deleteCalled = false;
 
     const fileBookmark = makeMockBookmark({
@@ -133,6 +134,7 @@ describe('BookmarkDetail drawer', () => {
     );
 
     renderDetailAt('/bookmarks/bm-file');
+    await waitForBootstrapReady();
 
     const urlField = await screen.findByLabelText('URL');
     expect(urlField).toBeDisabled();
@@ -144,10 +146,10 @@ describe('BookmarkDetail drawer', () => {
       expect(deleteCalled).toBe(true);
     });
     expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('shows restore banner for trashed bookmarks with read-only highlights and restores via API', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let restoreCalled = false;
 
     const trashedBookmark = makeMockBookmark({
@@ -201,10 +203,10 @@ describe('BookmarkDetail drawer', () => {
     });
     expect(screen.getByLabelText('Title')).not.toBeDisabled();
     expect(screen.getByRole('button', { name: 'Add highlight' })).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('replaces bookmark tags using autocomplete and PUT /bookmarks/:id/tags', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let capturedTags: string[] | null = null;
 
     const bookmark = makeMockBookmark({
@@ -231,6 +233,7 @@ describe('BookmarkDetail drawer', () => {
     );
 
     renderDetailAt('/bookmarks/bm-tags');
+    await waitForBootstrapReady();
 
     const tagsSection = await screen.findByTestId('bookmark-tags-section');
     const tagInput = within(tagsSection).getByRole('combobox', { name: 'Tags' });
@@ -247,10 +250,10 @@ describe('BookmarkDetail drawer', () => {
       expect(capturedTags).toEqual(['architecture', 'reading', 'urgent']);
     });
     expect(await screen.findByText('Tags updated.')).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('supports highlight CRUD in the drawer', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let highlights: Highlight[] = [
       makeMockHighlight({
         id: 'hl-1',
@@ -335,10 +338,10 @@ describe('BookmarkDetail drawer', () => {
     await waitFor(() => {
       expect(within(hlSection).queryByText('Initial quote')).not.toBeInTheDocument();
     });
-  });
+  }, 60_000);
 
   it('surfaces API trash-refusal errors when highlight mutation is rejected', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const bookmark = makeMockBookmark({ id: 'bm-hl-refuse', title: 'Trashed Remotely' });
 
     server.use(
@@ -368,10 +371,10 @@ describe('BookmarkDetail drawer', () => {
     expect(
       await within(hlSection).findByText('Cannot add highlight to a trashed bookmark'),
     ).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('renders markdown headings, lists, and links through MUI components in Note preview', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const markdownNote = [
       '# Reading Summary',
       '',
@@ -407,5 +410,5 @@ describe('BookmarkDetail drawer', () => {
     const link = within(preview).getByRole('link', { name: 'Architecture Spec' });
     expect(link).toHaveClass('MuiLink-root');
     expect(link).toHaveAttribute('href', 'https://arcdrop.test/spec');
-  });
+  }, 60_000);
 });

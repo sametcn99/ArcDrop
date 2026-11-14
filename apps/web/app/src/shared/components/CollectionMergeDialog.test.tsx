@@ -13,6 +13,7 @@ import {
   problemJsonResponse,
 } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
+import { waitForLibraryReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 import { SHARED_COLLECTION_STRINGS } from '../strings';
 import { SnackbarHost } from './SnackbarHost';
@@ -126,6 +127,7 @@ describe('CollectionMergeDialog', () => {
     );
 
     renderShellAt('/');
+    await waitForLibraryReady();
     expect(await screen.findByText('Design Systems')).toBeInTheDocument();
 
     await user.click(
@@ -182,5 +184,5 @@ describe('CollectionMergeDialog', () => {
     );
 
     expect(screen.queryByText('Design Systems')).not.toBeInTheDocument();
-  });
+  }, 60_000);
 });

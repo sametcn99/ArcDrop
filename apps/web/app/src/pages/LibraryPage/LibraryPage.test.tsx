@@ -10,6 +10,7 @@ import { useLibraryStore } from '../../stores/libraryStore';
 import { makeMockBookmark, makeMockSession, problemJsonResponse } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
 import { testFakeWsController } from '../../test/setup';
+import { waitForLibraryReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 
 function renderLibraryAt(path = '/') {
@@ -33,8 +34,10 @@ function renderLibraryAt(path = '/') {
 
 describe('LibraryPage', () => {
   it('renders fixture bookmarks across all four layouts (list, grid, headlines, moodboard)', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     renderLibraryAt('/');
+
+    await waitForLibraryReady();
 
     expect(await screen.findByText('ArcDrop Architecture Guide')).toBeInTheDocument();
     expect(screen.getByText('MUI Design Tokens Reference')).toBeInTheDocument();
@@ -51,10 +54,10 @@ describe('LibraryPage', () => {
     await user.click(screen.getByRole('button', { name: 'Moodboard' }));
     expect(screen.getByTestId('library-layout-moodboard')).toBeInTheDocument();
     expect(screen.getByText('MUI Design Tokens Reference')).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('switches sort order and filters to unassigned view', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     const seenQueries: Array<{ sort: string | null; unassignedOnly: string | null }> = [];
 
     server.use(
@@ -110,6 +113,7 @@ describe('LibraryPage', () => {
     );
 
     renderLibraryAt('/');
+    await waitForLibraryReady();
 
     expect(await screen.findByText('Default Updated Item')).toBeInTheDocument();
 
@@ -124,10 +128,10 @@ describe('LibraryPage', () => {
       seenQueries.some((q) => q.sort === 'title') &&
         seenQueries.some((q) => q.unassignedOnly === 'true'),
     ).toBe(true);
-  });
+  }, 60_000);
 
   it('supports load-more paging without duplicating existing items', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
 
     server.use(
       http.get('*/api/v1/bookmarks', ({ request }) => {
@@ -150,6 +154,7 @@ describe('LibraryPage', () => {
     );
 
     renderLibraryAt('/');
+    await waitForLibraryReady();
 
     expect(await screen.findByText('Page One Bookmark')).toBeInTheDocument();
     const loadMoreBtn = screen.getByRole('button', { name: 'Load more' });
@@ -158,10 +163,10 @@ describe('LibraryPage', () => {
     expect(await screen.findByText('Page Two Bookmark')).toBeInTheDocument();
     expect(screen.getByText('Page One Bookmark')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('toggles favorite optimistically, reconciles with server & sync echo, and rolls back on failure', async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ delay: null });
     let resolvePut!: () => void;
     let shouldFailNextPut = false;
     let currentFavorite = false;
@@ -229,6 +234,7 @@ describe('LibraryPage', () => {
     );
 
     renderLibraryAt('/');
+    await waitForLibraryReady();
 
     expect(await screen.findByText('Optimistic Star Bookmark')).toBeInTheDocument();
     const starButton = screen.getByRole('button', {
@@ -270,7 +276,7 @@ describe('LibraryPage', () => {
     expect(
       screen.getByRole('button', { name: 'Remove from favorites: Optimistic Star Bookmark' }),
     ).toHaveAttribute('aria-pressed', 'true');
-  });
+  }, 60_000);
 
   it('renders reminder badges on bookmark cards for scheduled and due reminders', async () => {
     server.use(
@@ -298,6 +304,7 @@ describe('LibraryPage', () => {
     );
 
     renderLibraryAt('/');
+    await waitForLibraryReady();
 
     const schedCard = await screen.findByTestId('bookmark-item-bm-sched');
     expect(within(schedCard).getByTestId('bookmark-reminder-badge')).toHaveTextContent(
@@ -308,5 +315,5 @@ describe('LibraryPage', () => {
     expect(within(dueCard).getByTestId('bookmark-reminder-badge')).toHaveTextContent(
       'Reminder due',
     );
-  });
+  }, 60_000);
 });

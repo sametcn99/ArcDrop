@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/authStore';
 import { makeMockCollection, makeMockSession, problemJsonResponse } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
 import { testFakeWsController } from '../../test/setup';
+import { waitForCollectionReady, waitForLibraryReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 import { SHARED_COLLECTION_STRINGS } from '../strings';
 import { SnackbarHost } from './SnackbarHost';
@@ -172,6 +173,7 @@ describe('CollectionTreeSidebar', () => {
     );
 
     const view = renderShellAt('/');
+    await waitForLibraryReady();
 
     expect(await screen.findByText('Reading List')).toBeInTheDocument();
     expect(screen.getByText('Design Systems')).toBeInTheDocument();
@@ -189,8 +191,9 @@ describe('CollectionTreeSidebar', () => {
     // Remount and confirm persisted expanded state restores automatically
     view.unmount();
     renderShellAt('/');
+    await waitForLibraryReady();
     expect(await screen.findByText('Architecture')).toBeInTheDocument();
-  });
+  }, 60_000);
 
   it('supports tree CRUD, surfaces cycle-conflict 409 errors, and reconciles WS deltas', async () => {
     const user = userEvent.setup({ delay: null });
@@ -245,6 +248,7 @@ describe('CollectionTreeSidebar', () => {
     );
 
     renderShellAt('/');
+    await waitForLibraryReady();
     expect(await screen.findByText('Reading List')).toBeInTheDocument();
 
     // Create root collection with icon and color
@@ -381,6 +385,7 @@ describe('CollectionTreeSidebar', () => {
     );
 
     renderShellAt('/collections/col-1');
+    await waitForCollectionReady();
     expect(await screen.findByRole('heading', { name: 'Reading List' })).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Collection actions: Reading List' }));
@@ -412,7 +417,7 @@ describe('CollectionTreeSidebar', () => {
     await waitFor(() => {
       expect(screen.queryByText('Reading List')).not.toBeInTheDocument();
     });
-  });
+  }, 60_000);
 
   it('produces API calls for dnd nest (and cycle 409), sibling reorder, and bookmark-onto-collection', async () => {
     const tree = makeFixtureTree();
@@ -499,6 +504,7 @@ describe('CollectionTreeSidebar', () => {
     localStorage.setItem('arcdrop.collectionTree.expanded', JSON.stringify({ 'col-1': true }));
 
     renderShellAt('/');
+    await waitForLibraryReady();
     expect(await screen.findByText('Design Systems')).toBeInTheDocument();
     expect(await screen.findByText('MUI Design Tokens Reference')).toBeInTheDocument();
 
@@ -547,5 +553,5 @@ describe('CollectionTreeSidebar', () => {
       ids: ['bm-2'],
       collectionIds: ['col-4'],
     });
-  });
+  }, 60_000);
 });

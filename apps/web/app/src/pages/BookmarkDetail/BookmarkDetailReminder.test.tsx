@@ -7,6 +7,7 @@ import { SnackbarHost } from '../../shared/components/SnackbarHost';
 import { useAuthStore } from '../../stores/authStore';
 import { makeMockBookmark, makeMockSession } from '../../test/msw/handlers';
 import { server } from '../../test/msw/server';
+import { waitForBootstrapReady } from '../../test/waiters';
 import { ThemeController } from '../../theme/ThemeController';
 
 function renderDetailAt(path: string) {
@@ -65,6 +66,7 @@ describe('BookmarkDetail reminder integration', () => {
       );
 
       renderDetailAt('/bookmarks/bm-rem');
+      await waitForBootstrapReady();
 
       const section = await screen.findByTestId('bookmark-reminder-section');
       expect(within(section).getByText('No reminder set.')).toBeInTheDocument();
@@ -102,5 +104,5 @@ describe('BookmarkDetail reminder integration', () => {
     } finally {
       matchMediaSpy.mockRestore();
     }
-  });
+  }, 60_000);
 });

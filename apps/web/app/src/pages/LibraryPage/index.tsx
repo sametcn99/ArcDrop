@@ -57,7 +57,7 @@ export default function LibraryPage() {
       ) : null}
 
       {loading ? (
-        <Stack spacing={1.5}>
+        <Stack spacing={1.5} data-testid="library-loading">
           <Skeleton variant="rounded" height={96} />
           <Skeleton variant="rounded" height={96} />
           <Skeleton variant="rounded" height={96} />
