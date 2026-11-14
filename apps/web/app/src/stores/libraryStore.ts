@@ -67,6 +67,7 @@ export interface LibraryState {
   hydrateView: (viewKey: string, response: BookmarkListResponse, append?: boolean) => void;
   hydrateCollections: (collections: Collection[]) => void;
   hydrateTags: (tags: TagUsage[]) => void;
+  bumpTagCounts: (tags: TagSummary[], delta: number) => void;
   hydrateStats: (stats: BookmarkStats) => void;
   hydrateHighlights: (bookmarkId: string, highlights: Highlight[]) => void;
   upsertHighlight: (highlight: Highlight) => void;
@@ -85,6 +86,7 @@ export interface LibraryState {
   restoreCollectionsSnapshot: (snapshot: Record<string, Collection>) => void;
   setCollectionShareState: (collectionId: string, share: Collection['share']) => void;
   adjustCollectionBookmarkCount: (collectionId: string, delta: number) => void;
+  bumpStatsForCreatedBookmark: (created: Bookmark, options: { hasCollection: boolean }) => void;
   addBookmarkToCollectionViews: (collectionId: string, bookmark: Bookmark) => void;
   reorderViewIds: (viewKey: string, orderedIds: string[]) => string[] | null;
   toggleCollectionExpanded: (id: string) => void;
@@ -276,6 +278,71 @@ function removeIdFromViews(
   return changed ? nextViews : views;
 }
 
+/**
+ * Session view-state cache is capped so hours of scope/sort/filter/search
+ * permutations cannot grow `views` (and the O(views × ids) maintenance inside
+ * applySyncChanges) without bound. The active view is always retained.
+ */
+const MAX_CACHED_VIEWS = 24;
+
+function pruneViews(
+  views: Record<string, LibraryViewState>,
+  activeViewKey: string,
+): Record<string, LibraryViewState> {
+  const keys = Object.keys(views);
+  if (keys.length <= MAX_CACHED_VIEWS) return views;
+
+  // Always keep the active and any in-flight views; of the rest, keep the
+  // most recently touched MAX_CACHED_VIEWS (object key order = insertion).
+  const pinned = new Set<string>([activeViewKey]);
+  for (const key of keys) {
+    const view = views[key];
+    if (view && (view.loading || view.loadingMore)) pinned.add(key);
+  }
+  const evictable = keys.filter((key) => !pinned.has(key));
+  const overflow = evictable.length + pinned.size - MAX_CACHED_VIEWS;
+  const evicted = new Set(overflow > 0 ? evictable.slice(0, overflow) : []);
+
+  const next: Record<string, LibraryViewState> = {};
+  for (const key of keys) {
+    const view = views[key];
+    if (view && !evicted.has(key)) next[key] = view;
+  }
+  return next;
+}
+
+/**
+ * Maintain tag usage counts from a bookmark's previous vs incoming tag list.
+ * Sync change snapshots do not carry tag counts (`count` is preserved from the
+ * previous value), so without this every remote tag mutation would leave the
+ * tag list stale until a full bootstrap.
+ */
+function applyTagCountDeltas(
+  nextTags: Record<string, TagUsage>,
+  prevTags: TagSummary[] | undefined,
+  incomingTags: TagSummary[] | undefined,
+): void {
+  const prev = prevTags ?? [];
+  const incoming = incomingTags ?? [];
+  if (prev.length === 0 && incoming.length === 0) return;
+
+  const prevIds = new Set(prev.map((tag) => tag.id));
+  const incomingIds = new Set(incoming.map((tag) => tag.id));
+  const deltas = new Map<string, number>();
+  for (const tag of prev) {
+    if (!incomingIds.has(tag.id)) deltas.set(tag.id, (deltas.get(tag.id) ?? 0) - 1);
+  }
+  for (const tag of incoming) {
+    if (!prevIds.has(tag.id)) deltas.set(tag.id, (deltas.get(tag.id) ?? 0) + 1);
+  }
+  for (const [id, delta] of deltas) {
+    const current = nextTags[id];
+    if (current) {
+      nextTags[id] = { ...current, count: Math.max(0, current.count + delta) };
+    }
+  }
+}
+
 function insertBookmarkIntoViews(
   views: Record<string, LibraryViewState>,
   bookmark: Bookmark,
@@ -366,15 +433,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set((state) => {
       const existing = state.views[viewKey] ?? createEmptyView();
       return {
-        views: {
-          ...state.views,
-          [viewKey]: {
-            ...existing,
-            loading: append ? existing.loading : loading,
-            loadingMore: append ? loading : false,
-            error: loading ? null : existing.error,
+        views: pruneViews(
+          {
+            ...state.views,
+            [viewKey]: {
+              ...existing,
+              loading: append ? existing.loading : loading,
+              loadingMore: append ? loading : false,
+              error: loading ? null : existing.error,
+            },
           },
-        },
+          state.activeViewKey,
+        ),
       };
     });
   },
@@ -383,15 +453,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set((state) => {
       const existing = state.views[viewKey] ?? createEmptyView();
       return {
-        views: {
-          ...state.views,
-          [viewKey]: {
-            ...existing,
-            loading: false,
-            loadingMore: false,
-            error,
+        views: pruneViews(
+          {
+            ...state.views,
+            [viewKey]: {
+              ...existing,
+              loading: false,
+              loadingMore: false,
+              error,
+            },
           },
-        },
+          state.activeViewKey,
+        ),
       };
     });
   },
@@ -418,19 +491,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       return {
         bookmarksById: nextBookmarks,
-        views: {
-          ...state.views,
-          [viewKey]: {
-            ids: mergedIds,
-            totalCount: response.totalCount,
-            page: response.page,
-            pageSize: response.pageSize,
-            hasMore,
-            loading: false,
-            loadingMore: false,
-            error: null,
+        views: pruneViews(
+          {
+            ...state.views,
+            [viewKey]: {
+              ids: mergedIds,
+              totalCount: response.totalCount,
+              page: response.page,
+              pageSize: response.pageSize,
+              hasMore,
+              loading: false,
+              loadingMore: false,
+              error: null,
+            },
           },
-        },
+          state.activeViewKey,
+        ),
       };
     });
   },
@@ -449,6 +525,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       next[tag.id] = tag;
     }
     set({ tagsById: next });
+  },
+
+  bumpTagCounts(tags, delta) {
+    if (tags.length === 0 || delta === 0) return;
+    set((state) => {
+      const nextTags = { ...state.tagsById };
+      for (const tag of tags) {
+        const current = nextTags[tag.id];
+        if (current) {
+          nextTags[tag.id] = { ...current, count: Math.max(0, current.count + delta) };
+        }
+      }
+      return { tagsById: nextTags };
+    });
   },
 
   hydrateStats(stats) {
@@ -836,6 +926,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     });
   },
 
+  bumpStatsForCreatedBookmark(created, options) {
+    set((state) => ({
+      stats: {
+        ...state.stats,
+        total: state.stats.total + 1,
+        unassigned: options.hasCollection ? state.stats.unassigned : state.stats.unassigned + 1,
+        favorites: created.favorite ? state.stats.favorites + 1 : state.stats.favorites,
+      },
+    }));
+  },
+
   addBookmarkToCollectionViews(collectionId, bookmark) {
     if (bookmark.deletedAt !== null) return;
     set((state) => {
@@ -950,6 +1051,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
               } else {
                 nextStats.trashed = Math.max(0, nextStats.trashed - 1);
               }
+              applyTagCountDeltas(nextTags, prev.tags, []);
             }
             delete nextBookmarks[change.id];
             delete nextPending[change.id];
@@ -972,18 +1074,25 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
               } else {
                 nextStats.trashed += 1;
               }
+              applyTagCountDeltas(nextTags, [], incoming.tags);
             } else if (wasActive && !isActive) {
               nextStats.total = Math.max(0, nextStats.total - 1);
               nextStats.trashed += 1;
               if (prev?.favorite) {
                 nextStats.favorites = Math.max(0, nextStats.favorites - 1);
               }
+              applyTagCountDeltas(nextTags, prev?.tags ?? [], []);
             } else if (!wasActive && isActive) {
               nextStats.total += 1;
               nextStats.trashed = Math.max(0, nextStats.trashed - 1);
               if (incoming.favorite) nextStats.favorites += 1;
+              // Trash already decremented the tag counts; restore re-adds them all.
+              applyTagCountDeltas(nextTags, [], incoming.tags);
             } else if (isActive && prev && prev.favorite !== incoming.favorite) {
               nextStats.favorites = Math.max(0, nextStats.favorites + (incoming.favorite ? 1 : -1));
+            }
+            if (prev && isActive && wasActive) {
+              applyTagCountDeltas(nextTags, prev.tags, incoming.tags);
             }
 
             nextBookmarks[change.id] = incoming;

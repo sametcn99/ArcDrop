@@ -1,11 +1,25 @@
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { useAuthStore } from '../stores/authStore';
 import { resolveRedirectTarget } from './redirect';
+import { RouteLoader } from './RouteFallbacks';
+
+/**
+ * While a persisted session is being restored (page reload), every guard
+ * holds off — neither redirecting to /login nor rendering the auth forms —
+ * until the refresh attempt settles.
+ */
+function RestoringFallback() {
+  return <RouteLoader />;
+}
 
 export function RequireAuth() {
   const status = useAuthStore((s) => s.status);
   const user = useAuthStore((s) => s.user);
   const location = useLocation();
+
+  if (status === 'restoring') {
+    return <RestoringFallback />;
+  }
 
   if (status !== 'authenticated' || !user) {
     return (
@@ -24,6 +38,10 @@ export function RequireAdmin() {
   const status = useAuthStore((s) => s.status);
   const user = useAuthStore((s) => s.user);
   const location = useLocation();
+
+  if (status === 'restoring') {
+    return <RestoringFallback />;
+  }
 
   if (status !== 'authenticated' || !user) {
     return (
@@ -46,6 +64,10 @@ export function PublicOnly() {
   const status = useAuthStore((s) => s.status);
   const user = useAuthStore((s) => s.user);
   const location = useLocation();
+
+  if (status === 'restoring') {
+    return <RestoringFallback />;
+  }
 
   if (status === 'authenticated' && user) {
     const target = resolveRedirectTarget(location.state, '/');

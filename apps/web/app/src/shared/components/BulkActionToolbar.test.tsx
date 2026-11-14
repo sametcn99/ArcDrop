@@ -79,8 +79,9 @@ describe('BulkActionToolbar & Collection Tools', () => {
     expect(await screen.findByText('ArcDrop Architecture Guide')).toBeInTheDocument();
     expect(screen.getByText('MUI Design Tokens Reference')).toBeInTheDocument();
 
-    // Select all in view
+    // Select all in view (via the select-all menu)
     await user.click(screen.getByRole('button', { name: 'Select all in view' }));
+    await user.click(await screen.findByTestId('bulk-select-in-view-option'));
     const toolbar = await screen.findByTestId('bulk-action-toolbar');
     expect(within(toolbar).getByTestId('bulk-selected-count')).toHaveTextContent('2 selected');
 
@@ -258,6 +259,40 @@ describe('BulkActionToolbar & Collection Tools', () => {
     await waitFor(() => {
       expect(deleteEmptyCalled).toBe(true);
     });
+  }, 90_000);
+
+  it('selects every bookmark matching the view (beyond loaded pages) via Select all', async () => {
+    const user = userEvent.setup({ delay: null });
+    const listQueries: string[] = [];
+
+    server.use(
+      http.get('*/api/v1/bookmarks', ({ request }) => {
+        listQueries.push(new URL(request.url).search);
+        return HttpResponse.json({
+          items: [
+            makeMockBookmark({ id: 'bm-a', title: 'Alpha Match' }),
+            makeMockBookmark({ id: 'bm-b', title: 'Beta Match' }),
+            makeMockBookmark({ id: 'bm-c', title: 'Gamma Match' }),
+          ],
+          totalCount: 3,
+          page: 1,
+          pageSize: 200,
+        });
+      }),
+    );
+
+    renderAtLibrary('/');
+    await waitForLibraryReady();
+
+    await user.click(screen.getByRole('button', { name: 'Select all in view' }));
+    await user.click(await screen.findByTestId('bulk-select-all-option'));
+
+    const toolbar = await screen.findByTestId('bulk-action-toolbar');
+    expect(within(toolbar).getByTestId('bulk-selected-count')).toHaveTextContent('3 selected');
+
+    // Ids are fetched with the maximum page size so small libraries need one request
+    expect(listQueries.some((query) => query.includes('pageSize=200'))).toBe(true);
+    expect(await screen.findByText('Selected 3 bookmarks.')).toBeInTheDocument();
   }, 90_000);
 
   it('surfaces 409 error cleanly if server rejects permanent delete on active bookmarks', async () => {

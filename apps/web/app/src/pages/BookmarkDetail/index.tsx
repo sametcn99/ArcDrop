@@ -11,7 +11,7 @@ import Tab from '@mui/material/Tab';
 import Tabs from '@mui/material/Tabs';
 import Typography from '@mui/material/Typography';
 import { useEffect } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useParams, useSearchParams, type Location } from 'react-router';
 import { BookmarkArchivePanel } from './components/BookmarkArchivePanel';
 import { BookmarkDetailForm } from './components/BookmarkDetailForm';
 import { useBookmarkDetail } from './hooks/useBookmarkDetail';
@@ -20,7 +20,12 @@ import { BOOKMARK_DETAIL_STRINGS } from './strings';
 export default function BookmarkDetailPage() {
   const { bookmarkId } = useParams<{ bookmarkId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // When opened from a list (background-location pattern), closing pops back
+  // to that list; direct URL loads fall back to the library root.
+  const hasBackground = Boolean((location.state as { background?: Location } | null)?.background);
 
   const activeTab = searchParams.get('tab') === 'archive' ? 'archive' : 'details';
   const archiveView = searchParams.get('view') === 'text' ? 'text' : 'html';
@@ -108,13 +113,21 @@ export default function BookmarkDetailPage() {
   };
 
   const handleClose = () => {
-    navigate('/');
+    if (hasBackground) {
+      navigate(-1);
+    } else {
+      navigate('/');
+    }
   };
 
   const handleTrash = async () => {
     const ok = await trash();
     if (ok) {
-      navigate('/');
+      if (hasBackground) {
+        navigate(-1);
+      } else {
+        navigate('/');
+      }
     }
   };
 

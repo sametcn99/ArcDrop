@@ -6,6 +6,17 @@ export const SHARED_CACHE_STATUS_STRINGS = {
   skipped: 'Archive: Skipped',
 } as const;
 
+export const AUTH_SHELL_STRINGS = {
+  tagline: 'Your bookmarks, self-hosted.',
+  taglineSupport: 'A private workspace for your team to collect, archive, and share the web.',
+  highlights: [
+    'Self-hosted and multi-user',
+    'Full-text archive with rich search',
+    'Public share links and RSS feeds',
+  ],
+  footerNote: 'Works best in modern browsers. Your data never leaves this instance.',
+} as const;
+
 export const SHARED_BOOKMARK_STRINGS = {
   selectBookmarkLabel: 'Select bookmark',
   untitledBookmark: 'Untitled bookmark',
@@ -77,9 +88,17 @@ export const SHARED_COLLECTION_STRINGS = {
   dragCollectionLabel: 'Drag collection',
   moveToRootDropLabel: 'Drop here to move to root level',
   reorderSlotLabel: 'Reorder position',
+  subCollectionsHeading: 'Sub-collections',
+  subCollectionCountSuffix: 'bookmarks',
   sharedBadgeTooltip: 'Publicly shared',
   sharedBadgeLabel: 'Shared',
   menuOpen: 'Open',
+  menuEditOrderLabel: 'Edit order',
+  menuEditOrderFinishLabel: 'Finish editing order',
+  editOrderToggleTooltip: 'Edit collection order',
+  editOrderToggleActiveTooltip: 'Finish editing collection order',
+  editOrderToggleAriaLabel: 'Edit collection order',
+  editOrderToggleActiveAriaLabel: 'Finish editing collection order',
   menuAddChild: 'Add sub-collection',
   menuEdit: 'Edit',
   menuShare: 'Share...',
@@ -165,6 +184,12 @@ export const SHARED_BULK_STRINGS = {
   selectedSingular: 'selected',
   selectedPlural: 'selected',
   selectAllLabel: 'Select all in view',
+  selectAllMatchingLabel: 'Select all',
+  selectAllFetchingLabel: 'Selecting…',
+  selectAllSummaryPrefix: 'Selected',
+  selectAllCapNoticePrefix: 'Bulk limit reached — selected the first',
+  selectAllCapNoticeSuffix: 'matching bookmarks.',
+  selectAllFailed: 'Could not select all matching bookmarks.',
   clearSelectionLabel: 'Clear selection',
   moveLabel: 'Move',
   addTagsLabel: 'Add tags',

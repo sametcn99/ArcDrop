@@ -2,35 +2,54 @@ import ArrowBackOutlinedIcon from '@mui/icons-material/ArrowBackOutlined';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
-import type { FormEvent } from 'react';
-import type { LoginFieldErrors } from '../hooks/useLoginFlow';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { useMemo, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import type { CompleteTfaInput } from '../../../stores/authStore';
 import { LOGIN_PAGE_STRINGS } from '../strings';
 
 export interface TotpStepProps {
-  code: string;
-  onCodeChange: (value: string) => void;
-  useRecoveryCode: boolean;
-  onToggleRecoveryMode: () => void;
-  fieldErrors: LoginFieldErrors;
   errorMessage: string | null;
   submitting: boolean;
-  onSubmit: (event: FormEvent) => void;
+  onSubmit: (input: CompleteTfaInput) => void;
   onBack: () => void;
 }
 
-export function TotpStep({
-  code,
-  onCodeChange,
-  useRecoveryCode,
-  onToggleRecoveryMode,
-  fieldErrors,
-  errorMessage,
-  submitting,
-  onSubmit,
-  onBack,
-}: TotpStepProps) {
+export function TotpStep({ errorMessage, submitting, onSubmit, onBack }: TotpStepProps) {
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+
+  const schema = useMemo(
+    () =>
+      z.object({
+        code: z
+          .string()
+          .trim()
+          .min(
+            1,
+            useRecoveryCode
+              ? LOGIN_PAGE_STRINGS.validationRecoveryRequired
+              : LOGIN_PAGE_STRINGS.validationTotpRequired,
+          ),
+      }),
+    [useRecoveryCode],
+  );
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<{ code: string }>({
+    resolver: zodResolver(schema),
+    defaultValues: { code: '' },
+    mode: 'onTouched',
+  });
+
+  const busy = submitting || isSubmitting;
+
   const label = useRecoveryCode
     ? LOGIN_PAGE_STRINGS.recoveryCodeLabel
     : LOGIN_PAGE_STRINGS.totpCodeLabel;
@@ -38,8 +57,12 @@ export function TotpStep({
     ? LOGIN_PAGE_STRINGS.recoveryCodePlaceholder
     : LOGIN_PAGE_STRINGS.totpCodePlaceholder;
   const helper =
-    fieldErrors.code ??
+    errors.code?.message ??
     (useRecoveryCode ? LOGIN_PAGE_STRINGS.recoveryCodeHelper : LOGIN_PAGE_STRINGS.totpCodeHelper);
+
+  const handleToggleRecoveryMode = () => {
+    setUseRecoveryCode((prev) => !prev);
+  };
 
   return (
     <Stack spacing={2.5}>
@@ -49,7 +72,13 @@ export function TotpStep({
         </Alert>
       ) : null}
 
-      <Box component="form" onSubmit={onSubmit} noValidate>
+      <Box
+        component="form"
+        onSubmit={handleSubmit((values) =>
+          onSubmit(useRecoveryCode ? { recoveryCode: values.code } : { code: values.code }),
+        )}
+        noValidate
+      >
         <Stack spacing={2}>
           <TextField
             id="login-tfa-code"
@@ -59,11 +88,10 @@ export function TotpStep({
             autoFocus
             fullWidth
             required
-            value={code}
-            onChange={(e) => onCodeChange(e.target.value)}
-            error={Boolean(fieldErrors.code)}
+            {...register('code')}
+            error={Boolean(errors.code)}
             helperText={helper}
-            disabled={submitting}
+            disabled={busy}
             slotProps={{
               htmlInput: {
                 inputMode: useRecoveryCode ? 'text' : 'numeric',
@@ -71,8 +99,17 @@ export function TotpStep({
             }}
           />
 
-          <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
-            {submitting ? LOGIN_PAGE_STRINGS.verifyingLabel : LOGIN_PAGE_STRINGS.verifySubmitLabel}
+          <Button
+            type="submit"
+            variant="contained"
+            size="large"
+            fullWidth
+            disabled={busy}
+            startIcon={
+              busy ? <CircularProgress size={18} color="inherit" aria-hidden /> : undefined
+            }
+          >
+            {busy ? LOGIN_PAGE_STRINGS.verifyingLabel : LOGIN_PAGE_STRINGS.verifySubmitLabel}
           </Button>
         </Stack>
       </Box>
@@ -84,7 +121,7 @@ export function TotpStep({
           size="small"
           startIcon={<ArrowBackOutlinedIcon />}
           onClick={onBack}
-          disabled={submitting}
+          disabled={busy}
         >
           {LOGIN_PAGE_STRINGS.backToSignInLabel}
         </Button>
@@ -93,8 +130,8 @@ export function TotpStep({
           type="button"
           variant="text"
           size="small"
-          onClick={onToggleRecoveryMode}
-          disabled={submitting}
+          onClick={handleToggleRecoveryMode}
+          disabled={busy}
         >
           {useRecoveryCode
             ? LOGIN_PAGE_STRINGS.useTotpModeLabel

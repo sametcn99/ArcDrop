@@ -15,7 +15,8 @@ import { useLibraryStore } from './libraryStore';
 import { useSyncStore } from './syncStore';
 import { useUiStore } from './uiStore';
 
-export type AuthStatus = 'unauthenticated' | 'authenticating' | 'totp_required' | 'authenticated';
+export type AuthStatus =
+  'unauthenticated' | 'restoring' | 'authenticating' | 'totp_required' | 'authenticated';
 
 export interface TfaChallengeState {
   challenge: string;
@@ -40,6 +41,7 @@ export interface AuthState {
   bootstrap: (input: BootstrapRequest) => Promise<AuthSession>;
   claim: (input: ClaimRequest) => Promise<AuthSession>;
   logout: () => Promise<void>;
+  restoreSession: () => Promise<boolean>;
   refreshProfile: () => Promise<User>;
   setSession: (session: AuthSession) => void;
   clearError: () => void;
@@ -64,6 +66,9 @@ function attachClientHooks() {
     },
     onSessionExpired(error) {
       clearClientDataStores();
+      // Also drop the persisted refresh token — the API has revoked its
+      // family (reuse detection) or it expired, so it can never restore.
+      apiClient.clearTokens();
       useAuthStore.setState({
         user: null,
         status: 'unauthenticated',
@@ -77,6 +82,11 @@ function attachClientHooks() {
     },
   });
 }
+
+// Single-flight guard: concurrent restore calls (React StrictMode double
+// effects, rapid mounts) must not replay the same refresh token twice — the
+// API rotates refresh tokens and revokes the family on reuse.
+let restoreSessionInFlight: Promise<boolean> | null = null;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
@@ -218,6 +228,41 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         error: null,
       });
     }
+  },
+
+  restoreSession() {
+    if (restoreSessionInFlight) {
+      return restoreSessionInFlight;
+    }
+
+    const persisted = apiClient.getPersistedRefreshToken();
+    if (!persisted) {
+      set({ status: 'unauthenticated' });
+      return Promise.resolve(false);
+    }
+
+    set({ status: 'restoring', error: null });
+    restoreSessionInFlight = (async () => {
+      try {
+        // The API rotates the refresh token on every use; setSession persists
+        // the new one for the next reload.
+        const session = await authApi.refresh(persisted);
+        get().setSession(session);
+        return true;
+      } catch {
+        apiClient.clearTokens();
+        set({
+          user: null,
+          status: 'unauthenticated',
+          tfaChallenge: null,
+          error: null,
+        });
+        return false;
+      } finally {
+        restoreSessionInFlight = null;
+      }
+    })();
+    return restoreSessionInFlight;
   },
 
   async refreshProfile() {

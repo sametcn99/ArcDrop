@@ -11,6 +11,7 @@ import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { Link as RouterLink } from 'react-router';
+import { useBookmarkDetailNavigationState } from '../../../shared/hooks/useBookmarkDetailNavigationState';
 import type { Bookmark } from '../../../api/schemas/bookmarks';
 import type { BrokenLinkCheckMode } from '../../../api/schemas/settings';
 import { CacheStatusChip } from '../../../shared/components/CacheStatusChip';
@@ -32,6 +33,7 @@ export function BrokenLinksSection({
   recheckingId,
   onRecheck,
 }: BrokenLinksSectionProps) {
+  const detailLinkState = useBookmarkDetailNavigationState();
   return (
     <Stack spacing={2}>
       <Alert severity="info" data-testid="broken-links-mode-note">
@@ -76,6 +78,7 @@ export function BrokenLinksSection({
                       <Link
                         component={RouterLink}
                         to={`/bookmarks/${bookmark.id}`}
+                        state={detailLinkState}
                         underline="hover"
                         color="text.primary"
                         variant="subtitle1"
@@ -141,6 +144,7 @@ export function BrokenLinksSection({
                         size="small"
                         component={RouterLink}
                         to={`/bookmarks/${bookmark.id}`}
+                        state={detailLinkState}
                         endIcon={<OpenInNewOutlinedIcon fontSize="small" />}
                       >
                         {HEALTH_PAGE_STRINGS.openDetailsLabel}

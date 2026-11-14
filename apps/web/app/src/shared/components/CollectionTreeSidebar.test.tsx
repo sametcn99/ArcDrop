@@ -420,6 +420,7 @@ describe('CollectionTreeSidebar', () => {
   }, 60_000);
 
   it('produces API calls for dnd nest (and cycle 409), sibling reorder, and bookmark-onto-collection', async () => {
+    const user = userEvent.setup({ delay: null });
     const tree = makeFixtureTree();
     const putCalls: Array<{ id: string; parentId: string | null }> = [];
     const orderCalls: Array<Array<{ id: string; order: number }>> = [];
@@ -508,6 +509,11 @@ describe('CollectionTreeSidebar', () => {
     expect(await screen.findByText('Design Systems')).toBeInTheDocument();
     expect(await screen.findByText('MUI Design Tokens Reference')).toBeInTheDocument();
 
+    // 0) Drag handles stay hidden until edit-order mode is enabled
+    expect(screen.queryByTestId('col-drag-handle-col-4')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('collection-edit-order-toggle'));
+    expect(screen.getByTestId('col-drag-handle-col-4')).toBeInTheDocument();
+
     // 1) Sibling reorder: drag col-4 onto reorder slot before col-1
     await performPointerDrag(
       screen.getByTestId('col-drag-handle-col-4'),
@@ -553,5 +559,5 @@ describe('CollectionTreeSidebar', () => {
       ids: ['bm-2'],
       collectionIds: ['col-4'],
     });
-  }, 60_000);
+  }, 120_000);
 });

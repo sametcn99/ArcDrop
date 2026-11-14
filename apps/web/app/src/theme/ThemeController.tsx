@@ -1,7 +1,5 @@
 import CssBaseline from '@mui/material/CssBaseline';
 import { ThemeProvider } from '@mui/material/styles';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
-import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import {
   createContext,
   useCallback,
@@ -126,10 +124,8 @@ export function ThemeController({ children }: ThemeControllerProps) {
   return (
     <ThemeControllerContext.Provider value={contextValue}>
       <ThemeProvider theme={activeTheme} storageManager={null} disableTransitionOnChange>
-        <LocalizationProvider dateAdapter={AdapterDayjs}>
-          <CssBaseline enableColorScheme />
-          {children}
-        </LocalizationProvider>
+        <CssBaseline enableColorScheme />
+        {children}
       </ThemeProvider>
     </ThemeControllerContext.Provider>
   );

@@ -3,6 +3,7 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -10,33 +11,32 @@ import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { useState, type FormEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { Link as RouterLink } from 'react-router';
-import type { LoginFieldErrors } from '../hooks/useLoginFlow';
+import { loginRequestSchema, type LoginRequest } from '../../../api/schemas/auth';
 import { LOGIN_PAGE_STRINGS } from '../strings';
 
 export interface CredentialsStepProps {
-  email: string;
-  onEmailChange: (value: string) => void;
-  password: string;
-  onPasswordChange: (value: string) => void;
-  fieldErrors: LoginFieldErrors;
   errorMessage: string | null;
   submitting: boolean;
-  onSubmit: (event: FormEvent) => void;
+  onSubmit: (input: LoginRequest) => void;
 }
 
-export function CredentialsStep({
-  email,
-  onEmailChange,
-  password,
-  onPasswordChange,
-  fieldErrors,
-  errorMessage,
-  submitting,
-  onSubmit,
-}: CredentialsStepProps) {
+export function CredentialsStep({ errorMessage, submitting, onSubmit }: CredentialsStepProps) {
   const [showPassword, setShowPassword] = useState(false);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginRequest>({
+    resolver: zodResolver(loginRequestSchema),
+    defaultValues: { email: '', password: '' },
+    mode: 'onTouched',
+  });
+
+  const busy = submitting || isSubmitting;
 
   return (
     <Stack spacing={2.5}>
@@ -46,7 +46,7 @@ export function CredentialsStep({
         </Alert>
       ) : null}
 
-      <Box component="form" onSubmit={onSubmit} noValidate>
+      <Box component="form" onSubmit={handleSubmit((values) => onSubmit(values))} noValidate>
         <Stack spacing={2}>
           <TextField
             id="login-email"
@@ -56,11 +56,10 @@ export function CredentialsStep({
             autoFocus
             fullWidth
             required
-            value={email}
-            onChange={(e) => onEmailChange(e.target.value)}
-            error={Boolean(fieldErrors.email)}
-            helperText={fieldErrors.email}
-            disabled={submitting}
+            {...register('email')}
+            error={Boolean(errors.email)}
+            helperText={errors.email?.message}
+            disabled={busy}
           />
 
           <TextField
@@ -70,11 +69,10 @@ export function CredentialsStep({
             autoComplete="current-password"
             fullWidth
             required
-            value={password}
-            onChange={(e) => onPasswordChange(e.target.value)}
-            error={Boolean(fieldErrors.password)}
-            helperText={fieldErrors.password}
-            disabled={submitting}
+            {...register('password')}
+            error={Boolean(errors.password)}
+            helperText={errors.password?.message}
+            disabled={busy}
             slotProps={{
               input: {
                 endAdornment: (
@@ -93,8 +91,17 @@ export function CredentialsStep({
             }}
           />
 
-          <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
-            {submitting ? LOGIN_PAGE_STRINGS.submittingLabel : LOGIN_PAGE_STRINGS.submitLabel}
+          <Button
+            type="submit"
+            variant="contained"
+            size="large"
+            fullWidth
+            disabled={busy}
+            startIcon={
+              busy ? <CircularProgress size={18} color="inherit" aria-hidden /> : undefined
+            }
+          >
+            {busy ? LOGIN_PAGE_STRINGS.submittingLabel : LOGIN_PAGE_STRINGS.submitLabel}
           </Button>
         </Stack>
       </Box>

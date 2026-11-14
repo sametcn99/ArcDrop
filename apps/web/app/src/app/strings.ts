@@ -4,6 +4,7 @@ export const APP_STRINGS = {
   openNavigationLabel: 'Open navigation drawer',
   closeNavigationLabel: 'Close navigation drawer',
   toggleDesktopSidebarLabel: 'Toggle sidebar',
+  sidebarResizeHandleLabel: 'Resize sidebar',
   quickAddLabel: 'Quick add',
   uploadFileLabel: 'Upload file',
   notificationsButtonLabel: 'Notifications',

@@ -19,16 +19,9 @@ export default function BootstrapPage() {
         <BootstrapClosedNotice detail={form.errorMessage} />
       ) : (
         <BootstrapForm
-          email={form.email}
-          onEmailChange={form.setEmail}
-          password={form.password}
-          onPasswordChange={form.setPassword}
-          confirmPassword={form.confirmPassword}
-          onConfirmPasswordChange={form.setConfirmPassword}
-          fieldErrors={form.fieldErrors}
           errorMessage={form.errorMessage}
           submitting={form.submitting}
-          onSubmit={(e) => void form.handleSubmit(e)}
+          onSubmit={(input) => void form.handleSubmit(input)}
         />
       )}
     </AuthPageShell>

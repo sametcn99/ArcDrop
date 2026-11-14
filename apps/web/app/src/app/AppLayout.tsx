@@ -49,8 +49,25 @@ import Stack from '@mui/material/Stack';
 import Toolbar from '@mui/material/Toolbar';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
-import { Link as RouterLink, Outlet, useLocation, useNavigate, useParams } from 'react-router';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import {
+  Link as RouterLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+  useParams,
+  useRoutes,
+  type Location,
+} from 'react-router';
 import { syncEngine } from '../api/sync-engine';
 import {
   addBookmarkToCollectionAction,
@@ -74,8 +91,42 @@ import { useLibraryStore } from '../stores/libraryStore';
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { useUiStore } from '../stores/uiStore';
 import { APP_STRINGS } from './strings';
+import { appChildRoutes } from './routes';
 
 const DRAWER_WIDTH = 264;
+
+// Adjustable desktop sidebar (see the resize handle on the drawer edge).
+const SIDEBAR_MIN_WIDTH = 200;
+const SIDEBAR_MAX_WIDTH = 480;
+const SIDEBAR_RESIZE_STEP = 24;
+const SIDEBAR_WIDTH_STORAGE_KEY = 'arcdrop.sidebarWidth';
+
+function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
+
+function readStoredSidebarWidth(): number {
+  try {
+    const parsed = Number.parseInt(
+      window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) ?? '',
+      10,
+    );
+    if (Number.isFinite(parsed)) {
+      return clampSidebarWidth(parsed);
+    }
+  } catch {
+    // localStorage unavailable (private mode, sandboxed origin) — use default
+  }
+  return DRAWER_WIDTH;
+}
+
+/**
+ * Renders the route tree at an explicit (background) location so the bookmark
+ * detail drawer can overlay a live list view instead of replacing it.
+ */
+function BackgroundLocationRoutes({ location }: { location: Location }) {
+  return <>{useRoutes(appChildRoutes, location)}</>;
+}
 
 const collisionDetection: CollisionDetection = (args) => {
   const pointerCollisions = pointerWithin(args);
@@ -128,6 +179,9 @@ export function AppLayout() {
     viewKey: string;
     orderedIds: string[];
   } | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
+  const [resizingSidebar, setResizingSidebar] = useState(false);
+  const sidebarWidthRef = useRef(sidebarWidth);
 
   const updateManualSortContext = useCallback(
     (
@@ -167,6 +221,11 @@ export function AppLayout() {
   const navigate = useNavigate();
   const { collectionId: routeCollectionId } = useParams<{ collectionId: string }>();
 
+  // When a bookmark detail is opened from a list, the list location is passed
+  // via router state and rendered underneath the detail drawer.
+  const backgroundLocation =
+    (location.state as { background?: Location } | null)?.background ?? null;
+
   const isQuickAddRoute = location.pathname === '/quick-add';
   const effectiveQuickAddOpen = quickAddDialogOpen || isQuickAddRoute;
   const quickAddInitialValues = useMemo(
@@ -186,13 +245,15 @@ export function AppLayout() {
 
   useEffect(() => {
     if (authStatus !== 'authenticated') {
+      // Engine teardown on logout/expiry is owned by the auth store
+      // (clearClientDataStores calls syncEngine.stop()), so a transient
+      // unmount while authenticated — StrictMode double mount, guard
+      // remount, background token refresh — must not tear the engine down
+      // and re-run the full bootstrap (5 GETs + ticket + new WS).
       return;
     }
     void syncEngine.start();
     void fetchNotificationsAction().catch(() => undefined);
-    return () => {
-      syncEngine.stop();
-    };
   }, [authStatus]);
 
   const handleToggleMobileDrawer = () => {
@@ -203,11 +264,74 @@ export function AppLayout() {
     setMobileOpen(false);
   };
 
+  const persistSidebarWidth = useCallback(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidthRef.current));
+    } catch {
+      // ignore persistence failures (private mode, sandboxed origin)
+    }
+  }, []);
+
+  // Sidebar resize drives a CSS custom property imperatively during the drag
+  // (no React state per pointermove — that re-rendered the whole layout and
+  // the collection tree on every pixel); state is committed on release. The
+  // property lives on the root flex container so AppBar, nav, and main all
+  // follow the width live.
+  const rootLayoutRef = useRef<HTMLElement | null>(null);
+
+  const applySidebarWidthVar = useCallback((width: number) => {
+    rootLayoutRef.current?.style.setProperty('--arcdrop-sidebar-width', `${width}px`);
+  }, []);
+
+  const handleSidebarResizeStart = (event: ReactPointerEvent) => {
+    event.preventDefault();
+    try {
+      // jsdom does not implement pointer capture; non-active pointer ids throw.
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // pointer capture is a nicety — window listeners already cover the drag
+    }
+    setResizingSidebar(true);
+  };
+
+  const handleSidebarResizeKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const delta = event.key === 'ArrowLeft' ? -SIDEBAR_RESIZE_STEP : SIDEBAR_RESIZE_STEP;
+    const next = clampSidebarWidth(sidebarWidthRef.current + delta);
+    sidebarWidthRef.current = next;
+    applySidebarWidthVar(next);
+    setSidebarWidth(next);
+    persistSidebarWidth();
+  };
+
+  useEffect(() => {
+    if (!resizingSidebar) return;
+    const handleMove = (event: PointerEvent) => {
+      const next = clampSidebarWidth(event.clientX);
+      sidebarWidthRef.current = next;
+      applySidebarWidthVar(next);
+    };
+    const finish = () => {
+      setResizingSidebar(false);
+      setSidebarWidth(sidebarWidthRef.current);
+      persistSidebarWidth();
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('pointercancel', finish);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('pointercancel', finish);
+    };
+  }, [applySidebarWidthVar, persistSidebarWidth, resizingSidebar]);
+
   const handleToggleDesktopSidebar = () => {
     setDesktopOpen((prev) => !prev);
   };
 
-  const handleOpenAccountMenu = (event: MouseEvent<HTMLElement>) => {
+  const handleOpenAccountMenu = (event: ReactMouseEvent<HTMLElement>) => {
     setAccountAnchor(event.currentTarget);
   };
 
@@ -361,8 +485,6 @@ export function AppLayout() {
   const isLibraryAll = location.pathname === '/' && !currentScope;
   const isLibraryFavorites = location.pathname === '/' && currentScope === 'favorites';
   const isLibraryUnassigned = location.pathname === '/' && currentScope === 'unassigned';
-
-  const effectiveDesktopWidth = desktopOpen ? DRAWER_WIDTH : 0;
 
   const renderDrawerContent = (enableDnd: boolean) => (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -544,12 +666,23 @@ export function AppLayout() {
         onDragCancel={handleDragCancel}
         onDragEnd={handleDragEnd}
       >
-        <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+        <Box
+          ref={rootLayoutRef}
+          data-testid="app-layout-root"
+          style={{ '--arcdrop-sidebar-width': `${sidebarWidth}px` } as React.CSSProperties}
+          sx={{
+            display: 'flex',
+            minHeight: '100vh',
+            bgcolor: 'background.default',
+            userSelect: resizingSidebar ? 'none' : undefined,
+            cursor: resizingSidebar ? 'col-resize' : undefined,
+          }}
+        >
           <AppBar
             position="fixed"
             sx={{
-              width: { md: `calc(100% - ${effectiveDesktopWidth}px)` },
-              ml: { md: `${effectiveDesktopWidth}px` },
+              width: { md: desktopOpen ? 'calc(100% - var(--arcdrop-sidebar-width))' : '100%' },
+              ml: { md: desktopOpen ? 'var(--arcdrop-sidebar-width)' : 0 },
             }}
           >
             <Toolbar sx={{ gap: 1.5 }}>
@@ -597,7 +730,7 @@ export function AppLayout() {
                 <Button
                   color="inherit"
                   size="small"
-                  variant="outlined"
+                  variant="text"
                   startIcon={<AddOutlinedIcon />}
                   onClick={() => setQuickAddDialogOpen(true)}
                   sx={{ display: { xs: 'none', sm: 'inline-flex' }, whiteSpace: 'nowrap' }}
@@ -619,7 +752,7 @@ export function AppLayout() {
                 <Button
                   color="inherit"
                   size="small"
-                  variant="outlined"
+                  variant="text"
                   startIcon={<UploadFileOutlinedIcon />}
                   onClick={() => setUploadDialogOpen(true)}
                   sx={{ display: { xs: 'none', sm: 'inline-flex' }, whiteSpace: 'nowrap' }}
@@ -731,7 +864,10 @@ export function AppLayout() {
           <Box
             component="nav"
             aria-label={APP_STRINGS.navigationDrawerLabel}
-            sx={{ width: { md: effectiveDesktopWidth }, flexShrink: { md: 0 } }}
+            sx={{
+              width: { md: desktopOpen ? 'var(--arcdrop-sidebar-width)' : 0 },
+              flexShrink: { md: 0 },
+            }}
           >
             <Drawer
               variant="temporary"
@@ -749,10 +885,43 @@ export function AppLayout() {
               open={desktopOpen}
               sx={{
                 display: { xs: 'none', md: desktopOpen ? 'block' : 'none' },
-                '& .MuiDrawer-paper': { boxSizing: 'border-box', width: DRAWER_WIDTH },
+                '& .MuiDrawer-paper': {
+                  boxSizing: 'border-box',
+                  width: 'var(--arcdrop-sidebar-width)',
+                },
               }}
             >
               {renderDrawerContent(true)}
+              <Box
+                role="separator"
+                aria-orientation="vertical"
+                aria-label={APP_STRINGS.sidebarResizeHandleLabel}
+                tabIndex={0}
+                onPointerDown={handleSidebarResizeStart}
+                onKeyDown={handleSidebarResizeKeyDown}
+                data-testid="sidebar-resize-handle"
+                sx={{
+                  position: 'absolute',
+                  top: 0,
+                  bottom: 0,
+                  right: 0,
+                  width: 6,
+                  cursor: 'col-resize',
+                  touchAction: 'none',
+                  bgcolor: resizingSidebar ? 'primary.main' : 'transparent',
+                  transition: (theme) =>
+                    theme.transitions.create('background-color', { duration: 120 }),
+                  '&:hover': {
+                    bgcolor: resizingSidebar ? 'primary.main' : 'action.hover',
+                  },
+                  '&:focus-visible': {
+                    outline: 2,
+                    outlineStyle: 'solid',
+                    outlineColor: 'primary.main',
+                    outlineOffset: -2,
+                  },
+                }}
+              />
             </Drawer>
           </Box>
 
@@ -761,11 +930,18 @@ export function AppLayout() {
             sx={{
               flexGrow: 1,
               p: 3,
-              width: { md: `calc(100% - ${effectiveDesktopWidth}px)` },
+              width: { md: desktopOpen ? 'calc(100% - var(--arcdrop-sidebar-width))' : '100%' },
             }}
           >
             <Toolbar />
-            <Outlet />
+            {backgroundLocation ? (
+              <>
+                <BackgroundLocationRoutes location={backgroundLocation} />
+                <Outlet />
+              </>
+            ) : (
+              <Outlet />
+            )}
           </Box>
         </Box>
 

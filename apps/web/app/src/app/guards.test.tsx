@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { apiClient } from '../api/client';
 import { SnackbarHost } from '../shared/components/SnackbarHost';
 import { useAuthStore } from '../stores/authStore';
-import { makeMockSession } from '../test/msw/handlers';
+import { makeMockSession, problemJsonResponse } from '../test/msw/handlers';
 import { server } from '../test/msw/server';
 import { waitForBootstrapReady, waitForLibraryReady } from '../test/waiters';
 import { ThemeController } from '../theme/ThemeController';
@@ -115,5 +115,66 @@ describe('Route guards & logout flow', () => {
     expect(apiClient.getAccessToken()).toBeNull();
     expect(apiClient.getRefreshToken()).toBeNull();
     expect(useAuthStore.getState().status).toBe('unauthenticated');
+  }, 60_000);
+
+  it('restores the persisted session on boot without redirecting to /login', async () => {
+    apiClient.clearTokens();
+    window.localStorage.setItem('arcdrop.refreshToken', 'persisted-refresh-token');
+    useAuthStore.setState({
+      user: null,
+      status: 'unauthenticated',
+      tfaChallenge: null,
+      error: null,
+    });
+
+    server.use(
+      http.post('*/api/v1/auth/refresh', () =>
+        HttpResponse.json(
+          makeMockSession({
+            user: { email: 'restored@arcdrop.test' },
+          }),
+        ),
+      ),
+    );
+
+    renderAtPath('/');
+    void useAuthStore.getState().restoreSession();
+
+    expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
+    expect(useAuthStore.getState().status).toBe('authenticated');
+    // The rotated refresh token replaces the persisted one for the next reload.
+    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBeTruthy();
+  }, 60_000);
+
+  it('clears the persisted token and redirects to /login when restore fails', async () => {
+    apiClient.clearTokens();
+    window.localStorage.setItem('arcdrop.refreshToken', 'dead-refresh-token');
+    useAuthStore.setState({
+      user: null,
+      status: 'unauthenticated',
+      tfaChallenge: null,
+      error: null,
+    });
+
+    server.use(
+      http.post('*/api/v1/auth/refresh', () =>
+        problemJsonResponse(401, {
+          code: 'UNAUTHORIZED',
+          title: 'Unauthorized',
+          detail: 'Invalid refresh token',
+        }),
+      ),
+    );
+
+    renderAtPath('/');
+    void useAuthStore.getState().restoreSession();
+
+    // The restore settles back to unauthenticated and wipes the dead token...
+    await waitFor(() => {
+      expect(useAuthStore.getState().status).toBe('unauthenticated');
+      expect(window.localStorage.getItem('arcdrop.refreshToken')).toBeNull();
+    });
+    // ...after which the user lands on the sign-in page.
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
   }, 60_000);
 });

@@ -15,6 +15,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router';
+import { useBookmarkDetailNavigationState } from '../hooks/useBookmarkDetailNavigationState';
 import { useNotificationsStore } from '../../stores/notificationsStore';
 import {
   fetchNotificationsAction,
@@ -33,6 +34,7 @@ export function NotificationsDrawer() {
   const setDrawerOpen = useNotificationsStore((s) => s.setDrawerOpen);
 
   const navigate = useNavigate();
+  const detailLinkState = useBookmarkDetailNavigationState();
 
   useEffect(() => {
     if (!open) return;
@@ -55,7 +57,7 @@ export function NotificationsDrawer() {
     }
     if (bookmarkId) {
       setDrawerOpen(false);
-      navigate(`/bookmarks/${bookmarkId}`);
+      navigate(`/bookmarks/${bookmarkId}`, { state: detailLinkState });
     }
   };
 

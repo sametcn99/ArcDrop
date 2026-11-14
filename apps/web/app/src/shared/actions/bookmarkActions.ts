@@ -1,5 +1,4 @@
 import { bookmarksApi } from '../../api/endpoints/bookmarks';
-import { collectionsApi } from '../../api/endpoints/collections';
 import { tagsApi } from '../../api/endpoints/tags';
 import type {
   Bookmark,
@@ -26,6 +25,25 @@ export interface CreateBookmarkActionInput {
   tags?: string[];
 }
 
+/**
+ * Aggregate refresh after a local create/upload. The old behavior fired three
+ * fire-and-forget GETs (stats + collections + tags) after every mutation even
+ * though the sync engine delivers the same change moments later; we now bump
+ * the client-side aggregates directly. `existedBefore` guards the race where
+ * the WS change (which bumps the same aggregates in applySyncChanges) lands
+ * before the POST response — exactly one side counts.
+ */
+function bumpAggregatesForCreatedBookmark(created: Bookmark, hasCollection: boolean): void {
+  const store = useLibraryStore.getState();
+  if (!useLibraryStore.getState().bookmarksById[created.id]) {
+    store.upsertBookmark(created);
+    store.bumpStatsForCreatedBookmark(created, { hasCollection });
+    store.bumpTagCounts(created.tags, 1);
+  } else {
+    store.upsertBookmark(created);
+  }
+}
+
 export async function createBookmarkAction(input: CreateBookmarkActionInput): Promise<Bookmark> {
   try {
     let created = await bookmarksApi.create(input.body, input.query);
@@ -34,34 +52,24 @@ export async function createBookmarkAction(input: CreateBookmarkActionInput): Pr
     }
 
     const store = useLibraryStore.getState();
-    store.upsertBookmark(created);
 
     const collectionParam = input.query?.collection?.trim();
+    let matchedCollectionId: string | null = null;
     if (collectionParam) {
       const matchedCollection = Object.values(store.collectionsById).find(
         (col) =>
           col.id === collectionParam ||
           col.title.trim().toLowerCase() === collectionParam.toLowerCase(),
       );
-      if (matchedCollection) {
-        store.addBookmarkToCollectionViews(matchedCollection.id, created);
-      }
+      matchedCollectionId = matchedCollection?.id ?? null;
     }
 
-    void Promise.all([
-      bookmarksApi
-        .stats()
-        .then((stats) => useLibraryStore.getState().hydrateStats(stats))
-        .catch(() => undefined),
-      collectionsApi
-        .list()
-        .then((res) => useLibraryStore.getState().hydrateCollections(res.items))
-        .catch(() => undefined),
-      tagsApi
-        .list()
-        .then((tags) => useLibraryStore.getState().hydrateTags(tags))
-        .catch(() => undefined),
-    ]);
+    bumpAggregatesForCreatedBookmark(created, matchedCollectionId !== null);
+
+    if (matchedCollectionId) {
+      store.addBookmarkToCollectionViews(matchedCollectionId, created);
+      store.adjustCollectionBookmarkCount(matchedCollectionId, 1);
+    }
 
     useUiStore.getState().enqueueSnackbar({
       message: SHARED_QUICK_ADD_STRINGS.toastCreated,
@@ -83,28 +91,14 @@ export async function uploadBookmarkFileAction(input: UploadBookmarkFileInput): 
     const created = await bookmarksApi.uploadFile(input);
 
     const store = useLibraryStore.getState();
-    store.upsertBookmark(created);
+    bumpAggregatesForCreatedBookmark(created, (input.collectionIds?.length ?? 0) > 0);
 
     if (input.collectionIds && input.collectionIds.length > 0) {
       for (const collectionId of input.collectionIds) {
         store.addBookmarkToCollectionViews(collectionId, created);
+        store.adjustCollectionBookmarkCount(collectionId, 1);
       }
     }
-
-    void Promise.all([
-      bookmarksApi
-        .stats()
-        .then((stats) => useLibraryStore.getState().hydrateStats(stats))
-        .catch(() => undefined),
-      collectionsApi
-        .list()
-        .then((res) => useLibraryStore.getState().hydrateCollections(res.items))
-        .catch(() => undefined),
-      tagsApi
-        .list()
-        .then((tags) => useLibraryStore.getState().hydrateTags(tags))
-        .catch(() => undefined),
-    ]);
 
     useUiStore.getState().enqueueSnackbar({
       message: SHARED_UPLOAD_STRINGS.toastUploaded,

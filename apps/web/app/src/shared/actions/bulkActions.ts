@@ -1,6 +1,7 @@
 import { bookmarksApi } from '../../api/endpoints/bookmarks';
 import { tagsApi } from '../../api/endpoints/tags';
 import type {
+  BookmarkListQuery,
   BulkBookmarksRequest,
   BulkBookmarksResponse,
   TagSummary,
@@ -13,6 +14,66 @@ import { SHARED_BULK_STRINGS } from '../strings';
 import { refreshCollectionsTreeAction } from './collectionActions';
 
 export const MAX_BULK_BOOKMARK_IDS = 500;
+
+// The API clamps pageSize at 200 — paginate with the maximum to collect ids.
+const SELECT_ALL_PAGE_SIZE = 200;
+
+/**
+ * Selects every bookmark matching the current view query — not just the ones
+ * loaded in the paginated list. Fetches ids page by page (up to the bulk
+ * cap), then replaces the selection.
+ */
+export async function selectAllMatchingBookmarksAction(
+  baseQuery: BookmarkListQuery,
+): Promise<{ selected: number; total: number }> {
+  const collected: string[] = [];
+  const seen = new Set<string>();
+  let total = 0;
+  let page = 1;
+  try {
+    for (;;) {
+      const res = await bookmarksApi.list({ ...baseQuery, page, pageSize: SELECT_ALL_PAGE_SIZE });
+      total = res.totalCount;
+      for (const item of res.items) {
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        collected.push(item.id);
+        if (collected.length >= MAX_BULK_BOOKMARK_IDS) break;
+      }
+      const fetchedThrough = page * SELECT_ALL_PAGE_SIZE;
+      if (
+        collected.length >= MAX_BULK_BOOKMARK_IDS ||
+        res.items.length === 0 ||
+        fetchedThrough >= total
+      ) {
+        break;
+      }
+      page += 1;
+    }
+  } catch (err) {
+    useUiStore.getState().enqueueSnackbar({
+      message: SHARED_BULK_STRINGS.selectAllFailed,
+      severity: 'error',
+    });
+    throw err;
+  }
+
+  useLibraryStore.getState().selectBookmarks(collected);
+
+  const capped = collected.length >= MAX_BULK_BOOKMARK_IDS && total > collected.length;
+  useUiStore.getState().enqueueSnackbar({
+    message: capped
+      ? `${SHARED_BULK_STRINGS.selectAllCapNoticePrefix} ${collected.length} of ${total} ${SHARED_BULK_STRINGS.selectAllCapNoticeSuffix}`
+      : `${SHARED_BULK_STRINGS.selectAllSummaryPrefix} ${collected.length} ${
+          collected.length === 1
+            ? SHARED_BULK_STRINGS.bookmarkSingular
+            : SHARED_BULK_STRINGS.bookmarkPlural
+        }.`,
+    severity: 'info',
+  });
+
+  return { selected: collected.length, total };
+}
 
 export function formatBulkSummaryMessage(response: BulkBookmarksResponse): string {
   const unit =

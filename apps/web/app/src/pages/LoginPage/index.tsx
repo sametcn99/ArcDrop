@@ -22,26 +22,16 @@ export default function LoginPage() {
     >
       {flow.isTotpStep ? (
         <TotpStep
-          code={flow.code}
-          onCodeChange={flow.setCode}
-          useRecoveryCode={flow.useRecoveryCode}
-          onToggleRecoveryMode={flow.handleToggleRecoveryMode}
-          fieldErrors={flow.fieldErrors}
           errorMessage={flow.errorMessage}
           submitting={flow.submitting}
-          onSubmit={(e) => void flow.handleTotpSubmit(e)}
+          onSubmit={(input) => void flow.handleTotpSubmit(input)}
           onBack={flow.handleBackToCredentials}
         />
       ) : (
         <CredentialsStep
-          email={flow.email}
-          onEmailChange={flow.setEmail}
-          password={flow.password}
-          onPasswordChange={flow.setPassword}
-          fieldErrors={flow.fieldErrors}
           errorMessage={flow.errorMessage}
           submitting={flow.submitting}
-          onSubmit={(e) => void flow.handleCredentialsSubmit(e)}
+          onSubmit={(input) => void flow.handleCredentialsSubmit(input)}
         />
       )}
     </AuthPageShell>

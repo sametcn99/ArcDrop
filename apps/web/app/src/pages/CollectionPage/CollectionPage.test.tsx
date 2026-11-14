@@ -91,7 +91,13 @@ describe('CollectionPage', () => {
     await waitForCollectionReady();
 
     expect(await screen.findByRole('heading', { name: 'Architecture' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Engineering' })).toBeInTheDocument();
+    // Sidebar rows no longer show bookmark counts, so the ancestor breadcrumb
+    // link and the sidebar row share the same name — scope to the breadcrumb.
+    expect(
+      within(screen.getByRole('navigation', { name: 'Collection hierarchy' })).getByRole('link', {
+        name: 'Engineering',
+      }),
+    ).toBeInTheDocument();
     expect(await screen.findByText('Scoped Item One')).toBeInTheDocument();
     expect(screen.getByText('Scoped Item Two')).toBeInTheDocument();
 
@@ -288,6 +294,78 @@ describe('CollectionPage', () => {
       { name: /^(First|Second) Manual Bookmark$/ },
     );
     expect(linksAfterRollback[0]).toHaveTextContent('First Manual Bookmark');
+  }, 60_000);
+
+  it('shows sub-collection cards for child collections and navigates on click', async () => {
+    const user = userEvent.setup({ delay: null });
+
+    const collections = [
+      makeMockCollection({ id: 'col-1', parentId: null, title: 'Engineering' }),
+      makeMockCollection({ id: 'col-2', parentId: 'col-1', title: 'Architecture' }),
+      makeMockCollection({
+        id: 'col-3',
+        parentId: 'col-2',
+        title: 'Pavilions',
+        bookmarkCount: 3,
+        order: 0,
+      }),
+      makeMockCollection({
+        id: 'col-4',
+        parentId: 'col-2',
+        title: 'Bridges',
+        bookmarkCount: 0,
+        order: 1,
+      }),
+    ];
+
+    server.use(
+      http.get('*/api/v1/collections', () => HttpResponse.json({ items: collections })),
+      http.get('*/api/v1/bookmarks', () =>
+        HttpResponse.json({
+          items: [makeMockBookmark({ id: 'bm-1', title: 'Scoped Item One' })],
+          totalCount: 1,
+          page: 1,
+          pageSize: 24,
+        }),
+      ),
+    );
+
+    renderCollectionAt('/collections/col-2');
+    await waitForCollectionReady();
+
+    expect(screen.getByTestId('sub-collections-section')).toBeInTheDocument();
+    const pavilionsCard = screen.getByRole('link', { name: /Pavilions/ });
+    expect(pavilionsCard).toHaveAttribute('href', '/collections/col-3');
+    expect(screen.getByText('3 bookmarks')).toBeInTheDocument();
+    expect(screen.getByText('0 bookmarks')).toBeInTheDocument();
+
+    // Clicking a card navigates into the sub-collection
+    await user.click(pavilionsCard);
+    expect(await screen.findByRole('heading', { name: 'Pavilions' })).toBeInTheDocument();
+  }, 60_000);
+
+  it('hides the sub-collection section when the collection has no children', async () => {
+    server.use(
+      http.get('*/api/v1/collections', () =>
+        HttpResponse.json({
+          items: [makeMockCollection({ id: 'col-1', title: 'Solitary', bookmarkCount: 1 })],
+        }),
+      ),
+      http.get('*/api/v1/bookmarks', () =>
+        HttpResponse.json({
+          items: [makeMockBookmark({ id: 'bm-1', title: 'Only Item' })],
+          totalCount: 1,
+          page: 1,
+          pageSize: 24,
+        }),
+      ),
+    );
+
+    renderCollectionAt('/collections/col-1');
+    await waitForCollectionReady();
+
+    expect(await screen.findByRole('heading', { name: 'Solitary' })).toBeInTheDocument();
+    expect(screen.queryByTestId('sub-collections-section')).not.toBeInTheDocument();
   }, 60_000);
 
   it('shows not-found state when collection returns 404', async () => {

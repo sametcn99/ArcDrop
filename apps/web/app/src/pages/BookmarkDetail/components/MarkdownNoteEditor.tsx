@@ -7,9 +7,16 @@ import TextField from '@mui/material/TextField';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
-import { useState } from 'react';
-import { MarkdownPreview } from '../../../shared/components/MarkdownPreview';
+import { lazy, Suspense, useState } from 'react';
 import { BOOKMARK_DETAIL_STRINGS } from '../strings';
+
+// react-markdown + micromark weigh ~30% of the BookmarkDetail chunk; the
+// preview tab is optional, so load it on first use instead of eagerly.
+const MarkdownPreview = lazy(() =>
+  import('../../../shared/components/MarkdownPreview').then((m) => ({
+    default: m.MarkdownPreview,
+  })),
+);
 
 export interface MarkdownNoteEditorProps {
   value: string;
@@ -67,7 +74,9 @@ export function MarkdownNoteEditor({
       ) : (
         <Paper variant="outlined" sx={{ p: 1.5, minHeight: 112 }}>
           {value.trim().length > 0 ? (
-            <MarkdownPreview markdown={value} />
+            <Suspense fallback={<Typography variant="body2">Loading preview…</Typography>}>
+              <MarkdownPreview markdown={value} />
+            </Suspense>
           ) : (
             <Box sx={{ py: 2 }}>
               <Typography variant="body2" color="text.secondary">

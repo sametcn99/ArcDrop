@@ -1,5 +1,6 @@
 import DeleteForeverOutlinedIcon from '@mui/icons-material/DeleteForeverOutlined';
 import RestoreFromTrashOutlinedIcon from '@mui/icons-material/RestoreFromTrashOutlined';
+import { selectAllMatchingBookmarksAction } from '../../shared/actions/bulkActions';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -17,8 +18,9 @@ import Paper from '@mui/material/Paper';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router';
+import { useBookmarkDetailNavigationState } from '../../shared/hooks/useBookmarkDetailNavigationState';
 import { AuthenticatedFilePreview } from '../../shared/components/AuthenticatedFilePreview';
 import { BookmarkIconBadge } from '../../shared/components/BookmarkIconBadge';
 import { BulkActionToolbar } from '../../shared/components/BulkActionToolbar';
@@ -30,6 +32,7 @@ import { useTrashView } from './hooks/useTrashView';
 import { TRASH_PAGE_STRINGS } from './strings';
 
 export default function TrashPage() {
+  const detailLinkState = useBookmarkDetailNavigationState();
   const {
     items,
     totalCount,
@@ -52,6 +55,8 @@ export default function TrashPage() {
   } = useTrashView();
 
   const [purgeAllDialogOpen, setPurgeAllDialogOpen] = useState(false);
+
+  const visibleBookmarkIds = useMemo(() => items.map((item) => item.id), [items]);
 
   const countLabel =
     totalCount === 1
@@ -102,8 +107,10 @@ export default function TrashPage() {
       </Alert>
 
       <BulkActionToolbar
-        visibleBookmarkIds={items.map((item) => item.id)}
+        visibleBookmarkIds={visibleBookmarkIds}
         context="trash"
+        totalCount={totalCount}
+        onSelectAllMatching={() => selectAllMatchingBookmarksAction({ trashed: true, page: 1 })}
         onActionCompleted={() => {
           refresh();
         }}
@@ -196,6 +203,7 @@ export default function TrashPage() {
                         <Link
                           component={RouterLink}
                           to={`/bookmarks/${bookmark.id}`}
+                          state={detailLinkState}
                           underline="hover"
                           color="text.primary"
                           variant="subtitle1"

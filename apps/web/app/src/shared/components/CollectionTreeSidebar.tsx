@@ -14,6 +14,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import PublicOutlinedIcon from '@mui/icons-material/PublicOutlined';
 import ShareOutlinedIcon from '@mui/icons-material/ShareOutlined';
 import SortByAlphaOutlinedIcon from '@mui/icons-material/SortByAlphaOutlined';
+import SwapVertOutlinedIcon from '@mui/icons-material/SwapVertOutlined';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -34,7 +35,7 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router';
 import { collectionsApi } from '../../api/endpoints/collections';
 import type { Collection, CollectionNode } from '../../api/schemas/collections';
@@ -249,6 +250,7 @@ function CollectionTreeBranch({
   activeCollectionId,
   expandedIds,
   enableDnd,
+  editOrderMode,
   onToggleExpand,
   onNavigate,
   onOpenMenu,
@@ -258,6 +260,7 @@ function CollectionTreeBranch({
   activeCollectionId: string | null;
   expandedIds: Record<string, boolean>;
   enableDnd: boolean;
+  editOrderMode: boolean;
   onToggleExpand: (id: string) => void;
   onNavigate?: () => void;
   onOpenMenu: (target: ContextMenuTarget) => void;
@@ -305,6 +308,7 @@ function CollectionTreeBranch({
           isOver: boolean;
           isDragging: boolean;
         }) => {
+          const showDragHandle = enableDnd && editOrderMode;
           const isDropValid =
             bindings.isOver &&
             !(activeDrag?.kind === 'collection' && activeDrag.collectionId === node.id);
@@ -332,7 +336,7 @@ function CollectionTreeBranch({
                 }}
                 secondaryAction={
                   <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
-                    {enableDnd ? (
+                    {showDragHandle ? (
                       <IconButton
                         ref={bindings.setActivatorRef}
                         size="small"
@@ -383,7 +387,16 @@ function CollectionTreeBranch({
                   to={`/collections/${node.id}`}
                   selected={isSelected}
                   onClick={onNavigate}
-                  sx={{ borderRadius: 1, pr: enableDnd ? 7.5 : 4.5, py: 0.5, minWidth: 0 }}
+                  sx={{
+                    borderRadius: 1,
+                    py: 0.5,
+                    minWidth: 0,
+                    // MUI's secondaryAction rule targets ListItemButton with a
+                    // higher-specificity selector (48px) — win it back so the
+                    // bookmark count clears the secondary actions (drag handle
+                    // appears only in edit-order mode).
+                    '&&': { pr: showDragHandle ? 11 : 7 },
+                  }}
                 >
                   <ListItemIcon sx={{ minWidth: 28 }}>
                     <CollectionIcon iconName={node.icon} colorValue={node.color} fontSize="small" />
@@ -403,9 +416,6 @@ function CollectionTreeBranch({
                             <PublicOutlinedIcon fontSize="inherit" color="primary" />
                           </Tooltip>
                         ) : null}
-                        <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                          {node.bookmarkCount}
-                        </Typography>
                       </Stack>
                     }
                   />
@@ -420,6 +430,7 @@ function CollectionTreeBranch({
                     activeCollectionId={activeCollectionId}
                     expandedIds={expandedIds}
                     enableDnd={enableDnd}
+                    editOrderMode={editOrderMode}
                     onToggleExpand={onToggleExpand}
                     onNavigate={onNavigate}
                     onOpenMenu={onOpenMenu}
@@ -459,6 +470,9 @@ export function CollectionTreeSidebar({
   const [filterMode, setFilterMode] = useState<TreeFilterMode>('all');
   const [sharedItems, setSharedItems] = useState<Collection[] | null>(null);
   const [loadingShared, setLoadingShared] = useState(false);
+  // Drag handles stay hidden until the user opts into reordering (via the
+  // header toggle or a row menu item) so the tree reads cleanly by default.
+  const [editOrderMode, setEditOrderMode] = useState(false);
 
   const [toolsMenuAnchor, setToolsMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuTarget, setMenuTarget] = useState<ContextMenuTarget | null>(null);
@@ -484,11 +498,31 @@ export function CollectionTreeSidebar({
     syncExpandedFromStorage();
   }, [syncExpandedFromStorage]);
 
+  // The shared-tab fetch used to depend on the whole `collectionsById` object,
+  // so ANY store update (every sync frame) refetched the shared list while the
+  // tab was open. Depend on a stable signature of the shared set instead —
+  // identity only changes when a shared collection is actually added/edited.
+  const sharedSignature = useMemo(
+    () =>
+      Object.values(collectionsById)
+        .filter((col) => col.share.enabled)
+        .map((col) => `${col.id}:${col.updatedAt}`)
+        .sort()
+        .join('|'),
+    [collectionsById],
+  );
+  const sharedInFlightRef = useRef(false);
+
   useEffect(() => {
     if (filterMode !== 'shared') {
       return;
     }
+    if (sharedInFlightRef.current) {
+      return;
+    }
     let cancelled = false;
+    sharedInFlightRef.current = true;
+    setLoadingShared(true);
     void collectionsApi
       .list({ shared: true })
       .then((res) => {
@@ -506,11 +540,14 @@ export function CollectionTreeSidebar({
           );
           setLoadingShared(false);
         }
+      })
+      .finally(() => {
+        sharedInFlightRef.current = false;
       });
     return () => {
       cancelled = true;
     };
-  }, [collectionsById, filterMode]);
+  }, [filterMode, sharedSignature]);
 
   const sortedCollections = useMemo(
     () =>
@@ -559,6 +596,28 @@ export function CollectionTreeSidebar({
         </Stack>
 
         <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
+          <Tooltip
+            title={
+              editOrderMode
+                ? SHARED_COLLECTION_STRINGS.editOrderToggleActiveTooltip
+                : SHARED_COLLECTION_STRINGS.editOrderToggleTooltip
+            }
+          >
+            <IconButton
+              size="small"
+              aria-label={
+                editOrderMode
+                  ? SHARED_COLLECTION_STRINGS.editOrderToggleActiveAriaLabel
+                  : SHARED_COLLECTION_STRINGS.editOrderToggleAriaLabel
+              }
+              aria-pressed={editOrderMode}
+              data-testid="collection-edit-order-toggle"
+              color={editOrderMode ? 'primary' : 'default'}
+              onClick={() => setEditOrderMode((prev) => !prev)}
+            >
+              <EditOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Tooltip title={SHARED_COLLECTION_STRINGS.collectionToolsTooltip}>
             <IconButton
               size="small"
@@ -673,9 +732,6 @@ export function CollectionTreeSidebar({
                           {col.title}
                         </Typography>
                         <PublicOutlinedIcon fontSize="inherit" color="primary" />
-                        <Typography variant="caption" color="text.secondary">
-                          {col.bookmarkCount}
-                        </Typography>
                       </Stack>
                     }
                   />
@@ -702,6 +758,7 @@ export function CollectionTreeSidebar({
             activeCollectionId={activeCollectionId}
             expandedIds={expandedIds}
             enableDnd={enableDnd}
+            editOrderMode={editOrderMode}
             onToggleExpand={toggleCollectionExpanded}
             onNavigate={onNavigate}
             onOpenMenu={setMenuTarget}
@@ -830,6 +887,25 @@ export function CollectionTreeSidebar({
               </MenuItem>,
               <Divider key="divider-order" />,
               <MenuItem
+                key="edit-order"
+                data-testid={`col-edit-order-${menuTarget.collection.id}`}
+                onClick={() => {
+                  setEditOrderMode((prev) => !prev);
+                  handleCloseMenu();
+                }}
+              >
+                <ListItemIcon>
+                  <SwapVertOutlinedIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText
+                  primary={
+                    editOrderMode
+                      ? SHARED_COLLECTION_STRINGS.menuEditOrderFinishLabel
+                      : SHARED_COLLECTION_STRINGS.menuEditOrderLabel
+                  }
+                />
+              </MenuItem>,
+              <MenuItem
                 key="move-up"
                 disabled={menuTarget.siblingIndex <= 0}
                 onClick={() => {
@@ -893,46 +969,54 @@ export function CollectionTreeSidebar({
           : null}
       </Menu>
 
-      <CollectionFormDialog
-        open={formDialog.open}
-        mode={formDialog.mode}
-        initialCollection={formDialog.collection}
-        defaultParentId={formDialog.defaultParentId}
-        onClose={() =>
-          setFormDialog((prev) => ({
-            ...prev,
-            open: false,
-          }))
-        }
-      />
-
-      <CollectionDeleteDialog
-        open={Boolean(deleteDialogCollection)}
-        collection={deleteDialogCollection}
-        onClose={() => setDeleteDialogCollection(null)}
-        onDeleted={(deletedId) => {
-          if (activeCollectionId === deletedId) {
-            navigate('/');
+      {formDialog.open ? (
+        <CollectionFormDialog
+          open={formDialog.open}
+          mode={formDialog.mode}
+          initialCollection={formDialog.collection}
+          defaultParentId={formDialog.defaultParentId}
+          onClose={() =>
+            setFormDialog((prev) => ({
+              ...prev,
+              open: false,
+            }))
           }
-        }}
-      />
+        />
+      ) : null}
 
-      <CollectionShareDialog
-        open={Boolean(shareDialogCollection)}
-        collection={shareDialogCollection}
-        onClose={() => setShareDialogCollection(null)}
-      />
+      {deleteDialogCollection ? (
+        <CollectionDeleteDialog
+          open={Boolean(deleteDialogCollection)}
+          collection={deleteDialogCollection}
+          onClose={() => setDeleteDialogCollection(null)}
+          onDeleted={(deletedId) => {
+            if (activeCollectionId === deletedId) {
+              navigate('/');
+            }
+          }}
+        />
+      ) : null}
 
-      <CollectionMergeDialog
-        open={mergeDialogState.open}
-        initialSourceId={mergeDialogState.initialSourceId}
-        onClose={() => setMergeDialogState({ open: false, initialSourceId: null })}
-        onMerged={(result) => {
-          if (activeCollectionId && result.trashedIds.includes(activeCollectionId)) {
-            navigate(`/collections/${result.target.id}`);
-          }
-        }}
-      />
+      {shareDialogCollection ? (
+        <CollectionShareDialog
+          open={Boolean(shareDialogCollection)}
+          collection={shareDialogCollection}
+          onClose={() => setShareDialogCollection(null)}
+        />
+      ) : null}
+
+      {mergeDialogState.open ? (
+        <CollectionMergeDialog
+          open={mergeDialogState.open}
+          initialSourceId={mergeDialogState.initialSourceId}
+          onClose={() => setMergeDialogState({ open: false, initialSourceId: null })}
+          onMerged={(result) => {
+            if (activeCollectionId && result.trashedIds.includes(activeCollectionId)) {
+              navigate(`/collections/${result.target.id}`);
+            }
+          }}
+        />
+      ) : null}
     </Box>
   );
 }

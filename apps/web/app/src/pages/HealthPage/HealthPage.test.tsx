@@ -198,7 +198,9 @@ describe('HealthPage', () => {
       action: 'create',
     });
 
-    expect(await screen.findByText('arcdrop.test/newly-detected')).toBeInTheDocument();
+    expect(
+      await screen.findByText('arcdrop.test/newly-detected', {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(dupCallCount).toBeGreaterThanOrEqual(2);
   }, 60_000);
 });

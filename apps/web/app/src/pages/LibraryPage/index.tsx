@@ -5,11 +5,14 @@ import Paper from '@mui/material/Paper';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import { useCallback, useMemo } from 'react';
 import { toggleBookmarkFavoriteAction } from '../../shared/actions/bookmarkActions';
+import { selectAllMatchingBookmarksAction } from '../../shared/actions/bulkActions';
 import { BookmarkLayouts } from '../../shared/components/BookmarkLayouts';
 import { BulkActionToolbar } from '../../shared/components/BulkActionToolbar';
 import { FilterChipsBar } from '../../shared/components/FilterChipsBar';
 import { SearchEmptyState } from '../../shared/components/SearchEmptyState';
+import { buildBookmarkApiQuery } from '../../shared/utils/searchFilters';
 import { LibraryToolbar } from './components/LibraryToolbar';
 import { useLibraryView } from './hooks/useLibraryView';
 import { LIBRARY_PAGE_STRINGS } from './strings';
@@ -52,6 +55,20 @@ export default function LibraryPage() {
 
   const showPageError = Boolean(error && !searchError);
 
+  // Stable identities for the memoized list rows and the bulk toolbar.
+  const visibleBookmarkIds = useMemo(() => items.map((item) => item.id), [items]);
+  const handleToggleFavorite = useCallback(
+    (bookmark: Parameters<typeof toggleBookmarkFavoriteAction>[0]) => {
+      void toggleBookmarkFavoriteAction(bookmark).catch(() => undefined);
+    },
+    [],
+  );
+  const handleSelectAllMatching = useCallback(
+    () =>
+      selectAllMatchingBookmarksAction(buildBookmarkApiQuery({ scope, sort, filters, page: 1 })),
+    [filters, scope, sort],
+  );
+
   return (
     <Stack spacing={3}>
       <LibraryToolbar
@@ -78,7 +95,12 @@ export default function LibraryPage() {
         onClearFilters={clearFilters}
       />
 
-      <BulkActionToolbar visibleBookmarkIds={items.map((item) => item.id)} context="library" />
+      <BulkActionToolbar
+        visibleBookmarkIds={visibleBookmarkIds}
+        context="library"
+        totalCount={totalCount}
+        onSelectAllMatching={handleSelectAllMatching}
+      />
 
       {showPageError ? (
         <Alert
@@ -120,9 +142,7 @@ export default function LibraryPage() {
             layoutMode={layoutMode}
             selectedBookmarkIds={selectedBookmarkIds}
             onTagClick={toggleTag}
-            onToggleFavorite={(bookmark) => {
-              void toggleBookmarkFavoriteAction(bookmark).catch(() => undefined);
-            }}
+            onToggleFavorite={handleToggleFavorite}
             onToggleSelect={toggleBookmarkSelection}
           />
 

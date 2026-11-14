@@ -55,12 +55,18 @@ export function useLibraryView() {
   const bookmarksById = useLibraryStore((s) => s.bookmarksById);
   const isBootstrapping = useSyncStore((s) => s.isBootstrapping);
 
-  const items = selectViewBookmarks(
-    {
-      views: viewState ? { [viewKey]: viewState } : {},
-      bookmarksById,
-    } as Parameters<typeof selectViewBookmarks>[0],
-    viewKey,
+  // Memoized so the array identity only changes when the view contents or a
+  // bookmark in it actually changes — memoized rows below then skip re-render.
+  const items = useMemo(
+    () =>
+      selectViewBookmarks(
+        {
+          views: viewState ? { [viewKey]: viewState } : {},
+          bookmarksById,
+        } as Parameters<typeof selectViewBookmarks>[0],
+        viewKey,
+      ),
+    [bookmarksById, viewKey, viewState],
   );
 
   const fetchPage = useCallback(

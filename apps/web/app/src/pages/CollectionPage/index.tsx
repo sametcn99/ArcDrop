@@ -15,9 +15,10 @@ import Paper from '@mui/material/Paper';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import { toggleBookmarkFavoriteAction } from '../../shared/actions/bookmarkActions';
+import { selectAllMatchingBookmarksAction } from '../../shared/actions/bulkActions';
 import { BookmarkLayouts } from '../../shared/components/BookmarkLayouts';
 import { BulkActionToolbar } from '../../shared/components/BulkActionToolbar';
 import { CollectionDeleteDialog } from '../../shared/components/CollectionDeleteDialog';
@@ -26,7 +27,9 @@ import { CollectionMergeDialog } from '../../shared/components/CollectionMergeDi
 import { CollectionShareDialog } from '../../shared/components/CollectionShareDialog';
 import { FilterChipsBar } from '../../shared/components/FilterChipsBar';
 import { SearchEmptyState } from '../../shared/components/SearchEmptyState';
+import { SubCollectionCards } from '../../shared/components/SubCollectionCards';
 import { useAppDnd, type DragItemData } from '../../shared/hooks/useAppDnd';
+import { buildBookmarkApiQuery } from '../../shared/utils/searchFilters';
 import { CollectionToolbar } from './components/CollectionToolbar';
 import { useCollectionView } from './hooks/useCollectionView';
 import { COLLECTION_PAGE_STRINGS } from './strings';
@@ -35,8 +38,10 @@ export default function CollectionPage() {
   const navigate = useNavigate();
   const { hasProvider } = useAppDnd();
   const {
+    collectionId,
     collection,
     ancestors,
+    childCollections,
     collectionNotFound,
     sort,
     layoutMode,
@@ -76,6 +81,22 @@ export default function CollectionPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  // Stable identities for the memoized list rows and the bulk toolbar.
+  // (Declared before any early return so hook order stays constant.)
+  const visibleBookmarkIds = useMemo(() => items.map((item) => item.id), [items]);
+  const handleToggleFavorite = useCallback(
+    (bookmark: Parameters<typeof toggleBookmarkFavoriteAction>[0]) => {
+      void toggleBookmarkFavoriteAction(bookmark).catch(() => undefined);
+    },
+    [],
+  );
+  const handleMoveBookmark = useCallback(
+    (bookmarkId: string, direction: 'up' | 'down') => {
+      void moveBookmark(bookmarkId, direction);
+    },
+    [moveBookmark],
+  );
 
   const fallbackSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -125,12 +146,8 @@ export default function CollectionPage() {
       draggableBookmarks={true}
       sortableBookmarks={canManualReorder}
       onTagClick={toggleTag}
-      onMoveBookmark={(bookmarkId, direction) => {
-        void moveBookmark(bookmarkId, direction);
-      }}
-      onToggleFavorite={(bookmark) => {
-        void toggleBookmarkFavoriteAction(bookmark).catch(() => undefined);
-      }}
+      onMoveBookmark={handleMoveBookmark}
+      onToggleFavorite={handleToggleFavorite}
       onToggleSelect={toggleBookmarkSelection}
     />
   );
@@ -166,8 +183,14 @@ export default function CollectionPage() {
       />
 
       <BulkActionToolbar
-        visibleBookmarkIds={items.map((item) => item.id)}
+        visibleBookmarkIds={visibleBookmarkIds}
         context="library"
+        totalCount={totalCount}
+        onSelectAllMatching={() =>
+          selectAllMatchingBookmarksAction(
+            buildBookmarkApiQuery({ collectionId, sort, filters, page: 1 }),
+          )
+        }
         onActionCompleted={(res) => {
           if (res.action === 'move' && res.affected > 0) {
             retry();
@@ -190,6 +213,10 @@ export default function CollectionPage() {
         >
           {error}
         </Alert>
+      ) : null}
+
+      {childCollections.length > 0 ? (
+        <SubCollectionCards collections={childCollections} enableDnd={hasProvider} />
       ) : null}
 
       {loading ? (
@@ -238,38 +265,46 @@ export default function CollectionPage() {
         </>
       )}
 
-      <CollectionShareDialog
-        open={shareOpen}
-        collection={collection}
-        onClose={() => setShareOpen(false)}
-      />
+      {shareOpen ? (
+        <CollectionShareDialog
+          open={shareOpen}
+          collection={collection}
+          onClose={() => setShareOpen(false)}
+        />
+      ) : null}
 
-      <CollectionFormDialog
-        open={editOpen}
-        mode="edit"
-        initialCollection={collection}
-        onClose={() => setEditOpen(false)}
-      />
+      {editOpen ? (
+        <CollectionFormDialog
+          open={editOpen}
+          mode="edit"
+          initialCollection={collection}
+          onClose={() => setEditOpen(false)}
+        />
+      ) : null}
 
-      <CollectionMergeDialog
-        open={mergeOpen}
-        initialSourceId={collection?.id ?? null}
-        onClose={() => setMergeOpen(false)}
-        onMerged={(result) => {
-          if (collection && result.trashedIds.includes(collection.id)) {
-            navigate(`/collections/${result.target.id}`);
-          }
-        }}
-      />
+      {mergeOpen ? (
+        <CollectionMergeDialog
+          open={mergeOpen}
+          initialSourceId={collection?.id ?? null}
+          onClose={() => setMergeOpen(false)}
+          onMerged={(result) => {
+            if (collection && result.trashedIds.includes(collection.id)) {
+              navigate(`/collections/${result.target.id}`);
+            }
+          }}
+        />
+      ) : null}
 
-      <CollectionDeleteDialog
-        open={deleteOpen}
-        collection={collection}
-        onClose={() => setDeleteOpen(false)}
-        onDeleted={() => {
-          navigate('/');
-        }}
-      />
+      {deleteOpen ? (
+        <CollectionDeleteDialog
+          open={deleteOpen}
+          collection={collection}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={() => {
+            navigate('/');
+          }}
+        />
+      ) : null}
     </Stack>
   );
 }

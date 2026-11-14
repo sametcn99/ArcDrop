@@ -27,11 +27,14 @@ import Stack from '@mui/material/Stack';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import type { ReactNode } from 'react';
+import { memo } from 'react';
 import { Link as RouterLink } from 'react-router';
+import { Virtuoso } from 'react-virtuoso';
 import type { Bookmark } from '../../api/schemas/bookmarks';
 import type { LibraryLayoutMode } from '../../stores/libraryStore';
 import { downloadBookmarkFileAction } from '../actions/bookmarkActions';
 import { buildBookmarkDragId, type DragItemData } from '../hooks/useAppDnd';
+import { useBookmarkDetailNavigationState } from '../hooks/useBookmarkDetailNavigationState';
 import { SHARED_BOOKMARK_STRINGS } from '../strings';
 import {
   formatBookmarkFileMeta,
@@ -44,6 +47,28 @@ import { ContentTypeChip } from './ContentTypeChip';
 import { FavoriteToggleButton } from './FavoriteToggleButton';
 import { ReminderBadge } from './ReminderBadge';
 import { TagChipList } from './TagChipList';
+
+/**
+ * Lists longer than this switch to window-scroll virtualization (react-virtuoso)
+ * so the DOM node count stays constant as "Load more" grows the view. Short
+ * lists stay on the plain path, which is also what the test suite exercises.
+ */
+const VIRTUALIZE_ITEM_THRESHOLD = 120;
+
+/** Stable-prop contract shared by the memoized rows of every layout. */
+interface BookmarkRowProps {
+  bookmark: Bookmark;
+  checked: boolean;
+  detailLinkState: ReturnType<typeof useBookmarkDetailNavigationState>;
+  index: number;
+  total: number;
+  draggable: boolean;
+  sortable: boolean;
+  onToggleFavorite: (bookmark: Bookmark) => void;
+  onToggleSelect: (id: string) => void;
+  onMoveBookmark?: (bookmarkId: string, direction: 'up' | 'down') => void;
+  onTagClick?: (tagName: string) => void;
+}
 
 export interface BookmarkLayoutsProps {
   items: Bookmark[];
@@ -69,6 +94,16 @@ function resolveBookmarkTitle(bookmark: Bookmark): string {
   return (
     bookmark.title ?? bookmark.fileName ?? bookmark.url ?? SHARED_BOOKMARK_STRINGS.untitledBookmark
   );
+}
+
+/** Memoized SortableContext id list — one array identity per items identity. */
+const sortableDragIdsCache = new WeakMap<Bookmark[], string[]>();
+function sortableDragIds(items: Bookmark[]): string[] {
+  const cached = sortableDragIdsCache.get(items);
+  if (cached) return cached;
+  const ids = items.map((item) => buildBookmarkDragId(item.id));
+  sortableDragIdsCache.set(items, ids);
+  return ids;
 }
 
 function resolveBookmarkSourceLabel(bookmark: Bookmark): string {
@@ -115,11 +150,13 @@ function BookmarkPrimaryAction({ bookmark }: { bookmark: Bookmark }) {
 }
 
 function ArchiveTextChipLink({ bookmark }: { bookmark: Bookmark }) {
+  const detailLinkState = useBookmarkDetailNavigationState();
   if (!isExtractableTextFileBookmark(bookmark)) return null;
   return (
     <Chip
       component={RouterLink}
       to={`/bookmarks/${bookmark.id}?tab=archive&view=text`}
+      state={detailLinkState}
       clickable
       size="small"
       variant="outlined"
@@ -321,6 +358,147 @@ function BookmarkDragAndOrderControls({
   );
 }
 
+/**
+ * Memoized so an unchanged bookmark (the store keeps object identity for
+ * untouched entries) skips re-rendering entirely when a sync frame or an
+ * unrelated store update re-renders the page.
+ */
+const ListRow = memo(function ListRow({
+  bookmark,
+  checked,
+  detailLinkState,
+  index,
+  total,
+  draggable,
+  sortable,
+  onToggleFavorite,
+  onToggleSelect,
+  onMoveBookmark,
+  onTagClick,
+}: BookmarkRowProps) {
+  const title = resolveBookmarkTitle(bookmark);
+  const sourceLabel = resolveBookmarkSourceLabel(bookmark);
+  const isImageFile = isImageFileBookmark(bookmark);
+
+  return (
+    <BookmarkItemWrapper
+      bookmark={bookmark}
+      title={title}
+      sortable={sortable}
+      draggable={draggable}
+    >
+      {(bindings) => (
+        <Card
+          ref={bindings.setNodeRef}
+          variant="outlined"
+          data-testid={`bookmark-item-${bookmark.id}`}
+          sx={{
+            transform: bindings.transformStyle,
+            transition: bindings.transitionStyle,
+            opacity: bindings.isDragging ? 0.5 : 1,
+          }}
+        >
+          <CardContent sx={{ py: 1.75, '&:last-child': { pb: 1.75 } }}>
+            <Stack
+              direction="row"
+              spacing={1.5}
+              sx={{ alignItems: 'flex-start', justifyContent: 'space-between' }}
+            >
+              <Checkbox
+                size="small"
+                checked={checked}
+                onChange={() => onToggleSelect(bookmark.id)}
+                slotProps={{
+                  input: {
+                    'aria-label': `${SHARED_BOOKMARK_STRINGS.selectBookmarkLabel}: ${title}`,
+                  },
+                }}
+                sx={{ mt: -0.5 }}
+              />
+
+              {isImageFile ? (
+                <AuthenticatedFilePreview
+                  bookmarkId={bookmark.id}
+                  contentType={bookmark.contentType}
+                  alt={title}
+                  size={48}
+                />
+              ) : (
+                <BookmarkIconBadge
+                  iconRef={bookmark.iconRef}
+                  contentType={bookmark.contentType}
+                  alt={title}
+                />
+              )}
+
+              <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                <Link
+                  component={RouterLink}
+                  to={`/bookmarks/${bookmark.id}`}
+                  state={detailLinkState}
+                  underline="hover"
+                  color="text.primary"
+                  variant="subtitle1"
+                  sx={{ fontWeight: 600, display: 'block' }}
+                >
+                  {title}
+                </Link>
+                {sourceLabel ? (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    noWrap
+                    sx={{ display: 'block' }}
+                  >
+                    {sourceLabel}
+                  </Typography>
+                ) : null}
+                {bookmark.excerpt ? (
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
+                    {bookmark.excerpt}
+                  </Typography>
+                ) : null}
+                <Stack
+                  direction="row"
+                  spacing={1}
+                  sx={{ mt: 1.25, alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
+                >
+                  <ContentTypeChip contentType={bookmark.contentType} />
+                  <ArchiveTextChipLink bookmark={bookmark} />
+                  <ReminderBadge
+                    reminderAt={bookmark.reminderAt}
+                    remindedAt={bookmark.remindedAt}
+                  />
+                  <TagChipList tags={bookmark.tags} maxVisible={5} onTagClick={onTagClick} />
+                </Stack>
+              </Box>
+
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', flexShrink: 0 }}>
+                <BookmarkDragAndOrderControls
+                  bookmark={bookmark}
+                  title={title}
+                  dragHandle={bindings.dragHandle}
+                  draggable={draggable}
+                  sortable={sortable}
+                  index={index}
+                  total={total}
+                  onMoveBookmark={onMoveBookmark}
+                />
+                <FavoriteToggleButton
+                  favorite={bookmark.favorite}
+                  itemLabel={title}
+                  onToggle={() => onToggleFavorite(bookmark)}
+                />
+                <BookmarkPrimaryAction bookmark={bookmark} />
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+    </BookmarkItemWrapper>
+  );
+});
+
 function ListLayout({
   items,
   selectedBookmarkIds,
@@ -331,139 +509,205 @@ function ListLayout({
   sortableBookmarks = false,
   onMoveBookmark,
 }: Omit<BookmarkLayoutsProps, 'layoutMode'>) {
+  const detailLinkState = useBookmarkDetailNavigationState();
+  const total = items.length;
+
+  if (total > VIRTUALIZE_ITEM_THRESHOLD) {
+    return (
+      <Box data-testid="library-layout-list">
+        <Virtuoso
+          useWindowScroll
+          totalCount={total}
+          itemContent={(index) => {
+            const bookmark = items[index];
+            if (!bookmark) return null;
+            return (
+              <Box sx={{ pb: 1.5 }}>
+                <ListRow
+                  bookmark={bookmark}
+                  checked={Boolean(selectedBookmarkIds[bookmark.id])}
+                  detailLinkState={detailLinkState}
+                  index={index}
+                  total={total}
+                  draggable={draggableBookmarks}
+                  sortable={sortableBookmarks}
+                  onToggleFavorite={onToggleFavorite}
+                  onToggleSelect={onToggleSelect}
+                  onMoveBookmark={onMoveBookmark}
+                  onTagClick={onTagClick}
+                />
+              </Box>
+            );
+          }}
+        />
+      </Box>
+    );
+  }
+
   return (
     <Stack spacing={1.5} data-testid="library-layout-list">
-      {items.map((bookmark, index) => {
-        const title = resolveBookmarkTitle(bookmark);
-        const sourceLabel = resolveBookmarkSourceLabel(bookmark);
-        const checked = Boolean(selectedBookmarkIds[bookmark.id]);
-        const isImageFile = isImageFileBookmark(bookmark);
-
-        return (
-          <BookmarkItemWrapper
-            key={bookmark.id}
-            bookmark={bookmark}
-            title={title}
-            sortable={sortableBookmarks}
-            draggable={draggableBookmarks}
-          >
-            {(bindings) => (
-              <Card
-                ref={bindings.setNodeRef}
-                variant="outlined"
-                data-testid={`bookmark-item-${bookmark.id}`}
-                sx={{
-                  transform: bindings.transformStyle,
-                  transition: bindings.transitionStyle,
-                  opacity: bindings.isDragging ? 0.5 : 1,
-                }}
-              >
-                <CardContent sx={{ py: 1.75, '&:last-child': { pb: 1.75 } }}>
-                  <Stack
-                    direction="row"
-                    spacing={1.5}
-                    sx={{ alignItems: 'flex-start', justifyContent: 'space-between' }}
-                  >
-                    <Checkbox
-                      size="small"
-                      checked={checked}
-                      onChange={() => onToggleSelect(bookmark.id)}
-                      slotProps={{
-                        input: {
-                          'aria-label': `${SHARED_BOOKMARK_STRINGS.selectBookmarkLabel}: ${title}`,
-                        },
-                      }}
-                      sx={{ mt: -0.5 }}
-                    />
-
-                    {isImageFile ? (
-                      <AuthenticatedFilePreview
-                        bookmarkId={bookmark.id}
-                        contentType={bookmark.contentType}
-                        alt={title}
-                        size={48}
-                      />
-                    ) : (
-                      <BookmarkIconBadge
-                        iconRef={bookmark.iconRef}
-                        contentType={bookmark.contentType}
-                        alt={title}
-                      />
-                    )}
-
-                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                      <Link
-                        component={RouterLink}
-                        to={`/bookmarks/${bookmark.id}`}
-                        underline="hover"
-                        color="text.primary"
-                        variant="subtitle1"
-                        sx={{ fontWeight: 600, display: 'block' }}
-                      >
-                        {title}
-                      </Link>
-                      {sourceLabel ? (
-                        <Typography
-                          variant="caption"
-                          color="text.secondary"
-                          noWrap
-                          sx={{ display: 'block' }}
-                        >
-                          {sourceLabel}
-                        </Typography>
-                      ) : null}
-                      {bookmark.excerpt ? (
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-                          {bookmark.excerpt}
-                        </Typography>
-                      ) : null}
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        sx={{ mt: 1.25, alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
-                      >
-                        <ContentTypeChip contentType={bookmark.contentType} />
-                        <ArchiveTextChipLink bookmark={bookmark} />
-                        <ReminderBadge
-                          reminderAt={bookmark.reminderAt}
-                          remindedAt={bookmark.remindedAt}
-                        />
-                        <TagChipList tags={bookmark.tags} maxVisible={5} onTagClick={onTagClick} />
-                      </Stack>
-                    </Box>
-
-                    <Stack
-                      direction="row"
-                      spacing={0.5}
-                      sx={{ alignItems: 'center', flexShrink: 0 }}
-                    >
-                      <BookmarkDragAndOrderControls
-                        bookmark={bookmark}
-                        title={title}
-                        dragHandle={bindings.dragHandle}
-                        draggable={draggableBookmarks}
-                        sortable={sortableBookmarks}
-                        index={index}
-                        total={items.length}
-                        onMoveBookmark={onMoveBookmark}
-                      />
-                      <FavoriteToggleButton
-                        favorite={bookmark.favorite}
-                        itemLabel={title}
-                        onToggle={() => onToggleFavorite(bookmark)}
-                      />
-                      <BookmarkPrimaryAction bookmark={bookmark} />
-                    </Stack>
-                  </Stack>
-                </CardContent>
-              </Card>
-            )}
-          </BookmarkItemWrapper>
-        );
-      })}
+      {items.map((bookmark, index) => (
+        <ListRow
+          key={bookmark.id}
+          bookmark={bookmark}
+          checked={Boolean(selectedBookmarkIds[bookmark.id])}
+          detailLinkState={detailLinkState}
+          index={index}
+          total={total}
+          draggable={draggableBookmarks}
+          sortable={sortableBookmarks}
+          onToggleFavorite={onToggleFavorite}
+          onToggleSelect={onToggleSelect}
+          onMoveBookmark={onMoveBookmark}
+          onTagClick={onTagClick}
+        />
+      ))}
     </Stack>
   );
 }
+
+const GridCard = memo(function GridCard({
+  bookmark,
+  checked,
+  detailLinkState,
+  index,
+  total,
+  draggable,
+  sortable,
+  onToggleFavorite,
+  onToggleSelect,
+  onMoveBookmark,
+  onTagClick,
+}: BookmarkRowProps) {
+  const title = resolveBookmarkTitle(bookmark);
+  const sourceLabel = resolveBookmarkSourceLabel(bookmark);
+  const isImageFile = isImageFileBookmark(bookmark);
+
+  return (
+    <BookmarkItemWrapper
+      bookmark={bookmark}
+      title={title}
+      sortable={sortable}
+      draggable={draggable}
+    >
+      {(bindings) => (
+        <Card
+          ref={bindings.setNodeRef}
+          variant="outlined"
+          data-testid={`bookmark-item-${bookmark.id}`}
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            transform: bindings.transformStyle,
+            transition: bindings.transitionStyle,
+            opacity: bindings.isDragging ? 0.5 : 1,
+          }}
+        >
+          <CardContent sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
+                <Checkbox
+                  size="small"
+                  checked={checked}
+                  onChange={() => onToggleSelect(bookmark.id)}
+                  slotProps={{
+                    input: {
+                      'aria-label': `${SHARED_BOOKMARK_STRINGS.selectBookmarkLabel}: ${title}`,
+                    },
+                  }}
+                  sx={{ p: 0.25 }}
+                />
+                <BookmarkIconBadge
+                  iconRef={bookmark.iconRef}
+                  contentType={bookmark.contentType}
+                  alt={title}
+                  size={32}
+                />
+              </Stack>
+
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                <BookmarkDragAndOrderControls
+                  bookmark={bookmark}
+                  title={title}
+                  dragHandle={bindings.dragHandle}
+                  draggable={draggable}
+                  sortable={sortable}
+                  index={index}
+                  total={total}
+                  onMoveBookmark={onMoveBookmark}
+                />
+                <FavoriteToggleButton
+                  favorite={bookmark.favorite}
+                  itemLabel={title}
+                  onToggle={() => onToggleFavorite(bookmark)}
+                />
+                <BookmarkPrimaryAction bookmark={bookmark} />
+              </Stack>
+            </Stack>
+
+            {isImageFile ? (
+              <AuthenticatedFilePreview
+                bookmarkId={bookmark.id}
+                contentType={bookmark.contentType}
+                alt={title}
+                variant="banner"
+                maxHeight={140}
+              />
+            ) : null}
+
+            <Link
+              component={RouterLink}
+              to={`/bookmarks/${bookmark.id}`}
+              state={detailLinkState}
+              underline="hover"
+              color="text.primary"
+              variant="subtitle1"
+              sx={{ fontWeight: 600 }}
+            >
+              {title}
+            </Link>
+
+            {sourceLabel ? (
+              <Typography variant="caption" color="text.secondary" noWrap>
+                {sourceLabel}
+              </Typography>
+            ) : null}
+
+            {bookmark.excerpt ? (
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{
+                  display: '-webkit-box',
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                  flexGrow: 1,
+                }}
+              >
+                {bookmark.excerpt}
+              </Typography>
+            ) : (
+              <Box sx={{ flexGrow: 1 }} />
+            )}
+
+            <Stack
+              direction="row"
+              spacing={0.75}
+              sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
+            >
+              <ContentTypeChip contentType={bookmark.contentType} />
+              <ArchiveTextChipLink bookmark={bookmark} />
+              <ReminderBadge reminderAt={bookmark.reminderAt} remindedAt={bookmark.remindedAt} />
+              <TagChipList tags={bookmark.tags} maxVisible={3} onTagClick={onTagClick} />
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+    </BookmarkItemWrapper>
+  );
+});
 
 function GridLayout({
   items,
@@ -475,6 +719,8 @@ function GridLayout({
   sortableBookmarks = false,
   onMoveBookmark,
 }: Omit<BookmarkLayoutsProps, 'layoutMode'>) {
+  const detailLinkState = useBookmarkDetailNavigationState();
+  const total = items.length;
   return (
     <Box
       data-testid="library-layout-grid"
@@ -488,148 +734,144 @@ function GridLayout({
         gap: 2,
       }}
     >
-      {items.map((bookmark, index) => {
-        const title = resolveBookmarkTitle(bookmark);
-        const sourceLabel = resolveBookmarkSourceLabel(bookmark);
-        const checked = Boolean(selectedBookmarkIds[bookmark.id]);
-        const isImageFile = isImageFileBookmark(bookmark);
-
-        return (
-          <BookmarkItemWrapper
-            key={bookmark.id}
-            bookmark={bookmark}
-            title={title}
-            sortable={sortableBookmarks}
-            draggable={draggableBookmarks}
-          >
-            {(bindings) => (
-              <Card
-                ref={bindings.setNodeRef}
-                variant="outlined"
-                data-testid={`bookmark-item-${bookmark.id}`}
-                sx={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  height: '100%',
-                  transform: bindings.transformStyle,
-                  transition: bindings.transitionStyle,
-                  opacity: bindings.isDragging ? 0.5 : 1,
-                }}
-              >
-                <CardContent
-                  sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column', gap: 1.25 }}
-                >
-                  <Stack
-                    direction="row"
-                    sx={{ alignItems: 'center', justifyContent: 'space-between' }}
-                  >
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
-                      <Checkbox
-                        size="small"
-                        checked={checked}
-                        onChange={() => onToggleSelect(bookmark.id)}
-                        slotProps={{
-                          input: {
-                            'aria-label': `${SHARED_BOOKMARK_STRINGS.selectBookmarkLabel}: ${title}`,
-                          },
-                        }}
-                        sx={{ p: 0.25 }}
-                      />
-                      <BookmarkIconBadge
-                        iconRef={bookmark.iconRef}
-                        contentType={bookmark.contentType}
-                        alt={title}
-                        size={32}
-                      />
-                    </Stack>
-
-                    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                      <BookmarkDragAndOrderControls
-                        bookmark={bookmark}
-                        title={title}
-                        dragHandle={bindings.dragHandle}
-                        draggable={draggableBookmarks}
-                        sortable={sortableBookmarks}
-                        index={index}
-                        total={items.length}
-                        onMoveBookmark={onMoveBookmark}
-                      />
-                      <FavoriteToggleButton
-                        favorite={bookmark.favorite}
-                        itemLabel={title}
-                        onToggle={() => onToggleFavorite(bookmark)}
-                      />
-                      <BookmarkPrimaryAction bookmark={bookmark} />
-                    </Stack>
-                  </Stack>
-
-                  {isImageFile ? (
-                    <AuthenticatedFilePreview
-                      bookmarkId={bookmark.id}
-                      contentType={bookmark.contentType}
-                      alt={title}
-                      variant="banner"
-                      maxHeight={140}
-                    />
-                  ) : null}
-
-                  <Link
-                    component={RouterLink}
-                    to={`/bookmarks/${bookmark.id}`}
-                    underline="hover"
-                    color="text.primary"
-                    variant="subtitle1"
-                    sx={{ fontWeight: 600 }}
-                  >
-                    {title}
-                  </Link>
-
-                  {sourceLabel ? (
-                    <Typography variant="caption" color="text.secondary" noWrap>
-                      {sourceLabel}
-                    </Typography>
-                  ) : null}
-
-                  {bookmark.excerpt ? (
-                    <Typography
-                      variant="body2"
-                      color="text.secondary"
-                      sx={{
-                        display: '-webkit-box',
-                        WebkitLineClamp: 3,
-                        WebkitBoxOrient: 'vertical',
-                        overflow: 'hidden',
-                        flexGrow: 1,
-                      }}
-                    >
-                      {bookmark.excerpt}
-                    </Typography>
-                  ) : (
-                    <Box sx={{ flexGrow: 1 }} />
-                  )}
-
-                  <Stack
-                    direction="row"
-                    spacing={0.75}
-                    sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
-                  >
-                    <ContentTypeChip contentType={bookmark.contentType} />
-                    <ArchiveTextChipLink bookmark={bookmark} />
-                    <ReminderBadge
-                      reminderAt={bookmark.reminderAt}
-                      remindedAt={bookmark.remindedAt}
-                    />
-                    <TagChipList tags={bookmark.tags} maxVisible={3} onTagClick={onTagClick} />
-                  </Stack>
-                </CardContent>
-              </Card>
-            )}
-          </BookmarkItemWrapper>
-        );
-      })}
+      {items.map((bookmark, index) => (
+        <GridCard
+          key={bookmark.id}
+          bookmark={bookmark}
+          checked={Boolean(selectedBookmarkIds[bookmark.id])}
+          detailLinkState={detailLinkState}
+          index={index}
+          total={total}
+          draggable={draggableBookmarks}
+          sortable={sortableBookmarks}
+          onToggleFavorite={onToggleFavorite}
+          onToggleSelect={onToggleSelect}
+          onMoveBookmark={onMoveBookmark}
+          onTagClick={onTagClick}
+        />
+      ))}
     </Box>
   );
 }
+
+const HeadlineRow = memo(function HeadlineRow({
+  bookmark,
+  checked,
+  detailLinkState,
+  index,
+  total,
+  draggable,
+  sortable,
+  onToggleFavorite,
+  onToggleSelect,
+  onMoveBookmark,
+}: BookmarkRowProps) {
+  const title = resolveBookmarkTitle(bookmark);
+  const sourceLabel = resolveBookmarkSourceLabel(bookmark);
+  const isImageFile = isImageFileBookmark(bookmark);
+
+  return (
+    <BookmarkItemWrapper
+      bookmark={bookmark}
+      title={title}
+      sortable={sortable}
+      draggable={draggable}
+    >
+      {(bindings) => (
+        <Box
+          ref={bindings.setNodeRef}
+          data-testid={`bookmark-item-${bookmark.id}`}
+          sx={{
+            transform: bindings.transformStyle,
+            transition: bindings.transitionStyle,
+            opacity: bindings.isDragging ? 0.5 : 1,
+          }}
+        >
+          {index > 0 ? <Divider /> : null}
+          <ListItem sx={{ py: 1, px: 2, gap: 1.5, display: 'flex', alignItems: 'center' }}>
+            <Checkbox
+              size="small"
+              checked={checked}
+              onChange={() => onToggleSelect(bookmark.id)}
+              slotProps={{
+                input: {
+                  'aria-label': `${SHARED_BOOKMARK_STRINGS.selectBookmarkLabel}: ${title}`,
+                },
+              }}
+              sx={{ p: 0.25 }}
+            />
+
+            {isImageFile ? (
+              <AuthenticatedFilePreview
+                bookmarkId={bookmark.id}
+                contentType={bookmark.contentType}
+                alt={title}
+                size={24}
+              />
+            ) : (
+              <BookmarkIconBadge
+                iconRef={bookmark.iconRef}
+                contentType={bookmark.contentType}
+                alt={title}
+                size={24}
+              />
+            )}
+
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={{ xs: 0.25, sm: 1.5 }}
+                sx={{ alignItems: { sm: 'baseline' }, minWidth: 0 }}
+              >
+                <Link
+                  component={RouterLink}
+                  to={`/bookmarks/${bookmark.id}`}
+                  state={detailLinkState}
+                  underline="hover"
+                  color="text.primary"
+                  variant="body2"
+                  noWrap
+                  sx={{ fontWeight: 600 }}
+                >
+                  {title}
+                </Link>
+                {sourceLabel ? (
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {sourceLabel}
+                  </Typography>
+                ) : null}
+              </Stack>
+            </Box>
+
+            <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexShrink: 0 }}>
+              <Box sx={{ display: { xs: 'none', md: 'inline-flex' }, gap: 0.75 }}>
+                <ArchiveTextChipLink bookmark={bookmark} />
+                <ReminderBadge reminderAt={bookmark.reminderAt} remindedAt={bookmark.remindedAt} />
+                <ContentTypeChip contentType={bookmark.contentType} />
+              </Box>
+              <BookmarkDragAndOrderControls
+                bookmark={bookmark}
+                title={title}
+                dragHandle={bindings.dragHandle}
+                draggable={draggable}
+                sortable={sortable}
+                index={index}
+                total={total}
+                onMoveBookmark={onMoveBookmark}
+              />
+              <FavoriteToggleButton
+                favorite={bookmark.favorite}
+                itemLabel={title}
+                onToggle={() => onToggleFavorite(bookmark)}
+              />
+              <BookmarkPrimaryAction bookmark={bookmark} />
+            </Stack>
+          </ListItem>
+        </Box>
+      )}
+    </BookmarkItemWrapper>
+  );
+});
 
 function HeadlinesLayout({
   items,
@@ -640,128 +882,211 @@ function HeadlinesLayout({
   sortableBookmarks = false,
   onMoveBookmark,
 }: Omit<BookmarkLayoutsProps, 'layoutMode'>) {
+  const detailLinkState = useBookmarkDetailNavigationState();
+  const total = items.length;
+
+  if (total > VIRTUALIZE_ITEM_THRESHOLD) {
+    return (
+      <Paper variant="outlined" data-testid="library-layout-headlines">
+        <Virtuoso
+          useWindowScroll
+          totalCount={total}
+          itemContent={(index) => {
+            const bookmark = items[index];
+            if (!bookmark) return null;
+            return (
+              <HeadlineRow
+                bookmark={bookmark}
+                checked={Boolean(selectedBookmarkIds[bookmark.id])}
+                detailLinkState={detailLinkState}
+                index={index}
+                total={total}
+                draggable={draggableBookmarks}
+                sortable={sortableBookmarks}
+                onToggleFavorite={onToggleFavorite}
+                onToggleSelect={onToggleSelect}
+                onMoveBookmark={onMoveBookmark}
+              />
+            );
+          }}
+        />
+      </Paper>
+    );
+  }
+
   return (
     <Paper variant="outlined" data-testid="library-layout-headlines">
       <List dense disablePadding>
-        {items.map((bookmark, index) => {
-          const title = resolveBookmarkTitle(bookmark);
-          const sourceLabel = resolveBookmarkSourceLabel(bookmark);
-          const checked = Boolean(selectedBookmarkIds[bookmark.id]);
-          const isImageFile = isImageFileBookmark(bookmark);
-
-          return (
-            <BookmarkItemWrapper
-              key={bookmark.id}
-              bookmark={bookmark}
-              title={title}
-              sortable={sortableBookmarks}
-              draggable={draggableBookmarks}
-            >
-              {(bindings) => (
-                <Box
-                  ref={bindings.setNodeRef}
-                  data-testid={`bookmark-item-${bookmark.id}`}
-                  sx={{
-                    transform: bindings.transformStyle,
-                    transition: bindings.transitionStyle,
-                    opacity: bindings.isDragging ? 0.5 : 1,
-                  }}
-                >
-                  {index > 0 ? <Divider /> : null}
-                  <ListItem sx={{ py: 1, px: 2, gap: 1.5, display: 'flex', alignItems: 'center' }}>
-                    <Checkbox
-                      size="small"
-                      checked={checked}
-                      onChange={() => onToggleSelect(bookmark.id)}
-                      slotProps={{
-                        input: {
-                          'aria-label': `${SHARED_BOOKMARK_STRINGS.selectBookmarkLabel}: ${title}`,
-                        },
-                      }}
-                      sx={{ p: 0.25 }}
-                    />
-
-                    {isImageFile ? (
-                      <AuthenticatedFilePreview
-                        bookmarkId={bookmark.id}
-                        contentType={bookmark.contentType}
-                        alt={title}
-                        size={24}
-                      />
-                    ) : (
-                      <BookmarkIconBadge
-                        iconRef={bookmark.iconRef}
-                        contentType={bookmark.contentType}
-                        alt={title}
-                        size={24}
-                      />
-                    )}
-
-                    <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                      <Stack
-                        direction={{ xs: 'column', sm: 'row' }}
-                        spacing={{ xs: 0.25, sm: 1.5 }}
-                        sx={{ alignItems: { sm: 'baseline' }, minWidth: 0 }}
-                      >
-                        <Link
-                          component={RouterLink}
-                          to={`/bookmarks/${bookmark.id}`}
-                          underline="hover"
-                          color="text.primary"
-                          variant="body2"
-                          noWrap
-                          sx={{ fontWeight: 600 }}
-                        >
-                          {title}
-                        </Link>
-                        {sourceLabel ? (
-                          <Typography variant="caption" color="text.secondary" noWrap>
-                            {sourceLabel}
-                          </Typography>
-                        ) : null}
-                      </Stack>
-                    </Box>
-
-                    <Stack
-                      direction="row"
-                      spacing={0.75}
-                      sx={{ alignItems: 'center', flexShrink: 0 }}
-                    >
-                      <Box sx={{ display: { xs: 'none', md: 'inline-flex' }, gap: 0.75 }}>
-                        <ArchiveTextChipLink bookmark={bookmark} />
-                        <ReminderBadge
-                          reminderAt={bookmark.reminderAt}
-                          remindedAt={bookmark.remindedAt}
-                        />
-                        <ContentTypeChip contentType={bookmark.contentType} />
-                      </Box>
-                      <BookmarkDragAndOrderControls
-                        bookmark={bookmark}
-                        title={title}
-                        dragHandle={bindings.dragHandle}
-                        draggable={draggableBookmarks}
-                        sortable={sortableBookmarks}
-                        index={index}
-                        total={items.length}
-                        onMoveBookmark={onMoveBookmark}
-                      />
-                      <FavoriteToggleButton
-                        favorite={bookmark.favorite}
-                        itemLabel={title}
-                        onToggle={() => onToggleFavorite(bookmark)}
-                      />
-                      <BookmarkPrimaryAction bookmark={bookmark} />
-                    </Stack>
-                  </ListItem>
-                </Box>
-              )}
-            </BookmarkItemWrapper>
-          );
-        })}
+        {items.map((bookmark, index) => (
+          <HeadlineRow
+            key={bookmark.id}
+            bookmark={bookmark}
+            checked={Boolean(selectedBookmarkIds[bookmark.id])}
+            detailLinkState={detailLinkState}
+            index={index}
+            total={total}
+            draggable={draggableBookmarks}
+            sortable={sortableBookmarks}
+            onToggleFavorite={onToggleFavorite}
+            onToggleSelect={onToggleSelect}
+            onMoveBookmark={onMoveBookmark}
+          />
+        ))}
       </List>
     </Paper>
   );
 }
+
+const MoodboardCard = memo(function MoodboardCard({
+  bookmark,
+  checked,
+  detailLinkState,
+  index,
+  total,
+  draggable,
+  sortable,
+  onToggleFavorite,
+  onToggleSelect,
+  onMoveBookmark,
+  onTagClick,
+}: BookmarkRowProps) {
+  const title = resolveBookmarkTitle(bookmark);
+  const sourceLabel = resolveBookmarkSourceLabel(bookmark);
+  const isImageFile = isImageFileBookmark(bookmark);
+
+  return (
+    <BookmarkItemWrapper
+      bookmark={bookmark}
+      title={title}
+      sortable={sortable}
+      draggable={draggable}
+    >
+      {(bindings) => (
+        <Card
+          ref={bindings.setNodeRef}
+          variant="outlined"
+          data-testid={`bookmark-item-${bookmark.id}`}
+          sx={{
+            breakInside: 'avoid',
+            mb: 2,
+            display: 'inline-block',
+            width: '100%',
+            transform: bindings.transformStyle,
+            transition: bindings.transitionStyle,
+            opacity: bindings.isDragging ? 0.5 : 1,
+          }}
+        >
+          <Box
+            sx={{
+              px: 2,
+              py: 1.5,
+              bgcolor: 'action.hover',
+              borderBottom: 1,
+              borderColor: 'divider',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 1,
+            }}
+          >
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
+              <Checkbox
+                size="small"
+                checked={checked}
+                onChange={() => onToggleSelect(bookmark.id)}
+                slotProps={{
+                  input: {
+                    'aria-label': `${SHARED_BOOKMARK_STRINGS.selectBookmarkLabel}: ${title}`,
+                  },
+                }}
+                sx={{ p: 0.25 }}
+              />
+              <BookmarkIconBadge
+                iconRef={bookmark.iconRef}
+                contentType={bookmark.contentType}
+                alt={title}
+                size={36}
+              />
+              {sourceLabel ? (
+                <Typography variant="caption" color="text.secondary" noWrap>
+                  {sourceLabel}
+                </Typography>
+              ) : null}
+            </Stack>
+
+            <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
+              <BookmarkDragAndOrderControls
+                bookmark={bookmark}
+                title={title}
+                dragHandle={bindings.dragHandle}
+                draggable={draggable}
+                sortable={sortable}
+                index={index}
+                total={total}
+                onMoveBookmark={onMoveBookmark}
+              />
+              <FavoriteToggleButton
+                favorite={bookmark.favorite}
+                itemLabel={title}
+                onToggle={() => onToggleFavorite(bookmark)}
+              />
+              <BookmarkPrimaryAction bookmark={bookmark} />
+            </Stack>
+          </Box>
+
+          <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+            {isImageFile ? (
+              <AuthenticatedFilePreview
+                bookmarkId={bookmark.id}
+                contentType={bookmark.contentType}
+                alt={title}
+                variant="banner"
+                maxHeight={180}
+              />
+            ) : null}
+
+            <Link
+              component={RouterLink}
+              to={`/bookmarks/${bookmark.id}`}
+              state={detailLinkState}
+              underline="hover"
+              color="text.primary"
+              variant="subtitle1"
+              sx={{ fontWeight: 600 }}
+            >
+              {title}
+            </Link>
+
+            {bookmark.excerpt ? (
+              <Typography variant="body2" color="text.secondary">
+                {bookmark.excerpt}
+              </Typography>
+            ) : null}
+
+            {bookmark.note ? (
+              <Paper variant="outlined" sx={{ p: 1.25, bgcolor: 'background.default' }}>
+                <Typography variant="caption" color="text.secondary">
+                  {bookmark.note}
+                </Typography>
+              </Paper>
+            ) : null}
+
+            <Stack
+              direction="row"
+              spacing={0.75}
+              sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
+            >
+              <ContentTypeChip contentType={bookmark.contentType} />
+              <ArchiveTextChipLink bookmark={bookmark} />
+              <ReminderBadge reminderAt={bookmark.reminderAt} remindedAt={bookmark.remindedAt} />
+              <TagChipList tags={bookmark.tags} onTagClick={onTagClick} />
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+    </BookmarkItemWrapper>
+  );
+});
 
 function MoodboardLayout({
   items,
@@ -773,6 +1098,8 @@ function MoodboardLayout({
   sortableBookmarks = false,
   onMoveBookmark,
 }: Omit<BookmarkLayoutsProps, 'layoutMode'>) {
+  const detailLinkState = useBookmarkDetailNavigationState();
+  const total = items.length;
   return (
     <Box
       data-testid="library-layout-moodboard"
@@ -781,148 +1108,22 @@ function MoodboardLayout({
         columnGap: 2,
       }}
     >
-      {items.map((bookmark, index) => {
-        const title = resolveBookmarkTitle(bookmark);
-        const sourceLabel = resolveBookmarkSourceLabel(bookmark);
-        const checked = Boolean(selectedBookmarkIds[bookmark.id]);
-        const isImageFile = isImageFileBookmark(bookmark);
-
-        return (
-          <BookmarkItemWrapper
-            key={bookmark.id}
-            bookmark={bookmark}
-            title={title}
-            sortable={sortableBookmarks}
-            draggable={draggableBookmarks}
-          >
-            {(bindings) => (
-              <Card
-                ref={bindings.setNodeRef}
-                variant="outlined"
-                data-testid={`bookmark-item-${bookmark.id}`}
-                sx={{
-                  breakInside: 'avoid',
-                  mb: 2,
-                  display: 'inline-block',
-                  width: '100%',
-                  transform: bindings.transformStyle,
-                  transition: bindings.transitionStyle,
-                  opacity: bindings.isDragging ? 0.5 : 1,
-                }}
-              >
-                <Box
-                  sx={{
-                    px: 2,
-                    py: 1.5,
-                    bgcolor: 'action.hover',
-                    borderBottom: 1,
-                    borderColor: 'divider',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 1,
-                  }}
-                >
-                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
-                    <Checkbox
-                      size="small"
-                      checked={checked}
-                      onChange={() => onToggleSelect(bookmark.id)}
-                      slotProps={{
-                        input: {
-                          'aria-label': `${SHARED_BOOKMARK_STRINGS.selectBookmarkLabel}: ${title}`,
-                        },
-                      }}
-                      sx={{ p: 0.25 }}
-                    />
-                    <BookmarkIconBadge
-                      iconRef={bookmark.iconRef}
-                      contentType={bookmark.contentType}
-                      alt={title}
-                      size={36}
-                    />
-                    {sourceLabel ? (
-                      <Typography variant="caption" color="text.secondary" noWrap>
-                        {sourceLabel}
-                      </Typography>
-                    ) : null}
-                  </Stack>
-
-                  <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
-                    <BookmarkDragAndOrderControls
-                      bookmark={bookmark}
-                      title={title}
-                      dragHandle={bindings.dragHandle}
-                      draggable={draggableBookmarks}
-                      sortable={sortableBookmarks}
-                      index={index}
-                      total={items.length}
-                      onMoveBookmark={onMoveBookmark}
-                    />
-                    <FavoriteToggleButton
-                      favorite={bookmark.favorite}
-                      itemLabel={title}
-                      onToggle={() => onToggleFavorite(bookmark)}
-                    />
-                    <BookmarkPrimaryAction bookmark={bookmark} />
-                  </Stack>
-                </Box>
-
-                <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
-                  {isImageFile ? (
-                    <AuthenticatedFilePreview
-                      bookmarkId={bookmark.id}
-                      contentType={bookmark.contentType}
-                      alt={title}
-                      variant="banner"
-                      maxHeight={180}
-                    />
-                  ) : null}
-
-                  <Link
-                    component={RouterLink}
-                    to={`/bookmarks/${bookmark.id}`}
-                    underline="hover"
-                    color="text.primary"
-                    variant="subtitle1"
-                    sx={{ fontWeight: 600 }}
-                  >
-                    {title}
-                  </Link>
-
-                  {bookmark.excerpt ? (
-                    <Typography variant="body2" color="text.secondary">
-                      {bookmark.excerpt}
-                    </Typography>
-                  ) : null}
-
-                  {bookmark.note ? (
-                    <Paper variant="outlined" sx={{ p: 1.25, bgcolor: 'background.default' }}>
-                      <Typography variant="caption" color="text.secondary">
-                        {bookmark.note}
-                      </Typography>
-                    </Paper>
-                  ) : null}
-
-                  <Stack
-                    direction="row"
-                    spacing={0.75}
-                    sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
-                  >
-                    <ContentTypeChip contentType={bookmark.contentType} />
-                    <ArchiveTextChipLink bookmark={bookmark} />
-                    <ReminderBadge
-                      reminderAt={bookmark.reminderAt}
-                      remindedAt={bookmark.remindedAt}
-                    />
-                    <TagChipList tags={bookmark.tags} onTagClick={onTagClick} />
-                  </Stack>
-                </CardContent>
-              </Card>
-            )}
-          </BookmarkItemWrapper>
-        );
-      })}
+      {items.map((bookmark, index) => (
+        <MoodboardCard
+          key={bookmark.id}
+          bookmark={bookmark}
+          checked={Boolean(selectedBookmarkIds[bookmark.id])}
+          detailLinkState={detailLinkState}
+          index={index}
+          total={total}
+          draggable={draggableBookmarks}
+          sortable={sortableBookmarks}
+          onToggleFavorite={onToggleFavorite}
+          onToggleSelect={onToggleSelect}
+          onMoveBookmark={onMoveBookmark}
+          onTagClick={onTagClick}
+        />
+      ))}
     </Box>
   );
 }
@@ -1001,7 +1202,7 @@ export function BookmarkLayouts({
 
   const strategy = layoutMode === 'grid' ? rectSortingStrategy : verticalListSortingStrategy;
   return (
-    <SortableContext items={items.map((item) => buildBookmarkDragId(item.id))} strategy={strategy}>
+    <SortableContext items={sortableDragIds(items)} strategy={strategy}>
       {layoutNode}
     </SortableContext>
   );

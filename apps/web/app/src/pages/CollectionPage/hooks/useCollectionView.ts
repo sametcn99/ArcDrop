@@ -6,7 +6,10 @@ import { ApiError, toApiError } from '../../../api/schemas/problem';
 import { reorderCollectionBookmarksAction } from '../../../shared/actions/collectionActions';
 import { useAppDnd } from '../../../shared/hooks/useAppDnd';
 import { useUrlState } from '../../../shared/hooks/useUrlState';
-import { getCollectionAncestors } from '../../../shared/utils/collectionTree';
+import {
+  getCollectionAncestors,
+  getSiblingCollections,
+} from '../../../shared/utils/collectionTree';
 import { buildBookmarkApiQuery } from '../../../shared/utils/searchFilters';
 import {
   buildCollectionViewKey,
@@ -79,7 +82,14 @@ export function useCollectionView() {
   const { setManualSortContext } = useAppDnd();
 
   const collection = collectionId ? (collectionsById[collectionId] ?? null) : null;
-  const ancestors = collectionId ? getCollectionAncestors(collectionsById, collectionId) : [];
+  const ancestors = useMemo(
+    () => (collectionId ? getCollectionAncestors(collectionsById, collectionId) : []),
+    [collectionId, collectionsById],
+  );
+  const childCollections = useMemo(
+    () => (collectionId ? getSiblingCollections(collectionsById, collectionId) : []),
+    [collectionId, collectionsById],
+  );
 
   useEffect(() => {
     if (collection) {
@@ -87,12 +97,18 @@ export function useCollectionView() {
     }
   }, [collection]);
 
-  const items = selectViewBookmarks(
-    {
-      views: viewState ? { [viewKey]: viewState } : {},
-      bookmarksById,
-    } as Parameters<typeof selectViewBookmarks>[0],
-    viewKey,
+  // Memoized so the array identity only changes when the view contents or a
+  // bookmark in it actually changes — memoized rows below then skip re-render.
+  const items = useMemo(
+    () =>
+      selectViewBookmarks(
+        {
+          views: viewState ? { [viewKey]: viewState } : {},
+          bookmarksById,
+        } as Parameters<typeof selectViewBookmarks>[0],
+        viewKey,
+      ),
+    [bookmarksById, viewKey, viewState],
   );
   const orderedIds = viewState?.ids ?? EMPTY_IDS;
 
@@ -301,6 +317,7 @@ export function useCollectionView() {
     collectionId,
     collection,
     ancestors,
+    childCollections,
     collectionNotFound,
     sort,
     viewKey,

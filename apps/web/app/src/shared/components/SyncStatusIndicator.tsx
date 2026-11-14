@@ -54,11 +54,10 @@ export function SyncStatusIndicator() {
     <Tooltip title={tooltipText}>
       <Chip
         size="small"
-        variant="outlined"
         color={cfg.color}
         icon={renderStatusIcon(connectionState, isBusy)}
-        label={`${cfg.label} · #${cursor}`}
-        aria-label={`${APP_STRINGS.syncStatusAriaPrefix}: ${cfg.label} (${cursor})`}
+        label={cfg.label}
+        aria-label={`${APP_STRINGS.syncStatusAriaPrefix}: ${cfg.label}`}
         data-testid="sync-status-indicator"
         data-sync-state={connectionState}
       />

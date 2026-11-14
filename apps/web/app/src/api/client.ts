@@ -87,6 +87,9 @@ export function parseContentDispositionFilename(header: string | null): string |
   return candidate.length > 0 ? candidate : null;
 }
 
+// localStorage key holding the rotating refresh token (see createApiClient).
+const REFRESH_TOKEN_STORAGE_KEY = 'arcdrop.refreshToken';
+
 function resolveDefaultBaseUrl(): string {
   const envUrl = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? '';
   return envUrl.trim().replace(/\/+$/, '');
@@ -170,10 +173,35 @@ export function createApiClient(config: ApiClientConfig = {}) {
   let baseUrl = (config.baseUrl ?? resolveDefaultBaseUrl()).replace(/\/+$/, '');
   const fetchImpl = config.fetchFn ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
 
-  // Strictly in-memory token storage (never persisted to localStorage/sessionStorage).
+  // The access token lives strictly in memory (never persisted). The refresh
+  // token is persisted to localStorage so a page reload can restore the
+  // session via POST /auth/refresh — safe here because the API rotates
+  // refresh tokens on every use and revokes the whole family when a rotated
+  // token is replayed (reuse detection, auth.service.ts).
   let tokens: TokenPair | null = null;
   let inFlightRefresh: Promise<AuthSession> | null = null;
   let hooks: ApiClientHooks = {};
+
+  function readPersistedRefreshToken(): string | null {
+    try {
+      return window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  function writePersistedRefreshToken(refreshToken: string | null): void {
+    try {
+      if (refreshToken) {
+        window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
+      } else {
+        window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+      }
+    } catch {
+      // Storage unavailable (private mode, sandboxed origin) — session simply
+      // won't survive a reload.
+    }
+  }
 
   function setHooks(nextHooks: ApiClientHooks): void {
     hooks = nextHooks;
@@ -196,10 +224,12 @@ export function createApiClient(config: ApiClientConfig = {}) {
 
   function setTokens(nextTokens: TokenPair | null): void {
     tokens = nextTokens ? { ...nextTokens } : null;
+    writePersistedRefreshToken(tokens?.refreshToken ?? null);
   }
 
   function clearTokens(): void {
     tokens = null;
+    writePersistedRefreshToken(null);
   }
 
   function getAccessToken(): string | null {
@@ -224,7 +254,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
         code: 'UNAUTHORIZED',
         detail: 'Session expired. Please sign in again.',
       });
-      tokens = null;
+      setTokens(null);
       hooks.onSessionExpired?.(error);
       throw error;
     }
@@ -238,15 +268,17 @@ export function createApiClient(config: ApiClientConfig = {}) {
           skipAuth: true,
           _retried: true,
         });
-        tokens = {
+        // setTokens (not a bare assignment) so the rotated refresh token is
+        // persisted for the next reload.
+        setTokens({
           accessToken: session.accessToken,
           refreshToken: session.refreshToken,
-        };
+        });
         hooks.onSessionRefreshed?.(session);
         return session;
       } catch (err) {
         const apiError = toApiError(err);
-        tokens = null;
+        setTokens(null);
         hooks.onSessionExpired?.(apiError);
         throw apiError;
       } finally {
@@ -397,6 +429,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
     clearTokens,
     getAccessToken,
     getRefreshToken,
+    getPersistedRefreshToken: readPersistedRefreshToken,
     refreshSession: executeRefreshSingleFlight,
     request: <T>(path: string, options?: RequestOptions<T>) => requestInternal<T>(path, options),
     getBlob: (path: string, options?: BlobRequestOptions) =>

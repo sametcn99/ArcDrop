@@ -15,17 +15,11 @@ export default function ClaimPage() {
       themeSwitcherLabel={APP_STRINGS.themeSwitcherLabel}
     >
       <ClaimForm
-        token={form.token}
-        onTokenChange={form.setToken}
+        urlToken={form.urlToken}
         hasTokenFromUrl={form.hasTokenFromUrl}
-        password={form.password}
-        onPasswordChange={form.setPassword}
-        confirmPassword={form.confirmPassword}
-        onConfirmPasswordChange={form.setConfirmPassword}
-        fieldErrors={form.fieldErrors}
         errorState={form.errorState}
         submitting={form.submitting}
-        onSubmit={(e) => void form.handleSubmit(e)}
+        onSubmit={(input) => void form.handleSubmit(input)}
       />
     </AuthPageShell>
   );

@@ -4,6 +4,7 @@ import DeleteOutlineOutlinedIcon from '@mui/icons-material/DeleteOutlineOutlined
 import DriveFileMoveOutlinedIcon from '@mui/icons-material/DriveFileMoveOutlined';
 import LabelOffOutlinedIcon from '@mui/icons-material/LabelOffOutlined';
 import LabelOutlinedIcon from '@mui/icons-material/LabelOutlined';
+import LibraryAddCheckOutlinedIcon from '@mui/icons-material/LibraryAddCheckOutlined';
 import RestoreFromTrashOutlinedIcon from '@mui/icons-material/RestoreFromTrashOutlined';
 import SelectAllOutlinedIcon from '@mui/icons-material/SelectAllOutlined';
 import Alert from '@mui/material/Alert';
@@ -11,6 +12,7 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
@@ -22,13 +24,17 @@ import FormGroup from '@mui/material/FormGroup';
 import FormLabel from '@mui/material/FormLabel';
 import IconButton from '@mui/material/IconButton';
 import LinearProgress from '@mui/material/LinearProgress';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Menu from '@mui/material/Menu';
+import MenuItem from '@mui/material/MenuItem';
 import Paper from '@mui/material/Paper';
 import Radio from '@mui/material/Radio';
 import RadioGroup from '@mui/material/RadioGroup';
 import Stack from '@mui/material/Stack';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import type {
   BulkBookmarksRequest,
   BulkBookmarksResponse,
@@ -49,6 +55,10 @@ import { TagAutocompleteInput } from './TagAutocompleteInput';
 export interface BulkActionToolbarProps {
   visibleBookmarkIds: string[];
   context?: 'library' | 'trash';
+  /** Total bookmarks matching the current view query (for the "Select all" option). */
+  totalCount?: number;
+  /** Selects every bookmark matching the view query, including ones not loaded in the list. */
+  onSelectAllMatching?: () => Promise<unknown>;
   onActionCompleted?: (response: BulkBookmarksResponse) => void;
 }
 
@@ -72,6 +82,8 @@ function flattenWithDepth(nodes: CollectionNode[], depth = 0): FlattenedCollecti
 export function BulkActionToolbar({
   visibleBookmarkIds,
   context = 'library',
+  totalCount,
+  onSelectAllMatching,
   onActionCompleted,
 }: BulkActionToolbarProps) {
   const selectedBookmarkIds = useLibraryStore((s) => s.selectedBookmarkIds);
@@ -129,6 +141,88 @@ export function BulkActionToolbar({
   const [tagsValidationError, setTagsValidationError] = useState<string | null>(null);
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  const [selectAllAnchorEl, setSelectAllAnchorEl] = useState<HTMLElement | null>(null);
+  const [selectAllBusy, setSelectAllBusy] = useState(false);
+
+  const openSelectAllMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    setSelectAllAnchorEl(event.currentTarget);
+  };
+
+  const handleSelectInView = () => {
+    setSelectAllAnchorEl(null);
+    selectBookmarks(visibleBookmarkIds);
+  };
+
+  const handleSelectAllMatching = async () => {
+    setSelectAllAnchorEl(null);
+    if (!onSelectAllMatching) return;
+    setSelectAllBusy(true);
+    try {
+      // Selection + success/cap/error toasts are handled by the action.
+      await onSelectAllMatching();
+    } catch {
+      // already surfaced by the action
+    } finally {
+      setSelectAllBusy(false);
+    }
+  };
+
+  const selectAllButton = (disabled: boolean) => (
+    <Button
+      size="small"
+      startIcon={<SelectAllOutlinedIcon fontSize="small" />}
+      disabled={disabled || selectAllBusy}
+      onClick={openSelectAllMenu}
+    >
+      {SHARED_BULK_STRINGS.selectAllLabel}
+    </Button>
+  );
+
+  const selectAllMenu = (
+    <Menu
+      open={Boolean(selectAllAnchorEl)}
+      anchorEl={selectAllAnchorEl}
+      onClose={() => setSelectAllAnchorEl(null)}
+      anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+      transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+    >
+      <MenuItem
+        onClick={handleSelectInView}
+        disabled={selectAllBusy}
+        data-testid="bulk-select-in-view-option"
+      >
+        <ListItemIcon>
+          <SelectAllOutlinedIcon fontSize="small" />
+        </ListItemIcon>
+        <ListItemText>
+          {visibleBookmarkIds.length > 0
+            ? `${SHARED_BULK_STRINGS.selectAllLabel} (${visibleBookmarkIds.length})`
+            : SHARED_BULK_STRINGS.selectAllLabel}
+        </ListItemText>
+      </MenuItem>
+      {onSelectAllMatching ? (
+        <MenuItem
+          onClick={() => void handleSelectAllMatching()}
+          disabled={selectAllBusy}
+          data-testid="bulk-select-all-option"
+        >
+          <ListItemIcon>
+            {selectAllBusy ? (
+              <CircularProgress size={16} aria-hidden />
+            ) : (
+              <LibraryAddCheckOutlinedIcon fontSize="small" />
+            )}
+          </ListItemIcon>
+          <ListItemText>
+            {typeof totalCount === 'number'
+              ? `${SHARED_BULK_STRINGS.selectAllMatchingLabel} (${totalCount})`
+              : SHARED_BULK_STRINGS.selectAllMatchingLabel}
+          </ListItemText>
+        </MenuItem>
+      ) : null}
+    </Menu>
+  );
 
   const runBulkRequest = async (request: BulkBookmarksRequest): Promise<boolean> => {
     setBusy(true);
@@ -223,18 +317,13 @@ export function BulkActionToolbar({
   };
 
   if (selectedCount === 0 && !summaryMessage && !inlineError && !rateLimitState) {
-    if (visibleBookmarkIds.length === 0) {
+    if (visibleBookmarkIds.length === 0 && !onSelectAllMatching) {
       return null;
     }
     return (
       <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <Button
-          size="small"
-          startIcon={<SelectAllOutlinedIcon fontSize="small" />}
-          onClick={() => selectBookmarks(visibleBookmarkIds)}
-        >
-          {SHARED_BULK_STRINGS.selectAllLabel}
-        </Button>
+        {selectAllButton(false)}
+        {selectAllMenu}
       </Box>
     );
   }
@@ -272,16 +361,9 @@ export function BulkActionToolbar({
                   }`}
                   data-testid="bulk-selected-count"
                 />
-                {visibleBookmarkIds.length > 0 ? (
-                  <Button
-                    size="small"
-                    startIcon={<SelectAllOutlinedIcon fontSize="small" />}
-                    disabled={busy}
-                    onClick={() => selectBookmarks(visibleBookmarkIds)}
-                  >
-                    {SHARED_BULK_STRINGS.selectAllLabel}
-                  </Button>
-                ) : null}
+                {visibleBookmarkIds.length > 0 || onSelectAllMatching
+                  ? selectAllButton(busy)
+                  : null}
                 <Button
                   size="small"
                   startIcon={<CloseIcon fontSize="small" />}
@@ -404,6 +486,8 @@ export function BulkActionToolbar({
         </Paper>
       ) : null}
 
+      {selectAllMenu}
+
       {summaryMessage ? (
         <Alert
           severity="success"
@@ -482,139 +566,145 @@ export function BulkActionToolbar({
       ) : null}
 
       {/* Move to collections dialog */}
-      <Dialog
-        open={moveDialogOpen}
-        onClose={() => (!busy ? setMoveDialogOpen(false) : undefined)}
-        fullWidth
-        maxWidth="sm"
-      >
-        <DialogTitle>{SHARED_BULK_STRINGS.moveDialogTitle}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <FormControl component="fieldset">
-              <FormLabel component="legend">{SHARED_BULK_STRINGS.moveModeLabel}</FormLabel>
-              <RadioGroup
-                value={moveMode}
-                onChange={(e) => {
-                  setMoveMode(e.target.value as BulkMoveMode);
-                  setMoveValidationError(null);
-                }}
-              >
-                <FormControlLabel
-                  value="union"
-                  control={<Radio size="small" />}
-                  label={SHARED_BULK_STRINGS.moveModeUnionLabel}
-                />
-                <FormControlLabel
-                  value="assign"
-                  control={<Radio size="small" />}
-                  label={SHARED_BULK_STRINGS.moveModeAssignLabel}
-                />
-              </RadioGroup>
-            </FormControl>
+      {moveDialogOpen ? (
+        <Dialog
+          open={moveDialogOpen}
+          onClose={() => (!busy ? setMoveDialogOpen(false) : undefined)}
+          fullWidth
+          maxWidth="sm"
+        >
+          <DialogTitle>{SHARED_BULK_STRINGS.moveDialogTitle}</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <FormControl component="fieldset">
+                <FormLabel component="legend">{SHARED_BULK_STRINGS.moveModeLabel}</FormLabel>
+                <RadioGroup
+                  value={moveMode}
+                  onChange={(e) => {
+                    setMoveMode(e.target.value as BulkMoveMode);
+                    setMoveValidationError(null);
+                  }}
+                >
+                  <FormControlLabel
+                    value="union"
+                    control={<Radio size="small" />}
+                    label={SHARED_BULK_STRINGS.moveModeUnionLabel}
+                  />
+                  <FormControlLabel
+                    value="assign"
+                    control={<Radio size="small" />}
+                    label={SHARED_BULK_STRINGS.moveModeAssignLabel}
+                  />
+                </RadioGroup>
+              </FormControl>
 
-            <Box>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                {SHARED_BULK_STRINGS.moveCollectionsHeading}
-              </Typography>
-              {collectionOptions.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  {SHARED_BULK_STRINGS.moveNoCollectionsHint}
+              <Box>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  {SHARED_BULK_STRINGS.moveCollectionsHeading}
                 </Typography>
-              ) : (
-                <FormGroup>
-                  {collectionOptions.map((col) => (
-                    <FormControlLabel
-                      key={col.id}
-                      sx={{ pl: col.depth * 2 }}
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={moveCollectionIds.includes(col.id)}
-                          onChange={() => handleToggleMoveCollection(col.id)}
-                        />
-                      }
-                      label={col.title}
-                    />
-                  ))}
-                </FormGroup>
-              )}
-            </Box>
+                {collectionOptions.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    {SHARED_BULK_STRINGS.moveNoCollectionsHint}
+                  </Typography>
+                ) : (
+                  <FormGroup>
+                    {collectionOptions.map((col) => (
+                      <FormControlLabel
+                        key={col.id}
+                        sx={{ pl: col.depth * 2 }}
+                        control={
+                          <Checkbox
+                            size="small"
+                            checked={moveCollectionIds.includes(col.id)}
+                            onChange={() => handleToggleMoveCollection(col.id)}
+                          />
+                        }
+                        label={col.title}
+                      />
+                    ))}
+                  </FormGroup>
+                )}
+              </Box>
 
-            {moveValidationError ? <Alert severity="error">{moveValidationError}</Alert> : null}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button disabled={busy} onClick={() => setMoveDialogOpen(false)}>
-            {SHARED_BULK_STRINGS.cancelLabel}
-          </Button>
-          <Button variant="contained" disabled={busy} onClick={() => void handleSubmitMove()}>
-            {SHARED_BULK_STRINGS.moveSubmitLabel}
-          </Button>
-        </DialogActions>
-      </Dialog>
+              {moveValidationError ? <Alert severity="error">{moveValidationError}</Alert> : null}
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button disabled={busy} onClick={() => setMoveDialogOpen(false)}>
+              {SHARED_BULK_STRINGS.cancelLabel}
+            </Button>
+            <Button variant="contained" disabled={busy} onClick={() => void handleSubmitMove()}>
+              {SHARED_BULK_STRINGS.moveSubmitLabel}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      ) : null}
 
       {/* Add / remove tags dialog */}
-      <Dialog
-        open={tagsDialogOpen}
-        onClose={() => (!busy ? setTagsDialogOpen(false) : undefined)}
-        fullWidth
-        maxWidth="sm"
-      >
-        <DialogTitle>
-          {tagsDialogMode === 'addTags'
-            ? SHARED_BULK_STRINGS.addTagsDialogTitle
-            : SHARED_BULK_STRINGS.removeTagsDialogTitle}
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <TagAutocompleteInput
-              value={tagInputs}
-              onChange={(next) => {
-                setTagInputs(next);
-                setTagsValidationError(null);
-              }}
-              disabled={busy}
-              error={Boolean(tagsValidationError)}
-              helperText={tagsValidationError ?? undefined}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button disabled={busy} onClick={() => setTagsDialogOpen(false)}>
-            {SHARED_BULK_STRINGS.cancelLabel}
-          </Button>
-          <Button variant="contained" disabled={busy} onClick={() => void handleSubmitTags()}>
-            {SHARED_BULK_STRINGS.tagsApplyLabel}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {tagsDialogOpen ? (
+        <Dialog
+          open={tagsDialogOpen}
+          onClose={() => (!busy ? setTagsDialogOpen(false) : undefined)}
+          fullWidth
+          maxWidth="sm"
+        >
+          <DialogTitle>
+            {tagsDialogMode === 'addTags'
+              ? SHARED_BULK_STRINGS.addTagsDialogTitle
+              : SHARED_BULK_STRINGS.removeTagsDialogTitle}
+          </DialogTitle>
+          <DialogContent>
+            <Stack spacing={2} sx={{ pt: 1 }}>
+              <TagAutocompleteInput
+                value={tagInputs}
+                onChange={(next) => {
+                  setTagInputs(next);
+                  setTagsValidationError(null);
+                }}
+                disabled={busy}
+                error={Boolean(tagsValidationError)}
+                helperText={tagsValidationError ?? undefined}
+              />
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button disabled={busy} onClick={() => setTagsDialogOpen(false)}>
+              {SHARED_BULK_STRINGS.cancelLabel}
+            </Button>
+            <Button variant="contained" disabled={busy} onClick={() => void handleSubmitTags()}>
+              {SHARED_BULK_STRINGS.tagsApplyLabel}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      ) : null}
 
       {/* Delete permanently confirmation dialog */}
-      <Dialog
-        open={deleteConfirmOpen}
-        onClose={() => (!busy ? setDeleteConfirmOpen(false) : undefined)}
-        fullWidth
-        maxWidth="xs"
-      >
-        <DialogTitle>{SHARED_BULK_STRINGS.deleteConfirmTitle}</DialogTitle>
-        <DialogContent>
-          <DialogContentText>{SHARED_BULK_STRINGS.deleteConfirmDescription}</DialogContentText>
-        </DialogContent>
-        <DialogActions>
-          <Button disabled={busy} onClick={() => setDeleteConfirmOpen(false)}>
-            {SHARED_BULK_STRINGS.cancelLabel}
-          </Button>
-          <Button
-            variant="contained"
-            color="error"
-            disabled={busy}
-            onClick={() => void handleConfirmDelete()}
-          >
-            {SHARED_BULK_STRINGS.deleteConfirmSubmit}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {deleteConfirmOpen ? (
+        <Dialog
+          open={deleteConfirmOpen}
+          onClose={() => (!busy ? setDeleteConfirmOpen(false) : undefined)}
+          fullWidth
+          maxWidth="xs"
+        >
+          <DialogTitle>{SHARED_BULK_STRINGS.deleteConfirmTitle}</DialogTitle>
+          <DialogContent>
+            <DialogContentText>{SHARED_BULK_STRINGS.deleteConfirmDescription}</DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button disabled={busy} onClick={() => setDeleteConfirmOpen(false)}>
+              {SHARED_BULK_STRINGS.cancelLabel}
+            </Button>
+            <Button
+              variant="contained"
+              color="error"
+              disabled={busy}
+              onClick={() => void handleConfirmDelete()}
+            >
+              {SHARED_BULK_STRINGS.deleteConfirmSubmit}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      ) : null}
     </Stack>
   );
 }

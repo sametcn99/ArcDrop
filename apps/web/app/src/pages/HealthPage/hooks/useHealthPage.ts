@@ -39,6 +39,14 @@ export function useHealthPage() {
 
   const hasLoadedOnceRef = useRef(false);
   const lastSyncCursorRef = useRef(syncCursor);
+  // Auto-refresh used to fire the full duplicates+broken-links fetch on EVERY
+  // sync cursor bump while the page was open — one external mutation can
+  // arrive as several back-to-back cursor bumps, each triggering a fetch.
+  // Coalesce bursts with a short trailing debounce and skip hidden tabs; the
+  // refresh button always fetches immediately.
+  const AUTO_REFRESH_DEBOUNCE_MS = 800;
+  const autoRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const missedRefreshWhileHiddenRef = useRef(false);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -61,6 +69,38 @@ export function useHealthPage() {
     }
   }, [upsertBookmark]);
 
+  const scheduleAutoRefresh = useCallback(() => {
+    if (autoRefreshTimerRef.current !== null) {
+      clearTimeout(autoRefreshTimerRef.current);
+    }
+    autoRefreshTimerRef.current = setTimeout(() => {
+      autoRefreshTimerRef.current = null;
+      void fetchAll();
+    }, AUTO_REFRESH_DEBOUNCE_MS);
+  }, [fetchAll]);
+
+  useEffect(
+    () => () => {
+      if (autoRefreshTimerRef.current !== null) {
+        clearTimeout(autoRefreshTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && missedRefreshWhileHiddenRef.current) {
+        missedRefreshWhileHiddenRef.current = false;
+        scheduleAutoRefresh();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [scheduleAutoRefresh]);
+
   useEffect(() => {
     if (isBootstrapping) return;
     if (
@@ -78,9 +118,13 @@ export function useHealthPage() {
     }
     if (syncCursor !== lastSyncCursorRef.current) {
       lastSyncCursorRef.current = syncCursor;
-      void fetchAll();
+      if (typeof document !== 'undefined' && document.hidden) {
+        missedRefreshWhileHiddenRef.current = true;
+        return;
+      }
+      scheduleAutoRefresh();
     }
-  }, [fetchAll, isBootstrapping, lastSyncError, lastSyncedAt, syncCursor]);
+  }, [fetchAll, isBootstrapping, lastSyncError, lastSyncedAt, scheduleAutoRefresh, syncCursor]);
 
   useEffect(() => {
     if (isBootstrapping || userRole !== 'admin') {

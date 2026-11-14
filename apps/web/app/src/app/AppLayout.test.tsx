@@ -58,20 +58,20 @@ describe('AppLayout and router shell', () => {
     await waitFor(() => {
       expect(indicator).toHaveAttribute('data-sync-state', 'live');
     });
-    expect(indicator).toHaveTextContent('Live · #10');
+    expect(indicator).toHaveTextContent('Live');
 
     act(() => {
       useSyncStore.getState().setConnectionState('polling');
       useSyncStore.getState().setCursor('14');
     });
     expect(indicator).toHaveAttribute('data-sync-state', 'polling');
-    expect(indicator).toHaveTextContent('Polling · #14');
+    expect(indicator).toHaveTextContent('Polling');
 
     act(() => {
       useSyncStore.getState().setConnectionState('offline');
     });
     expect(indicator).toHaveAttribute('data-sync-state', 'offline');
-    expect(indicator).toHaveTextContent('Offline · #14');
+    expect(indicator).toHaveTextContent('Offline');
   }, 60_000);
 
   it('toggles desktop sidebar collapse and opens the account menu', async () => {
@@ -93,6 +93,43 @@ describe('AppLayout and router shell', () => {
     await user.click(screen.getByRole('button', { name: 'member@arcdrop.test' }));
     expect(await screen.findByRole('menuitem', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
+  }, 60_000);
+
+  it('resizes and persists the desktop sidebar width via the handle', async () => {
+    const user = userEvent.setup({ delay: null });
+    window.localStorage.setItem('arcdrop.sidebarWidth', '400');
+    useAuthStore.getState().setSession(
+      makeMockSession({
+        user: { email: 'resizer@arcdrop.test' },
+      }),
+    );
+    renderAtRoute('/');
+    await waitForBootstrapReady();
+
+    const root = document.querySelector('[style*="--arcdrop-sidebar-width"]') as HTMLElement;
+    expect(getComputedStyle(root).getPropertyValue('--arcdrop-sidebar-width')).toBe('400px');
+
+    const handle = screen.getByTestId('sidebar-resize-handle');
+    handle.focus();
+
+    await user.keyboard('{ArrowLeft}');
+    expect(getComputedStyle(root).getPropertyValue('--arcdrop-sidebar-width')).toBe('376px');
+    expect(window.localStorage.getItem('arcdrop.sidebarWidth')).toBe('376');
+
+    // Dragging past the clamp bounds is capped at the max width
+    act(() => {
+      handle.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, clientX: 376, clientY: 300 }),
+      );
+    });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 900 }));
+    });
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointerup', { clientX: 900 }));
+    });
+    expect(getComputedStyle(root).getPropertyValue('--arcdrop-sidebar-width')).toBe('480px');
+    expect(window.localStorage.getItem('arcdrop.sidebarWidth')).toBe('480');
   }, 60_000);
 
   it('toggles theme from the AppBar ThemeSwitcher', async () => {

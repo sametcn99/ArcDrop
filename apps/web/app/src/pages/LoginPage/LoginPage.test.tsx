@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { apiClient } from '../../api/client';
 import { appRoutes } from '../../app/routes';
 import { SnackbarHost } from '../../shared/components/SnackbarHost';
@@ -24,9 +24,8 @@ function renderAtLogin(
 }
 
 describe('LoginPage', () => {
-  it('logs in with valid credentials, keeps tokens in memory only, and navigates to library', async () => {
+  it('logs in with valid credentials, persists the refresh token for session restore, and navigates to library', async () => {
     const user = userEvent.setup();
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
 
     renderAtLogin();
 
@@ -38,8 +37,13 @@ describe('LoginPage', () => {
     expect(useAuthStore.getState().status).toBe('authenticated');
     expect(useAuthStore.getState().user?.email).toBe('alice@arcdrop.test');
     expect(apiClient.getAccessToken()).toBe('access-token-login');
-    expect(setItemSpy).not.toHaveBeenCalled();
-    expect(window.localStorage.length).toBe(0);
+    // Refresh token persisted so a reload can restore the session; the
+    // access token itself never touches storage.
+    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBe('refresh-token-login');
+    const storedValues = Object.keys(window.localStorage)
+      .map((key) => window.localStorage.getItem(key) ?? '')
+      .join('|');
+    expect(storedValues).not.toContain('access-token-login');
     expect(window.sessionStorage.length).toBe(0);
   });
 

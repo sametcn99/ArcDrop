@@ -21,6 +21,60 @@ function withSuspense(node: ReactNode): ReactNode {
   return <Suspense fallback={<RouteLoader />}>{node}</Suspense>;
 }
 
+/**
+ * Routes rendered inside AppLayout. Also mounted by AppLayout itself with a
+ * "background" location so the bookmark detail drawer can stay overlaid on
+ * the list the user opened it from (see AppLayout's background-location
+ * handling).
+ */
+export const appChildRoutes: RouteObject[] = [
+  {
+    index: true,
+    element: withSuspense(<LibraryPage />),
+  },
+  {
+    path: 'quick-add',
+    element: withSuspense(<LibraryPage />),
+  },
+  {
+    path: 'collections/:collectionId',
+    element: withSuspense(<CollectionPage />),
+  },
+  {
+    path: 'bookmarks/:bookmarkId',
+    element: withSuspense(<BookmarkDetailPage />),
+  },
+  {
+    path: 'trash',
+    element: withSuspense(<TrashPage />),
+  },
+  {
+    path: 'health',
+    element: withSuspense(<HealthPage />),
+  },
+  {
+    path: 'portability',
+    element: withSuspense(<PortabilityPage />),
+  },
+  {
+    path: 'settings',
+    element: withSuspense(<SettingsPage />),
+  },
+  {
+    element: <RequireAdmin />,
+    children: [
+      {
+        path: 'admin',
+        element: withSuspense(<AdminPage />),
+      },
+    ],
+  },
+  {
+    path: '*',
+    element: <NotFoundPage />,
+  },
+];
+
 export const appRoutes: RouteObject[] = [
   {
     element: <PublicOnly />,
@@ -49,53 +103,7 @@ export const appRoutes: RouteObject[] = [
       {
         path: '/',
         element: <AppLayout />,
-        children: [
-          {
-            index: true,
-            element: withSuspense(<LibraryPage />),
-          },
-          {
-            path: 'quick-add',
-            element: withSuspense(<LibraryPage />),
-          },
-          {
-            path: 'collections/:collectionId',
-            element: withSuspense(<CollectionPage />),
-          },
-          {
-            path: 'bookmarks/:bookmarkId',
-            element: withSuspense(<BookmarkDetailPage />),
-          },
-          {
-            path: 'trash',
-            element: withSuspense(<TrashPage />),
-          },
-          {
-            path: 'health',
-            element: withSuspense(<HealthPage />),
-          },
-          {
-            path: 'portability',
-            element: withSuspense(<PortabilityPage />),
-          },
-          {
-            path: 'settings',
-            element: withSuspense(<SettingsPage />),
-          },
-          {
-            element: <RequireAdmin />,
-            children: [
-              {
-                path: 'admin',
-                element: withSuspense(<AdminPage />),
-              },
-            ],
-          },
-          {
-            path: '*',
-            element: <NotFoundPage />,
-          },
-        ],
+        children: appChildRoutes,
       },
     ],
   },

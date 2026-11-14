@@ -15,6 +15,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router';
+import { useBookmarkDetailNavigationState } from '../../../shared/hooks/useBookmarkDetailNavigationState';
 import type { Bookmark, TagSummary } from '../../../api/schemas/bookmarks';
 import type { DuplicateGroup, ResolveDuplicatesResponse } from '../../../api/schemas/health';
 import { SHARED_BOOKMARK_STRINGS } from '../../../shared/strings';
@@ -48,6 +49,7 @@ function DuplicateCandidateCard({
   onToggleTrash: () => void;
 }) {
   const title = bookmark.title ?? bookmark.url ?? SHARED_BOOKMARK_STRINGS.untitledBookmark;
+  const detailLinkState = useBookmarkDetailNavigationState();
 
   return (
     <Card
@@ -82,6 +84,7 @@ function DuplicateCandidateCard({
         <Link
           component={RouterLink}
           to={`/bookmarks/${bookmark.id}`}
+          state={detailLinkState}
           underline="hover"
           color="text.primary"
           variant="subtitle2"

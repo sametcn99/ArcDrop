@@ -11,7 +11,7 @@ import type {
   UpdateCollectionRequest,
 } from '../../api/schemas/collections';
 import { ApiError, toApiError } from '../../api/schemas/problem';
-import { useLibraryStore } from '../../stores/libraryStore';
+import { COLLECTION_VIEW_PREFIX, useLibraryStore } from '../../stores/libraryStore';
 import { useUiStore } from '../../stores/uiStore';
 import { SHARED_COLLECTION_STRINGS } from '../strings';
 import { flattenCollectionNodes } from '../utils/collectionTree';
@@ -261,10 +261,25 @@ export async function addBookmarkToCollectionAction(
     });
     const store = useLibraryStore.getState();
     store.addBookmarkToCollectionViews(collectionId, bookmark);
-    await Promise.allSettled([
-      refreshCollectionsTreeAction(),
-      bookmarksApi.stats().then((stats) => useLibraryStore.getState().hydrateStats(stats)),
-    ]);
+    // Collection snapshots in sync changes do not carry bookmark counts, so
+    // keep the sidebar count converging optimistically instead of refetching
+    // the whole collection tree after every drag-drop. Skip the bump when a
+    // loaded view already lists the bookmark (union move onto its current
+    // collection must not double-count).
+    const viewPrefix = `${COLLECTION_VIEW_PREFIX}${collectionId}|`;
+    const alreadyMember = Object.entries(store.views).some(
+      ([key, view]) =>
+        key.startsWith(viewPrefix) && !key.includes('?') && view.ids.includes(bookmark.id),
+    );
+    if (!alreadyMember) {
+      store.adjustCollectionBookmarkCount(collectionId, 1);
+    }
+    // Only `stats.unassigned` can change here (membership is not on the
+    // bookmark DTO), so a single stats GET replaces the old tree+stats pair.
+    void bookmarksApi
+      .stats()
+      .then((stats) => useLibraryStore.getState().hydrateStats(stats))
+      .catch(() => undefined);
     useUiStore.getState().enqueueSnackbar({
       message: SHARED_COLLECTION_STRINGS.toastBookmarkAdded,
       severity: 'success',

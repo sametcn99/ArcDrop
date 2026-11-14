@@ -3,6 +3,7 @@ import VisibilityOutlinedIcon from '@mui/icons-material/VisibilityOutlined';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -10,37 +11,40 @@ import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { useState, type FormEvent } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { useState } from 'react';
+import { useForm } from 'react-hook-form';
 import { Link as RouterLink } from 'react-router';
-import type { BootstrapFieldErrors } from '../hooks/useBootstrapForm';
+import { bootstrapRequestSchema } from '../../../api/schemas/auth';
 import { BOOTSTRAP_PAGE_STRINGS } from '../strings';
 
 export interface BootstrapFormProps {
-  email: string;
-  onEmailChange: (value: string) => void;
-  password: string;
-  onPasswordChange: (value: string) => void;
-  confirmPassword: string;
-  onConfirmPasswordChange: (value: string) => void;
-  fieldErrors: BootstrapFieldErrors;
   errorMessage: string | null;
   submitting: boolean;
-  onSubmit: (event: FormEvent) => void;
+  onSubmit: (input: { email: string; password: string }) => void;
 }
 
-export function BootstrapForm({
-  email,
-  onEmailChange,
-  password,
-  onPasswordChange,
-  confirmPassword,
-  onConfirmPasswordChange,
-  fieldErrors,
-  errorMessage,
-  submitting,
-  onSubmit,
-}: BootstrapFormProps) {
+export function BootstrapForm({ errorMessage, submitting, onSubmit }: BootstrapFormProps) {
   const [showPassword, setShowPassword] = useState(false);
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<{ email: string; password: string; confirmPassword: string }>({
+    resolver: zodResolver(
+      bootstrapRequestSchema
+        .extend({ confirmPassword: z.string() })
+        .refine((values) => values.password === values.confirmPassword, {
+          path: ['confirmPassword'],
+          message: BOOTSTRAP_PAGE_STRINGS.passwordMismatchError,
+        }),
+    ),
+    defaultValues: { email: '', password: '', confirmPassword: '' },
+    mode: 'onTouched',
+  });
+
+  const busy = submitting || isSubmitting;
 
   return (
     <Stack spacing={2.5}>
@@ -50,7 +54,13 @@ export function BootstrapForm({
         </Alert>
       ) : null}
 
-      <Box component="form" onSubmit={onSubmit} noValidate>
+      <Box
+        component="form"
+        onSubmit={handleSubmit((values) =>
+          onSubmit({ email: values.email, password: values.password }),
+        )}
+        noValidate
+      >
         <Stack spacing={2}>
           <TextField
             id="bootstrap-email"
@@ -60,11 +70,10 @@ export function BootstrapForm({
             autoFocus
             fullWidth
             required
-            value={email}
-            onChange={(e) => onEmailChange(e.target.value)}
-            error={Boolean(fieldErrors.email)}
-            helperText={fieldErrors.email}
-            disabled={submitting}
+            {...register('email')}
+            error={Boolean(errors.email)}
+            helperText={errors.email?.message}
+            disabled={busy}
           />
 
           <TextField
@@ -74,11 +83,10 @@ export function BootstrapForm({
             autoComplete="new-password"
             fullWidth
             required
-            value={password}
-            onChange={(e) => onPasswordChange(e.target.value)}
-            error={Boolean(fieldErrors.password)}
-            helperText={fieldErrors.password ?? BOOTSTRAP_PAGE_STRINGS.passwordHelper}
-            disabled={submitting}
+            {...register('password')}
+            error={Boolean(errors.password)}
+            helperText={errors.password?.message ?? BOOTSTRAP_PAGE_STRINGS.passwordHelper}
+            disabled={busy}
             slotProps={{
               input: {
                 endAdornment: (
@@ -104,17 +112,23 @@ export function BootstrapForm({
             autoComplete="new-password"
             fullWidth
             required
-            value={confirmPassword}
-            onChange={(e) => onConfirmPasswordChange(e.target.value)}
-            error={Boolean(fieldErrors.confirmPassword)}
-            helperText={fieldErrors.confirmPassword}
-            disabled={submitting}
+            {...register('confirmPassword')}
+            error={Boolean(errors.confirmPassword)}
+            helperText={errors.confirmPassword?.message}
+            disabled={busy}
           />
 
-          <Button type="submit" variant="contained" size="large" fullWidth disabled={submitting}>
-            {submitting
-              ? BOOTSTRAP_PAGE_STRINGS.submittingLabel
-              : BOOTSTRAP_PAGE_STRINGS.submitLabel}
+          <Button
+            type="submit"
+            variant="contained"
+            size="large"
+            fullWidth
+            disabled={busy}
+            startIcon={
+              busy ? <CircularProgress size={18} color="inherit" aria-hidden /> : undefined
+            }
+          >
+            {busy ? BOOTSTRAP_PAGE_STRINGS.submittingLabel : BOOTSTRAP_PAGE_STRINGS.submitLabel}
           </Button>
         </Stack>
       </Box>

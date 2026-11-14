@@ -164,27 +164,37 @@ describe('API client & auth endpoints', () => {
     expect(client.getRefreshToken()).toBeNull();
   });
 
-  it('never writes access or refresh tokens to localStorage or sessionStorage', async () => {
-    const localSetSpy = vi.spyOn(Storage.prototype, 'setItem');
+  it('persists the rotating refresh token to localStorage, never the access token', async () => {
+    let rotationCount = 0;
+    server.use(
+      http.post('*/api/v1/auth/refresh', () => {
+        rotationCount += 1;
+        return HttpResponse.json(
+          makeMockSession({
+            accessToken: `access-rotated-${rotationCount}`,
+            refreshToken: `refresh-rotated-${rotationCount}`,
+          }),
+        );
+      }),
+    );
+
     const client = createApiClient();
-    const authApi = createAuthApi(client);
+    client.setTokens({ accessToken: 'access-current', refreshToken: 'refresh-stored-1' });
 
-    const outcome = await authApi.login({
-      email: 'alice@arcdrop.test',
-      password: 'password-1234',
-    });
-    expect(outcome.kind).toBe('authenticated');
-    if (outcome.kind === 'authenticated') {
-      client.setTokens({
-        accessToken: outcome.session.accessToken,
-        refreshToken: outcome.session.refreshToken,
-      });
-    }
+    // Refresh token persisted so a reload can restore the session...
+    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBe('refresh-stored-1');
+    // ...while the access token never touches storage.
+    const storedValues = Object.keys(window.localStorage)
+      .map((key) => window.localStorage.getItem(key) ?? '')
+      .join('|');
+    expect(storedValues).not.toContain('access-current');
 
+    // Rotation updates the persisted token for the next reload.
     await client.refreshSession();
+    expect(client.getAccessToken()).toBe('access-rotated-1');
+    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBe('refresh-rotated-1');
 
-    expect(localSetSpy).not.toHaveBeenCalled();
-    expect(window.localStorage.length).toBe(0);
-    expect(window.sessionStorage.length).toBe(0);
+    client.clearTokens();
+    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBeNull();
   });
 });
