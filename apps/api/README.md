@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M10 — bookmark enrichment (**Wave 2 started: M0–M10**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (31 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; plus M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params. **Next:** Wave 2 — M11 (search operators & full-text search).
+**Status:** M11 — search operators (**Wave 2: M0–M11**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (31 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; plus M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract). **Next:** Wave 2 — M12 (library health — duplicates & broken-link scanner).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -197,16 +197,20 @@ Compose is hardened for self-hosting (M9): resource limits/reservations (`api`: 
   only, `trashed=true` lists see the trash, `GET /bookmarks/{id}` sees both
   (`deletedAt` in the body tells which). `PUT` and `DELETE` refuse trashed rows
   (404 among active); restore refuses active rows.
-- **Search contract (D10):** `GET /bookmarks` with `search` (ILIKE across
-  title/url/excerpt + tag names, LIKE metacharacters escaped),
+- **Search contract (D10 / M11):** `GET /bookmarks` with `search` (or alias `q`,
+  rejecting requests that pass both with `400`) parsed through the M11
+  operator grammar (see **Search operators (M11)** below — a single bare term
+  remains the degenerate case: ILIKE across `title`/`excerpt`/`note`/`url` +
+  tag names with LIKE metacharacters escaped), composing via `AND` with
   `tag` (exact, case-insensitive), `domain` (exact registrable domain,
-  case-insensitive), `unassignedOnly`, `trashed`, `sort`
-  (updated-desc default | created-desc | title-asc), `page` (≥1),
-  `pageSize` (≥1, CLAMPED to 200 — a bigger value never 400s), `updatedSince`
-  (ISO-8601, `updatedAt >`), and `collectionId` (uuid; membership filter,
-  ACTIVE since M4 — see the collections section). Response: `{ items, totalCount, page,
-pageSize }`; `totalCount` is pre-paging. Ordering is always
-  `(sort, id ASC)` for stable paging. Tag names are attached to every item.
+  case-insensitive), `favorite` (`true`/`false`), `type` (`ContentType`),
+  `unassignedOnly`, `trashed`, `sort` (updated-desc default | created-desc |
+  title-asc), `page` (≥1), `pageSize` (≥1, CLAMPED to 200 — a bigger value
+  never 400s), `updatedSince` (ISO-8601, `updatedAt >`), and `collectionId`
+  (uuid; membership filter, ACTIVE since M4 — see the collections section).
+  Response: `{ items, totalCount, page, pageSize }`; `totalCount` is
+  pre-paging. Ordering is always `(sort, id ASC)` for stable paging. Tag names
+  are attached to every item.
 - **Tag invariants:** per-user case-insensitive unique names via a stored
   `name_lower` + unique `(userId, name_lower)` index; the first-created
   spelling wins as display name. A tag row exists ONLY while ≥1 membership
@@ -494,8 +498,8 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 + M10 catalog (31 tools):** bookmarks `listBookmarks` (incl. `favorite`
-  and `type` filters), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
+- **v1 + M10/M11 catalog (31 tools):** bookmarks `listBookmarks` (incl. M11
+  `search`/`q` operator grammar, `favorite`, and `type` filters), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
   `favorite` toggle), `deleteBookmark` (trash), `restoreBookmark`,
   `replaceBookmarkTags`, `replaceBookmarkCollections` (membership sync),
   `reindexBookmark`, `getBookmarkStats` (incl. `favorites`),
@@ -983,8 +987,9 @@ src/
                            /bookmarks/{id}/tags; /tags/{name} rename/merge/delete;
                            /bookmarks/{id}/collections (delegates to CollectionsService);
                            /bookmarks/{id}/reindex (schedules the M6 pipeline);
-                           UrlDecompositionService (D12); TrashPurgeService + cron job
-                           (purge now fires the icon-eviction ride-along)
+                           UrlDecompositionService (D12); `search-query.parser.ts` +
+                           `search-query.compiler.ts` (M11 grammar); TrashPurgeService +
+                           cron job (purge now fires the icon-eviction ride-along)
   collections/             /collections flat list + tree + CRUD + restore + order;
                            cycle protection, two-phase delete, membership sync;
                            tree-builder.ts (pure, unit-tested)
@@ -1047,6 +1052,10 @@ test/
                                 pre-import cursor, 409 import lock, MCP import/
                                 export tools incl. read-only refusals, import caps
                                 413 (isolated boot))
+  search-operators.e2e.test.ts M11 suite (all search operators, quoting/escapes,
+                                NULL-safe negations, match:OR vs default AND, `q` alias +
+                                conflict 400, REST filter composability, reserved/unknown
+                                operator 400s with positions, OpenAPI & MCP `listBookmarks`)
   zip-builder.ts               test-only minimal ZIP WRITER (inverse of the M8
                                 reader) — builds stored/deflate archives for fixtures
 ```
@@ -1336,12 +1345,32 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 - **Quick-add:** `POST /bookmarks?url=…&title=…&excerpt=…&note=…&favorite=…&collection=…` shares the exact `CreateBookmarkDto` validation, D13 duplicate-allowing insert, and async enrichment pipeline with JSON body `POST /bookmarks`, plus optional `collection` attachment (active collection UUID or exact active title).
 - **MCP parity:** 31 tools (11 reads, 20 mutations) including `listHighlights`, `createHighlight`, `updateHighlight`, `deleteHighlight`, and DTO-derived `favorite`/`type` support on `listBookmarks` and `updateBookmark`.
 
-## Wave-2 Handoff (for M11+)
+## Search operators (M11 — D19, Raindrop parity G9)
 
-M0–M10 are complete and green (269 unit / 155 e2e tests across 41 test files). Next is **M11 (search operators & full-text search)**:
+`GET /api/v1/bookmarks` (`search` or alias `q`) and the mirrored MCP tool `listBookmarks` share **one canonical Raindrop-compatible search grammar** implemented as a pure, field-model-driven parser (`src/bookmarks/search-query.parser.ts`) and TypeORM SQL compiler (`src/bookmarks/search-query.compiler.ts`):
 
-- **Filters already feeding M11's search-operator grammar:** `ListBookmarksQueryDto` and `BookmarksService.list` (`src/bookmarks/bookmarks.service.ts`) already implement composable `favorite` (`favorite=true|false`), `type` (`type=article|image|video|audio|document|book|link`), `tag`, `domain`, `collectionId`, `unassignedOnly`, `trashed`, and `updatedSince` filters alongside `search`. M11's operator parser (e.g. `is:favorite`, `type:video`, `tag:…`, `domain:…`, `in:…`) can compile directly into these same query conditions (remember: all filters must keep composing with `trashed` and `updatedSince` delta reads).
-- **Highlight search consideration:** `highlights` rows carry `text` and `note` scoped by `user_id` and `bookmark_id` (`IX_highlights_user`, `IX_highlights_bookmark_created`) if M11 includes highlight text in full-text/operator matching.
+| Syntax                                    | Meaning                                                                                    | Notes                                                                                                                |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `word` / `"exact phrase"`                 | Case-insensitive substring match across `title`, `excerpt`, `note`, `url`, and tag names   | `\"` and `\\` escapes inside quotes; LIKE metacharacters (`%`, `_`, `\`) escaped                                     |
+| `-word` / `-"exact phrase"`               | Exclusion across the same fields                                                           | Uses `COALESCE(col, '')` so `NULL` `title`/`excerpt`/`note` never drop rows                                          |
+| `#tag` / `#"multi word tag"`              | Exact tag name match (`tags.name_lower`)                                                   | Negatable with `-#tag` / `-#"multi word tag"`                                                                        |
+| `title:` / `excerpt:` / `note:` / `link:` | Field-scoped substring match (`link:` aliases `url`)                                       | Supports `"quoted phrases"` and `-` prefix negation                                                                  |
+| `type:<X>`                                | Content type (`article\|image\|video\|audio\|document\|book\|link`)                        | Case-insensitive value; negatable (`-type:video`)                                                                    |
+| `favorite:true\|false`                    | Favorite flag filter                                                                       | Negatable (`-favorite:true`)                                                                                         |
+| `notag:true\|false`                       | Untagged (`true`) or has ≥1 tag (`false`)                                                  | Negatable (`-notag:true`)                                                                                            |
+| `created:` / `lastUpdate:`                | UTC date/range filter with optional `<`, `>`, `<=`, `>=` prefix and `YYYY[-MM[-DD]]` value | `created:2025-05` matches `[2025-05-01T00:00Z, 2025-06-01T00:00Z)`; calendar-validated (incl. leap years); negatable |
+| `match:OR` / `match:AND`                  | Match mode (`AND` default)                                                                 | In `OR` mode, positive clauses are OR'd and exclusions (`-...`) stay ANDed outside                                   |
+| `broken:` / `file:` / `reminder:`         | Reserved Wave-2 operators (M12 / M18 / M14)                                                | Fail explicitly with `400 BAD_REQUEST` (`"operator not available yet"`)                                              |
+
+- **Error contract:** invalid syntax, unknown operators (`foo:bar`), bad dates, reserved operators, or supplying both `search` and `q` return `400 BAD_REQUEST` (`application/problem+json` on REST, `CallToolResult { isError: true }` on MCP) with the exact character `position` in the message. Bare URLs (`https://…`), time-like numbers (`12:30`), lone `-`, and `--flags` stay plain text terms.
+- **Composability & M17 extensibility:** compiled grammar predicates compose via `AND` with all REST query parameters (`collectionId`, `tag`, `domain`, `favorite`, `type`, `unassignedOnly`, `trashed`, `updatedSince`). `DEFAULT_TEXT_SEARCH_FIELDS` and `DEFAULT_TEXT_FIELD_BUILDERS` are registry-driven so M17 can plug in full-text `content` / `highlights` fields without rewriting the parser.
+
+## Wave-2 Handoff (for M12+)
+
+M0–M11 are complete and green (291 unit / 169 e2e tests across 44 test files). Next is **M12 (library health — duplicate detector & broken-link scanner)**:
+
+- **Normalization surface for M12 duplicates finder:** `UrlDecompositionService` (`src/bookmarks/url-decomposition.service.ts`) already decomposes `scheme`, `host`, `domain`, `port`, `path`, `query`, and `fragment` on every bookmark write (D12). Layer canonical/duplicate URL normalization alongside it without altering existing `url` verbatim storage (D13).
+- **Activating `broken:` in M12:** `SearchQueryParser` (`src/bookmarks/search-query.parser.ts`) already tracks `RESERVED_OPERATORS.broken` and accepts `SearchParserOptions.enabledReservedOperators`. When M12 adds broken-link status to `Bookmark`, wire `broken:true|false` in `search-query.parser.ts` + `search-query.compiler.ts` (and enable it in `BookmarksService.list`) while leaving `file:` (M18) and `reminder:` (M14) returning `"operator not available yet"`.
 - **MCP & OpenAPI parity:** keep adding every new authenticated non-admin REST route to `src/mcp/mcp-tool-catalog.ts` and `EXPECTED_TOOLS` in `test/mcp.e2e.test.ts` (any new `ListBookmarksQueryDto` fields auto-propagate to `listBookmarks`'s schema).
 - **Guard, migration & formatting discipline:** keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
 

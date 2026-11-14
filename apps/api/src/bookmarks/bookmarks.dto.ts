@@ -192,12 +192,41 @@ export class UpdateBookmarkDto {
 }
 
 export class ListBookmarksQueryDto {
-  /** ILIKE substring across title, url, excerpt and tag names (D10). */
-  @ApiPropertyOptional({ maxLength: 200 })
+  /**
+   * Search query using the M11 operator grammar (D10/D19). Plain terms remain
+   * the degenerate case (case-insensitive ILIKE across title, excerpt, note,
+   * url, and tag names).
+   */
+  @ApiPropertyOptional({
+    maxLength: 500,
+    description:
+      'Search query supporting Raindrop-compatible operators: ' +
+      'bare `word` / `"exact phrase"` (matches title, excerpt, note, url, tags; supports `\\"` and `\\\\` escapes), ' +
+      '`-word` / `-"phrase"` exclusions, ' +
+      '`#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
+      'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable with `-`), ' +
+      '`type:<article|image|video|audio|document|book|link>`, ' +
+      '`favorite:true|false`, `notag:true|false`, ' +
+      '`created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), ' +
+      'and `match:OR` (OR positive terms; exclusions stay ANDed). ' +
+      'Reserved (`broken:`, `file:`, `reminder:`) and unknown operators fail with 400 BAD_REQUEST.',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxLength(500)
   search?: string;
+
+  /** Alias for `search` accepting the exact same operator grammar. */
+  @ApiPropertyOptional({
+    maxLength: 500,
+    description:
+      'Alias for `search` — accepts the same M11 search operator grammar. ' +
+      'Provide either `search` or `q`, not both.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  q?: string;
 
   /** Membership filter (D5) — accepted, validated, and active since M4. */
   @ApiPropertyOptional({ format: 'uuid', description: 'Only bookmarks in this collection (D5)' })

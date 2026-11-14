@@ -22,16 +22,17 @@ import {
   type TagDto,
   type UpdateBookmarkDto,
 } from './bookmarks.dto';
-import { containsPattern } from './like-pattern';
+import { compileSearchQuery } from './search-query.compiler';
+import { parseSearchQuery, SearchQueryParseError } from './search-query.parser';
 import { TagsService } from './tags.service';
 import { UrlDecompositionService } from './url-decomposition.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 
 /**
  * Bookmark CRUD, trash/restore, server-side search + paging and stats
- * (plan M3, D10/D12/D13/D17; enriched M10). Every route is user-scoped — a
- * row another user owns simply does not exist (404, never 403: existence is
- * not leaked).
+ * (plan M3, D10/D12/D13/D17; enriched M10; operator grammar M11). Every route
+ * is user-scoped — a row another user owns simply does not exist (404, never
+ * 403: existence is not leaked).
  *
  * Every mutation runs through `ChangeLogService.transact` so the ChangeEvent
  * is appended in the mutation's own transaction with a gapless per-user seq,
@@ -62,10 +63,14 @@ export class BookmarksService {
   }
 
   /**
-   * Search + filters + paging (plan D10, M10). Defaults: active set (trashed
-   * excluded), sort by `updatedAt` desc, pageSize 20 clamped to 200.
+   * Search + filters + paging (plan D10, M10, M11). Defaults: active set
+   * (trashed excluded), sort by `updatedAt` desc, pageSize 20 clamped to 200.
    */
   async list(user: RequestUser, query: ListBookmarksQueryDto): Promise<BookmarkListDto> {
+    if (query.search !== undefined && query.q !== undefined) {
+      throw new BadRequestException('Provide either "search" or "q", not both');
+    }
+
     const page = query.page ?? 1;
     const pageSize = Math.min(query.pageSize ?? DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
 
@@ -79,16 +84,21 @@ export class BookmarksService {
       qb.andWhere('b.deletedAt IS NULL');
     }
 
-    if (query.search !== undefined && query.search.trim() !== '') {
-      const pattern = containsPattern(query.search.trim());
-      qb.andWhere(
-        `(b.title ILIKE :pattern OR b.url ILIKE :pattern OR b.excerpt ILIKE :pattern
-          OR EXISTS (
-            SELECT 1 FROM bookmark_tags bt JOIN tags t ON t.id = bt.tag_id
-             WHERE bt.bookmark_id = b.id AND t.name_lower ILIKE :pattern
-          ))`,
-        { pattern },
-      );
+    const rawSearch = query.search ?? query.q;
+    if (rawSearch !== undefined && rawSearch.trim() !== '') {
+      let parsed;
+      try {
+        parsed = parseSearchQuery(rawSearch);
+      } catch (error) {
+        if (error instanceof SearchQueryParseError) {
+          throw new BadRequestException(error.message);
+        }
+        throw error;
+      }
+      const compiled = compileSearchQuery(parsed);
+      if (compiled !== null) {
+        qb.andWhere(compiled.sql, compiled.params);
+      }
     }
 
     if (query.tag !== undefined && query.tag.trim() !== '') {

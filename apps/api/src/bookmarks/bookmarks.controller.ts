@@ -55,7 +55,7 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 
 /**
- * Bookmark surface (plan M3, extended M10). All routes are bearer-authenticated
+ * Bookmark surface (plan M3, extended M10/M11). All routes are bearer-authenticated
  * (global guard) and user-scoped; `GET /bookmarks/tags` and `PUT /bookmarks/{id}/tags`
  * expose tags, `GET/POST /bookmarks/{id}/highlights` expose highlights.
  */
@@ -107,12 +107,18 @@ export class BookmarksController {
     operationId: 'listBookmarks',
     summary: 'Search / filter / page the caller’s bookmarks',
     description:
-      'Case-insensitive ILIKE search across title, url, excerpt and tag names. ' +
-      '`collectionId` matches bookmarks with a membership in that collection ' +
-      '(the collection itself may be trashed — membership is membership). ' +
-      'Supports `favorite` and `type` content-type filters. ' +
-      '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc ' +
-      '(default), `createdAt` desc or `title` asc.',
+      'Searches and filters bookmarks. The `search` (or alias `q`) query parameter parses ' +
+      'the canonical M11 Raindrop-compatible operator grammar: plain `word` / `"exact phrase"` ' +
+      '(case-insensitive ILIKE across title, excerpt, note, url, and tag names), ' +
+      '`-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
+      'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable), ' +
+      '`type:<article|image|video|audio|document|book|link>`, `favorite:true|false`, `notag:true|false`, ' +
+      '`created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` ' +
+      '(OR positive terms; exclusions stay ANDed). Reserved operators (`broken:`, `file:`, `reminder:`) ' +
+      'and unknown operators return `400 BAD_REQUEST` with character position. ' +
+      'Composes with `collectionId` (membership is membership), `tag`, `domain`, `favorite`, `type`, ' +
+      '`unassignedOnly`, `trashed`, and `updatedSince` via AND. ' +
+      '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc (default), `createdAt` desc or `title` asc.',
   })
   @ApiOkResponse({ type: BookmarkListDto })
   list(

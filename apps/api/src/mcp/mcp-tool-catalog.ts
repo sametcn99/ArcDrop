@@ -100,11 +100,11 @@ export function buildToolCatalog(deps: {
   const { bookmarks, highlights, tags, collections, metadata, sync, syncTickets, portability } =
     deps;
   return [
-    // -- bookmarks (M3/M6/M10) ---------------------------------------------
+    // -- bookmarks (M3/M6/M10/M11) -----------------------------------------
     define(
       'listBookmarks',
       'GET',
-      'Search / filter / page bookmarks. Case-insensitive search across title, url, excerpt and tag names; filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, type (article|image|video|audio|document|book|link), updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
+      'Search / filter / page bookmarks. `search` (or alias `q`) parses the canonical M11 operator grammar: `word`, `"exact phrase"` (across title/excerpt/note/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `favorite:true|false`, `notag:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`broken:`, `file:`, `reminder:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, type, updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
       [ListBookmarksQueryDto],
       (user, [query]) => bookmarks.list(user, query as ListBookmarksQueryDto),
     ),
