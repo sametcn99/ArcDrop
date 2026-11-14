@@ -22,7 +22,7 @@ function makeConfig(dataDir: string): AppConfig {
     cors: { origins: [] },
     dataDir,
     metrics: { enabled: false },
-      metadata: { enabled: false, allowPrivate: false },
+    metadata: { enabled: false, allowPrivate: false },
     log: { level: 'fatal' },
   };
 }

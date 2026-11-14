@@ -150,7 +150,8 @@ export class MetadataFetchService {
 
       const patch: Partial<Bookmark> = {};
       if (row.title === null && title) patch.title = clamp(title, MAX_TITLE_LENGTH);
-      if (row.excerpt === null && description) patch.excerpt = clamp(description, MAX_EXCERPT_LENGTH);
+      if (row.excerpt === null && description)
+        patch.excerpt = clamp(description, MAX_EXCERPT_LENGTH);
 
       if (mode === 'fill') {
         if (row.coverRef === null && coverRef) patch.coverRef = coverRef;

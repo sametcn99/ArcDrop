@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  isPrivateAddress,
-  isPrivateIPv4,
-  isPrivateIPv6,
-  parseIPv4,
-  parseIPv6,
-} from './private-ip';
+import { isPrivateAddress, isPrivateIPv4, isPrivateIPv6, parseIPv4, parseIPv6 } from './private-ip';
 
 /**
  * The SSRF blocklist matrix (ticket M6): every range the ticket names,
@@ -36,7 +30,9 @@ describe('private-ip', () => {
       expect(parseIPv6('fd12:3456:789a:bcde:f012:3456:789a:bcde')).toEqual([
         0xfd12, 0x3456, 0x789a, 0xbcde, 0xf012, 0x3456, 0x789a, 0xbcde,
       ]);
-      expect(parseIPv6('2606:4700::6810:84e5')).toEqual([0x2606, 0x4700, 0, 0, 0, 0, 0x6810, 0x84e5]);
+      expect(parseIPv6('2606:4700::6810:84e5')).toEqual([
+        0x2606, 0x4700, 0, 0, 0, 0, 0x6810, 0x84e5,
+      ]);
     });
 
     it('handles embedded IPv4 tails', () => {

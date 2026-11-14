@@ -19,7 +19,13 @@ import { SsrfSafeFetchService } from './ssrf-fetch.service';
 @Module({
   imports: [TypeOrmModule.forFeature([Bookmark]), ChangeLogModule],
   controllers: [IconsController],
-  providers: [SsrfSafeFetchService, IconCacheService, MetadataFetchService, IconEvictionService, IconEvictionJob],
+  providers: [
+    SsrfSafeFetchService,
+    IconCacheService,
+    MetadataFetchService,
+    IconEvictionService,
+    IconEvictionJob,
+  ],
   exports: [MetadataFetchService, IconEvictionService, IconCacheService],
 })
 export class MetadataModule {}

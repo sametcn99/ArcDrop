@@ -50,7 +50,10 @@ describe('parsePageMetadata', () => {
   });
 
   it('uses property= when name= is absent (og tags)', () => {
-    const parsed = parsePageMetadata('<meta property="og:image" content="https://cdn.example/x.png">', BASE);
+    const parsed = parsePageMetadata(
+      '<meta property="og:image" content="https://cdn.example/x.png">',
+      BASE,
+    );
     expect(parsed.ogImage).toBe('https://cdn.example/x.png');
   });
 

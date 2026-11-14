@@ -72,10 +72,9 @@ function safeFromCodePoint(code: number): string {
 
 /** Reads one attribute off a tag string; returns the decoded value or null. */
 function attr(tag: string, name: string): string | null {
-  const match = new RegExp(
-    `\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`,
-    'i',
-  ).exec(tag);
+  const match = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, 'i').exec(
+    tag,
+  );
   if (!match) return null;
   const raw = (match[1] ?? match[2] ?? match[3] ?? '').trim();
   return raw === '' ? null : decodeHtmlEntities(raw);

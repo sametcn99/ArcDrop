@@ -147,7 +147,10 @@ export class SsrfSafeFetchService {
           );
         }
         if (hop >= MAX_REDIRECTS) {
-          throw new MetadataFetchError('too-many-redirects', `more than ${MAX_REDIRECTS} redirects`);
+          throw new MetadataFetchError(
+            'too-many-redirects',
+            `more than ${MAX_REDIRECTS} redirects`,
+          );
         }
         void response.body?.cancel().catch(() => {});
         current = this.validatedUrl(new URL(location, current).href); // relative Location resolved against the CURRENT hop
@@ -159,7 +162,10 @@ export class SsrfSafeFetchService {
         // a stalled body must not hang past the shared deadline.
         if (response.status < 200 || response.status >= 300) {
           void response.body?.cancel().catch(() => {});
-          throw new MetadataFetchError('http-status', `unusable status ${response.status} from ${current.href}`);
+          throw new MetadataFetchError(
+            'http-status',
+            `unusable status ${response.status} from ${current.href}`,
+          );
         }
         return await this.readBody(response, current, { allowedContentTypes, imageOnly });
       } finally {
@@ -205,7 +211,10 @@ export class SsrfSafeFetchService {
     for (const { address } of addresses) {
       if (!strict) continue; // test/dev affordance — hop 0 only, DNS itself must still resolve
       if (parseIPv4(address) === null && parseIPv6(address) === null) {
-        throw new MetadataFetchError('unclassifiable-address', `cannot classify resolved address ${address}`);
+        throw new MetadataFetchError(
+          'unclassifiable-address',
+          `cannot classify resolved address ${address}`,
+        );
       }
       if (isPrivateAddress(address)) {
         throw new MetadataFetchError(
@@ -222,20 +231,30 @@ export class SsrfSafeFetchService {
     url: URL,
     opts: { allowedContentTypes?: ReadonlySet<string>; imageOnly?: boolean },
   ): Promise<FetchedDocument> {
-    const contentType = (response.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
+    const contentType =
+      (response.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
     if (opts.allowedContentTypes && !opts.allowedContentTypes.has(contentType)) {
       void response.body?.cancel().catch(() => {}); // free the pooled socket — an unread body pins it
-      throw new MetadataFetchError('content-type-refused', `content-type not allowed: ${contentType || '(none)'}`);
+      throw new MetadataFetchError(
+        'content-type-refused',
+        `content-type not allowed: ${contentType || '(none)'}`,
+      );
     }
     if (opts.imageOnly && !contentType.startsWith('image/')) {
       void response.body?.cancel().catch(() => {}); // same
-      throw new MetadataFetchError('content-type-refused', `content-type not an image: ${contentType || '(none)'}`);
+      throw new MetadataFetchError(
+        'content-type-refused',
+        `content-type not an image: ${contentType || '(none)'}`,
+      );
     }
 
     const contentLength = Number(response.headers.get('content-length'));
     if (Number.isInteger(contentLength) && contentLength > MAX_RESPONSE_BYTES) {
       void response.body?.cancel().catch(() => {}); // same
-      throw new MetadataFetchError('response-too-large', `content-length ${contentLength} exceeds the cap`);
+      throw new MetadataFetchError(
+        'response-too-large',
+        `content-length ${contentLength} exceeds the cap`,
+      );
     }
 
     const reader = response.body?.getReader();
@@ -252,7 +271,10 @@ export class SsrfSafeFetchService {
         if (!value) continue;
         total += value.byteLength;
         if (total > MAX_RESPONSE_BYTES) {
-          throw new MetadataFetchError('response-too-large', `body exceeded ${MAX_RESPONSE_BYTES} bytes while streaming`);
+          throw new MetadataFetchError(
+            'response-too-large',
+            `body exceeded ${MAX_RESPONSE_BYTES} bytes while streaming`,
+          );
         }
         chunks.push(value);
       }

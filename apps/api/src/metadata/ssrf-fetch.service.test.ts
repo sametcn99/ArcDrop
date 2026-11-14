@@ -40,11 +40,15 @@ const makeFetcher = (options: {
       options.route(String(url), init)) as unknown as typeof fetch,
   });
 
-const htmlResponse = (body = '<html><title>ok</title></html>', contentType = 'text/html'): Response =>
-  new Response(body, { status: 200, headers: { 'content-type': contentType } });
+const htmlResponse = (
+  body = '<html><title>ok</title></html>',
+  contentType = 'text/html',
+): Response => new Response(body, { status: 200, headers: { 'content-type': contentType } });
 
 const PNG_BYTES = Uint8Array.from(
-  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='),
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  ),
   (c) => c.charCodeAt(0),
 );
 
@@ -118,9 +122,9 @@ describe('SsrfSafeFetchService', () => {
         dns: { 'target.example.test': [ip] },
         route: () => htmlResponse(),
       });
-      const error = await fetcher.fetchHtml('http://target.example.test/x').catch(
-        (e: MetadataFetchError) => e,
-      );
+      const error = await fetcher
+        .fetchHtml('http://target.example.test/x')
+        .catch((e: MetadataFetchError) => e);
       expect((error as MetadataFetchError).reason).toBe('private-address-blocked');
     }
   });
@@ -146,7 +150,9 @@ describe('SsrfSafeFetchService', () => {
         dns: { 'a.example.test': ['93.184.216.34'], 'b.example.test': ['8.8.8.8'] },
         route: (url) => {
           requested.push(url);
-          return url === 'http://a.example.test/start' ? redirect('http://b.example.test/end') : htmlResponse();
+          return url === 'http://a.example.test/start'
+            ? redirect('http://b.example.test/end')
+            : htmlResponse();
         },
       });
       const doc = await fetcher.fetchHtml('http://a.example.test/start');
@@ -178,11 +184,13 @@ describe('SsrfSafeFetchService', () => {
         allowPrivate: true,
         dns: { '127.0.0.1': ['127.0.0.1'] },
         route: (url) =>
-          url === 'http://127.0.0.1:8080/x' ? redirect('http://127.0.0.1:9999/secret') : htmlResponse(),
+          url === 'http://127.0.0.1:8080/x'
+            ? redirect('http://127.0.0.1:9999/secret')
+            : htmlResponse(),
       });
-      const error = await fetcher.fetchHtml('http://127.0.0.1:8080/x').catch(
-        (e: MetadataFetchError) => e,
-      );
+      const error = await fetcher
+        .fetchHtml('http://127.0.0.1:8080/x')
+        .catch((e: MetadataFetchError) => e);
       expect((error as MetadataFetchError).reason).toBe('private-address-blocked');
     });
 
@@ -190,7 +198,11 @@ describe('SsrfSafeFetchService', () => {
       const fetcher = makeFetcher({
         dns: { 'a.example.test': ['93.184.216.34'], 'b.example.test': ['8.8.4.4'] },
         route: (url) =>
-          redirect(url === 'http://a.example.test/1' ? 'http://b.example.test/2' : 'http://a.example.test/1'),
+          redirect(
+            url === 'http://a.example.test/1'
+              ? 'http://b.example.test/2'
+              : 'http://a.example.test/1',
+          ),
       });
       const error = await fetcher
         .fetchHtml('http://a.example.test/1')
@@ -212,7 +224,8 @@ describe('SsrfSafeFetchService', () => {
       const last = hops[hops.length - 1]!;
       const fetcher = makeFetcher({
         dns: { 'a.example.test': ['93.184.216.34'] },
-        route: (url) => (url === last ? htmlResponse() : redirect(hops[hops.indexOf(url) + 1] ?? '')),
+        route: (url) =>
+          url === last ? htmlResponse() : redirect(hops[hops.indexOf(url) + 1] ?? ''),
       });
       const doc = await fetcher.fetchHtml(start);
       expect(doc.finalUrl).toBe(last);
@@ -249,7 +262,8 @@ describe('SsrfSafeFetchService', () => {
     it('fetchHtml refuses non-HTML responses without reading the body', async () => {
       const fetcher = makeFetcher({
         dns: { 'a.example.test': ['93.184.216.34'] },
-        route: () => new Response('<title>Leak</title>', { headers: { 'content-type': 'text/plain' } }),
+        route: () =>
+          new Response('<title>Leak</title>', { headers: { 'content-type': 'text/plain' } }),
       });
       const error = await fetcher
         .fetchHtml('http://a.example.test/x')

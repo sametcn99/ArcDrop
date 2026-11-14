@@ -6,11 +6,13 @@ import type { AppConfig } from '@api/config/env.schema';
 import { IconCacheService } from './icon-cache.service';
 
 const PNG_BYTES = Uint8Array.from(
-  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='),
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  ),
   (c) => c.charCodeAt(0),
 );
 
-const configWith = (dataDir: string): AppConfig => ({ dataDir } as unknown as AppConfig);
+const configWith = (dataDir: string): AppConfig => ({ dataDir }) as unknown as AppConfig;
 
 describe('IconCacheService', () => {
   let dataDir: string;

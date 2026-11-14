@@ -99,19 +99,19 @@ const inMask = (value: number, prefix: number, bits: number): boolean => {
   // Shift out the host bits and compare the network part. `prefix` is
   // already 16-bit aligned here (bit math over 16-bit groups).
   const mask = (0xffff << (16 - bits)) & 0xffff;
-  return ((value & mask) >>> 0) === (prefix & mask);
+  return (value & mask) >>> 0 === (prefix & mask);
 };
 
 export function isPrivateIPv4(ip: string): boolean {
   const value = parseIPv4(ip);
   if (value === null) return false;
   return (
-    (value >>> 24) === 0 || // 0.0.0.0/8
-    (value >>> 24) === 10 || // 10.0.0.0/8
-    (value >>> 24) === 127 || // 127.0.0.0/8
-    (value >>> 16) === 0xa9fe || // 169.254.0.0/16 (incl. 169.254.169.254)
-    (value >>> 20) === 0xac1 || // 172.16.0.0/12 (top 12 bits of 172.16)
-    (value >>> 16) === 0xc0a8 // 192.168.0.0/16
+    value >>> 24 === 0 || // 0.0.0.0/8
+    value >>> 24 === 10 || // 10.0.0.0/8
+    value >>> 24 === 127 || // 127.0.0.0/8
+    value >>> 16 === 0xa9fe || // 169.254.0.0/16 (incl. 169.254.169.254)
+    value >>> 20 === 0xac1 || // 172.16.0.0/12 (top 12 bits of 172.16)
+    value >>> 16 === 0xc0a8 // 192.168.0.0/16
   );
 }
 

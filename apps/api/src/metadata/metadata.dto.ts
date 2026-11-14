@@ -19,4 +19,3 @@ export class ReindexBookmarkResponseDto {
   @ApiProperty({ enum: ['scheduled'], example: 'scheduled' })
   status!: 'scheduled';
 }
-

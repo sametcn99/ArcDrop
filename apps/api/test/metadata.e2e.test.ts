@@ -144,7 +144,9 @@ async function readBookmark(
 // -- stub origin (the "public web", played by a loopback Bun.serve) -----------
 
 const PNG_BYTES = Uint8Array.from(
-  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='),
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  ),
   (c) => c.charCodeAt(0),
 );
 
@@ -157,7 +159,12 @@ const stubbedOrigin = (port: number): string => `http://127.0.0.1:${port}`;
 
 /** The stub world; `port` is substituted at serve time. */
 function stubRoutes(port: number): Map<string, (url: URL) => Response> {
-  const page = (title: string, ogImage: string | null, favicon: string | null, description?: string): Response => {
+  const page = (
+    title: string,
+    ogImage: string | null,
+    favicon: string | null,
+    description?: string,
+  ): Response => {
     const meta = [
       `<title>${title}</title>`,
       description ? `<meta name="description" content="${description}">` : '',
@@ -170,34 +177,53 @@ function stubRoutes(port: number): Map<string, (url: URL) => Response> {
   };
 
   return new Map([
-    ['/page-good', () => page('Stub Good Page', '/icon.png', '/icon.png', 'Stub description for the good page')],
-    ['/page-second', () => page('Second Page', '/icon2.png', '/icon2.png', 'Second page description')],
+    [
+      '/page-good',
+      () => page('Stub Good Page', '/icon.png', '/icon.png', 'Stub description for the good page'),
+    ],
+    [
+      '/page-second',
+      () => page('Second Page', '/icon2.png', '/icon2.png', 'Second page description'),
+    ],
     ['/reindex-page', () => page('Reindex Page', '/icon.png', '/icon.png', 'Reindex description')],
     ['/page-badtypes', () => page('BadTypes Page', '/plain', '/plain')],
     ['/icon.png', pngResponse],
     ['/icon2.png', pngResponse],
-    ['/plain', () => new Response('definitely not an image', { headers: { 'content-type': 'text/plain' } })],
+    [
+      '/plain',
+      () => new Response('definitely not an image', { headers: { 'content-type': 'text/plain' } }),
+    ],
     // Redirects BACK to this origin's loopback address — hop ≥ 1 is always
     // strictly validated, so this is the real "redirects to a private
     // address" refusal over live HTTP.
-    ['/redirect-private', () => new Response(null, { status: 302, headers: { location: `${stubbedOrigin(port)}/secret-page` } })],
+    [
+      '/redirect-private',
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: `${stubbedOrigin(port)}/secret-page` },
+        }),
+    ],
     ['/secret-page', () => page('Private Leak', null, null, 'metadata that must never land')],
     // ~3 MiB streamed html (no content-length — exercises the streamed cap).
-    ['/huge', () => {
-      const chunk = new Uint8Array(1024 * 1024).fill(0x61);
-      let sent = 0;
-      const stream = new ReadableStream<Uint8Array>({
-        pull(controller) {
-          if (sent >= 3) {
-            controller.close();
-            return;
-          }
-          sent++;
-          controller.enqueue(chunk);
-        },
-      });
-      return new Response(stream, { headers: { 'content-type': 'text/html' } });
-    }],
+    [
+      '/huge',
+      () => {
+        const chunk = new Uint8Array(1024 * 1024).fill(0x61);
+        let sent = 0;
+        const stream = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (sent >= 3) {
+              controller.close();
+              return;
+            }
+            sent++;
+            controller.enqueue(chunk);
+          },
+        });
+        return new Response(stream, { headers: { 'content-type': 'text/html' } });
+      },
+    ],
   ]);
 }
 
@@ -257,7 +283,11 @@ async function bootstrapAdmin(baseUrl: string): Promise<AuthSession> {
   return res.body;
 }
 
-async function createUserViaAdmin(baseUrl: string, admin: AuthSession, email: string): Promise<AuthSession> {
+async function createUserViaAdmin(
+  baseUrl: string,
+  admin: AuthSession,
+  email: string,
+): Promise<AuthSession> {
   const res = await call<{ invite: { token: string } }>(baseUrl, 'POST', '/admin/users', {
     bearer: admin.accessToken,
     body: { email },
@@ -304,7 +334,10 @@ function connectSyncWs(baseUrl: string, bearer: string): Promise<SyncSocket> {
   );
 }
 
-async function waitForNotification(socket: SyncSocket, timeoutMs = 5000): Promise<{ seq: string; action: string }> {
+async function waitForNotification(
+  socket: SyncSocket,
+  timeoutMs = 5000,
+): Promise<{ seq: string; action: string }> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const next = socket.messages.shift();
@@ -314,7 +347,8 @@ async function waitForNotification(socket: SyncSocket, timeoutMs = 5000): Promis
   throw new Error('no ws notification arrived within the deadline');
 }
 
-const iconPathOf = (ref: string): string => join(process.env.ARCDROP__DATA_DIR ?? '/data', 'icons', ref);
+const iconPathOf = (ref: string): string =>
+  join(process.env.ARCDROP__DATA_DIR ?? '/data', 'icons', ref);
 
 // -- the suite ----------------------------------------------------------------
 
@@ -375,7 +409,9 @@ describe('Metadata & icons (e2e)', () => {
       const served = (await res.json()) as {
         paths: Record<string, Record<string, { operationId?: string }>>;
       };
-      expect(served.paths['/api/v1/bookmarks/{id}/reindex']?.post?.operationId).toBe('reindexBookmark');
+      expect(served.paths['/api/v1/bookmarks/{id}/reindex']?.post?.operationId).toBe(
+        'reindexBookmark',
+      );
       expect(served.paths['/api/v1/icons/{id}']?.get?.operationId).toBe('getIcon');
     });
 
@@ -616,16 +652,20 @@ describe('Metadata & icons (e2e)', () => {
       // A fake orphan and a foreign file share the directory.
       const fakeOrphan = `${'z'.repeat(32)}.png`;
       writeFileSync(iconPathOf(fakeOrphan), PNG_BYTES);
-      writeFileSync(join(process.env.ARCDROP__DATA_DIR ?? '/data', 'icons', 'README.txt'), 'keep me');
+      writeFileSync(
+        join(process.env.ARCDROP__DATA_DIR ?? '/data', 'icons', 'README.txt'),
+        'keep me',
+      );
 
       // trash → (backdated) purge: the rows die, the files orphan.
       const trash = await call(baseUrl, 'DELETE', `/bookmarks/${doomed.id}`, {
         bearer: alice.accessToken,
       });
       expect(trash.status).toBe(204);
-      await dataSource.query(`UPDATE bookmarks SET deleted_at = NOW() - INTERVAL '400 days' WHERE id = $1`, [
-        doomed.id,
-      ]);
+      await dataSource.query(
+        `UPDATE bookmarks SET deleted_at = NOW() - INTERVAL '400 days' WHERE id = $1`,
+        [doomed.id],
+      );
       const purge = await app.get(TrashPurgeService).purgeExpired();
       expect(purge.purged).toBeGreaterThanOrEqual(1);
 
@@ -635,7 +675,9 @@ describe('Metadata & icons (e2e)', () => {
       expect(existsSync(iconPathOf(doomed.iconRef!))).toBeFalse();
       expect(existsSync(iconPathOf(doomed.coverRef!))).toBeFalse();
       expect(existsSync(iconPathOf(fakeOrphan))).toBeFalse();
-      expect(existsSync(join(process.env.ARCDROP__DATA_DIR ?? '/data', 'icons', 'README.txt'))).toBeTrue();
+      expect(
+        existsSync(join(process.env.ARCDROP__DATA_DIR ?? '/data', 'icons', 'README.txt')),
+      ).toBeTrue();
 
       // Serving reflects the eviction.
       const gone = await call(baseUrl, 'GET', `/icons/${doomed.iconRef}`);

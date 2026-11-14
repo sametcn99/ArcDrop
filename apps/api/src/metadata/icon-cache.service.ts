@@ -58,8 +58,7 @@ export class IconCacheService {
   ]);
 
   /** `<32 base64url chars>.<png|jpg|gif|webp|avif|ico>` — nothing else resolves. */
-  private static readonly REF_PATTERN =
-    /^[A-Za-z0-9_-]{32}\.(png|jpg|gif|webp|avif|ico)$/;
+  private static readonly REF_PATTERN = /^[A-Za-z0-9_-]{32}\.(png|jpg|gif|webp|avif|ico)$/;
 
   isValidRef(ref: string): boolean {
     return IconCacheService.REF_PATTERN.test(ref);
@@ -79,7 +78,8 @@ export class IconCacheService {
     const ext = IconCacheService.STORE_TYPES.get(contentType.toLowerCase());
     if (!ext) throw new Error(`icon cache refuses content type: ${contentType}`);
     if (bytes.byteLength === 0) throw new Error('icon cache refuses an empty body');
-    if (bytes.byteLength > MAX_RESPONSE_BYTES) throw new Error('icon cache refuses oversized bodies');
+    if (bytes.byteLength > MAX_RESPONSE_BYTES)
+      throw new Error('icon cache refuses oversized bodies');
 
     const ref = `${randomBytes(24).toString('base64url')}.${ext}`;
     await mkdir(this.iconsDir, { recursive: true });

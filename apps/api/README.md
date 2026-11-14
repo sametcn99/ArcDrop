@@ -20,18 +20,18 @@ collections, sync, metadata & icons, MCP, portability, hardening & ops.
 
 ## Scripts
 
-| Script                       | What it does                                                  |
-| ---------------------------- | ------------------------------------------------------------- |
-| `bun run dev`                | Watch-mode dev server (needs env vars, see below)             |
-| `bun run build`              | Bundle to `dist/` (`main.js` + `database/data-source.cli.js`) |
-| `bun run start`              | Run the built bundle                                          |
-| `bun run lint`               | ESLint (repo-root flat config)                                |
-| `bun run typecheck`          | Strict TypeScript check (`tsc --noEmit`)                      |
-| `bun test src`               | Unit tests (`bun test`)                                       |
-| `bun test e2e`               | E2E tests (need `ARCDROP__DATABASE__URL`)                     |
-| `bun run migration:run`      | Build, then run pending migrations via the TypeORM CLI        |
-| `bun run migration:revert`   | Build, then revert the last migration                         |
-| `bun run migration:generate` | Build, then generate a migration (see Migration workflow)     |
+| Script                       | What it does                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `bun run dev`                | Watch-mode dev server (needs env vars, see below)                             |
+| `bun run build`              | Bundle to `dist/` (`main.js` + `database/data-source.cli.js`)                 |
+| `bun run start`              | Run the built bundle                                                          |
+| `bun run lint`               | ESLint (repo-root flat config)                                                |
+| `bun run typecheck`          | Strict TypeScript check (`tsc --noEmit`)                                      |
+| `bun test src`               | Unit tests (`bun test`)                                                       |
+| `bun test e2e`               | E2E tests (need `ARCDROP__DATABASE__URL`)                                     |
+| `bun run migration:run`      | Build, then run pending migrations via the TypeORM CLI                        |
+| `bun run migration:revert`   | Build, then revert the last migration                                         |
+| `bun run migration:generate` | Build, then generate a migration (see Migration workflow)                     |
 | `bun run backfill:metadata`  | Build, then backfill metadata/icons for pre-M6 bookmarks (see the M6 section) |
 
 Repo-root scripts (`bun run dev`, `bun run lint`, `bun test`, …) proxy into this app.
@@ -44,17 +44,17 @@ Config is validated with zod at boot (fail-fast: invalid env → report with the
 (typo protection). Copy `.env.example` to `.env` for local dev — bun loads it
 automatically.
 
-| Variable                            | Required | Default | Meaning                                                  |
-| ----------------------------------- | -------- | ------- | -------------------------------------------------------- |
-| `ARCDROP__DATABASE__URL`            | yes      | —       | PostgreSQL connection URL (`postgres://…`)               |
-| `ARCDROP__JWT__SECRET`              | yes      | —       | JWT signing secret, min 32 chars (used from M2)          |
-| `ARCDROP__PORT`                     | no       | `3000`  | HTTP port                                                |
-| `ARCDROP__CORS__ORIGINS`            | no       | empty   | Comma-separated browser origins; empty = CORS off        |
-| `ARCDROP__DATA_DIR`                 | no       | `/data` | Data volume root (icons live in `…/icons` since M6); must be writable |
-| `ARCDROP__METRICS__ENABLED`         | no       | `false` | Serve Prometheus metrics at `/metrics`                   |
-| `ARCDROP__METADATA__ENABLED`        | no       | `true`  | M6 outbound metadata/icon fetch pipeline master switch   |
-| `ARCDROP__METADATA__ALLOW_PRIVATE`  | no       | `false` | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
-| `ARCDROP__LOG__LEVEL`               | no       | `info`  | pino level: `fatal…trace`                                |
+| Variable                           | Required | Default | Meaning                                                                                                                  |
+| ---------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `ARCDROP__DATABASE__URL`           | yes      | —       | PostgreSQL connection URL (`postgres://…`)                                                                               |
+| `ARCDROP__JWT__SECRET`             | yes      | —       | JWT signing secret, min 32 chars (used from M2)                                                                          |
+| `ARCDROP__PORT`                    | no       | `3000`  | HTTP port                                                                                                                |
+| `ARCDROP__CORS__ORIGINS`           | no       | empty   | Comma-separated browser origins; empty = CORS off                                                                        |
+| `ARCDROP__DATA_DIR`                | no       | `/data` | Data volume root (icons live in `…/icons` since M6); must be writable                                                    |
+| `ARCDROP__METRICS__ENABLED`        | no       | `false` | Serve Prometheus metrics at `/metrics`                                                                                   |
+| `ARCDROP__METADATA__ENABLED`       | no       | `true`  | M6 outbound metadata/icon fetch pipeline master switch                                                                   |
+| `ARCDROP__METADATA__ALLOW_PRIVATE` | no       | `false` | M6 TEST/DEV ONLY — let the fetcher target private/loopback initial urls (redirect hops stay strict). NEVER in production |
+| `ARCDROP__LOG__LEVEL`              | no       | `info`  | pino level: `fatal…trace`                                                                                                |
 
 ## Local development
 
@@ -358,7 +358,7 @@ favicon — an attacker-chosen og:image URL is itself an SSRF vector):
 
 - `POST /bookmarks/{id}/reindex` — bearer-authed, owned + ACTIVE only
   (trashed/unknown → 404, same rules as PUT). Returns `202
-  { id, status: "scheduled" }` immediately; the pipeline runs in `refresh`
+{ id, status: "scheduled" }` immediately; the pipeline runs in `refresh`
   mode and its completion records the `bookmark:update` event.
 - Backfill for pre-M6 rows is a CLI run IN THE CONTAINER:
   `docker compose exec api bun dist/scripts/backfill-metadata.js`
