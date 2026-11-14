@@ -19,6 +19,7 @@ import { useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import { toggleBookmarkFavoriteAction } from '../../shared/actions/bookmarkActions';
 import { BookmarkLayouts } from '../../shared/components/BookmarkLayouts';
+import { BulkActionToolbar } from '../../shared/components/BulkActionToolbar';
 import { CollectionDeleteDialog } from '../../shared/components/CollectionDeleteDialog';
 import { CollectionFormDialog } from '../../shared/components/CollectionFormDialog';
 import { CollectionMergeDialog } from '../../shared/components/CollectionMergeDialog';
@@ -162,6 +163,16 @@ export default function CollectionPage() {
         onCreatedRangeChange={setCreatedRange}
         onMatchOrChange={setMatchOr}
         onClearFilters={clearFilters}
+      />
+
+      <BulkActionToolbar
+        visibleBookmarkIds={items.map((item) => item.id)}
+        context="library"
+        onActionCompleted={(res) => {
+          if (res.action === 'move' && res.affected > 0) {
+            retry();
+          }
+        }}
       />
 
       {canManualReorder && items.length > 0 ? (

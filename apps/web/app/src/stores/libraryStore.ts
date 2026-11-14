@@ -74,6 +74,8 @@ export interface LibraryState {
   renameOrMergeTagInLibrary: (currentName: string, survivingTag: TagSummary) => void;
   removeTagFromLibrary: (tagName: string) => void;
   upsertBookmark: (bookmark: Bookmark) => void;
+  markBookmarksDeletedState: (ids: string[], deletedAt: string | null) => void;
+  removeBookmarks: (ids: string[]) => void;
   beginOptimisticBookmark: (id: string, patch: Partial<Bookmark>) => void;
   commitOptimisticBookmark: (id: string, confirmed: Bookmark) => void;
   rollbackOptimisticBookmark: (id: string) => void;
@@ -567,6 +569,98 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return {
         bookmarksById: nextBookmarks,
         pendingOptimistic: nextPending,
+        views: nextViews,
+      };
+    });
+  },
+
+  markBookmarksDeletedState(ids, deletedAt) {
+    if (ids.length === 0) return;
+    set((state) => {
+      const nextBookmarks = { ...state.bookmarksById };
+      const nextPending = { ...state.pendingOptimistic };
+      const nextSelected = { ...state.selectedBookmarkIds };
+      const nextStats = { ...state.stats };
+      let nextViews = state.views;
+
+      for (const id of ids) {
+        const existing = nextBookmarks[id];
+        delete nextPending[id];
+        delete nextSelected[id];
+        if (!existing) continue;
+
+        const wasActive = existing.deletedAt === null;
+        const willBeActive = deletedAt === null;
+        if (wasActive && !willBeActive) {
+          nextStats.total = Math.max(0, nextStats.total - 1);
+          nextStats.trashed += 1;
+          if (existing.favorite) {
+            nextStats.favorites = Math.max(0, nextStats.favorites - 1);
+          }
+        } else if (!wasActive && willBeActive) {
+          nextStats.total += 1;
+          nextStats.trashed = Math.max(0, nextStats.trashed - 1);
+          if (existing.favorite) {
+            nextStats.favorites += 1;
+          }
+        }
+
+        const updated: Bookmark = {
+          ...existing,
+          deletedAt,
+        };
+        nextBookmarks[id] = updated;
+        nextViews = insertBookmarkIntoViews(nextViews, updated);
+      }
+
+      return {
+        bookmarksById: nextBookmarks,
+        pendingOptimistic: nextPending,
+        selectedBookmarkIds: nextSelected,
+        stats: nextStats,
+        views: nextViews,
+      };
+    });
+  },
+
+  removeBookmarks(ids) {
+    if (ids.length === 0) return;
+    set((state) => {
+      const nextBookmarks = { ...state.bookmarksById };
+      const nextPending = { ...state.pendingOptimistic };
+      const nextSelected = { ...state.selectedBookmarkIds };
+      const nextHighlights = { ...state.highlightsByBookmarkId };
+      const nextHighlightsLoaded = { ...state.highlightsLoadedByBookmarkId };
+      const nextStats = { ...state.stats };
+      let nextViews = state.views;
+
+      for (const id of ids) {
+        const existing = nextPending[id] ?? nextBookmarks[id];
+        if (existing) {
+          if (existing.deletedAt === null) {
+            nextStats.total = Math.max(0, nextStats.total - 1);
+            if (existing.favorite) {
+              nextStats.favorites = Math.max(0, nextStats.favorites - 1);
+            }
+          } else {
+            nextStats.trashed = Math.max(0, nextStats.trashed - 1);
+          }
+        }
+        delete nextBookmarks[id];
+        delete nextPending[id];
+        delete nextSelected[id];
+        delete nextHighlights[id];
+        delete nextHighlightsLoaded[id];
+        nextViews = removeIdFromViews(nextViews, id);
+      }
+
+      return {
+        bookmarksById: nextBookmarks,
+        pendingOptimistic: nextPending,
+        selectedBookmarkIds: nextSelected,
+        highlightsByBookmarkId: nextHighlights,
+        highlightsLoadedByBookmarkId: nextHighlightsLoaded,
+        stats: nextStats,
         views: nextViews,
       };
     });

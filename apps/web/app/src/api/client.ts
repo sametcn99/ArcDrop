@@ -46,7 +46,25 @@ interface InternalRequestOptions<T> extends RequestOptions<T> {
 }
 
 interface InternalBlobRequestOptions extends BlobRequestOptions {
+  method?: 'GET' | 'POST';
+  body?: unknown;
   _retried?: boolean;
+}
+
+export function parseRetryAfterSeconds(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const trimmed = header.trim();
+  if (!trimmed) return undefined;
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number.parseInt(trimmed, 10);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+  }
+  const timestamp = Date.parse(trimmed);
+  if (Number.isFinite(timestamp)) {
+    const deltaSeconds = Math.max(0, Math.ceil((timestamp - Date.now()) / 1000));
+    return deltaSeconds;
+  }
+  return undefined;
 }
 
 export function parseContentDispositionFilename(header: string | null): string | null {
@@ -110,6 +128,7 @@ function buildApiUrl(
 
 async function parseErrorResponse(response: Response): Promise<ApiError> {
   const requestIdHeader = response.headers.get('x-request-id') ?? undefined;
+  const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get('retry-after'));
   let rawBody: unknown;
   try {
     rawBody = await response.json();
@@ -119,26 +138,32 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
 
   const parsed = problemDetailsSchema.safeParse(rawBody);
   if (parsed.success) {
-    return new ApiError({
-      ...parsed.data,
-      requestId: parsed.data.requestId ?? requestIdHeader,
-    });
+    return new ApiError(
+      {
+        ...parsed.data,
+        requestId: parsed.data.requestId ?? requestIdHeader,
+      },
+      { retryAfterSeconds },
+    );
   }
 
-  return new ApiError({
-    type: `https://arcdrop.dev/problems/http-${response.status}`,
-    title: response.statusText || 'Request Failed',
-    status: response.status,
-    code: `HTTP_${response.status}`,
-    detail:
-      typeof rawBody === 'object' &&
-      rawBody !== null &&
-      'message' in rawBody &&
-      typeof rawBody.message === 'string'
-        ? rawBody.message
-        : response.statusText || `Request failed with status ${response.status}`,
-    requestId: requestIdHeader,
-  });
+  return new ApiError(
+    {
+      type: `https://arcdrop.dev/problems/http-${response.status}`,
+      title: response.statusText || 'Request Failed',
+      status: response.status,
+      code: `HTTP_${response.status}`,
+      detail:
+        typeof rawBody === 'object' &&
+        rawBody !== null &&
+        'message' in rawBody &&
+        typeof rawBody.message === 'string'
+          ? rawBody.message
+          : response.statusText || `Request failed with status ${response.status}`,
+      requestId: requestIdHeader,
+    },
+    { retryAfterSeconds },
+  );
 }
 
 export function createApiClient(config: ApiClientConfig = {}) {
@@ -302,10 +327,11 @@ export function createApiClient(config: ApiClientConfig = {}) {
     return json as T;
   }
 
-  async function getBlobInternal(
+  async function requestBlobInternal(
     path: string,
     options: InternalBlobRequestOptions = {},
   ): Promise<BlobResponse> {
+    const method = options.method ?? 'GET';
     const url = buildApiUrl(baseUrl, path, options.query);
     const headers: Record<string, string> = {
       Accept: '*/*',
@@ -317,11 +343,20 @@ export function createApiClient(config: ApiClientConfig = {}) {
       headers['Authorization'] = `Bearer ${usedAccessToken}`;
     }
 
+    let bodyInit: BodyInit | undefined;
+    if (options.body instanceof FormData) {
+      bodyInit = options.body;
+    } else if (options.body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      bodyInit = JSON.stringify(options.body);
+    }
+
     let response: Response;
     try {
       response = await fetchImpl(url, {
-        method: 'GET',
+        method,
         headers,
+        body: bodyInit,
         signal: options.signal,
       });
     } catch (error) {
@@ -332,7 +367,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
       if (tokens.accessToken === usedAccessToken) {
         await executeRefreshSingleFlight();
       }
-      return getBlobInternal(path, { ...options, _retried: true });
+      return requestBlobInternal(path, { ...options, _retried: true });
     }
 
     if (!response.ok) {
@@ -364,7 +399,10 @@ export function createApiClient(config: ApiClientConfig = {}) {
     getRefreshToken,
     refreshSession: executeRefreshSingleFlight,
     request: <T>(path: string, options?: RequestOptions<T>) => requestInternal<T>(path, options),
-    getBlob: (path: string, options?: BlobRequestOptions) => getBlobInternal(path, options),
+    getBlob: (path: string, options?: BlobRequestOptions) =>
+      requestBlobInternal(path, { ...options, method: 'GET' }),
+    postBlob: (path: string, body?: unknown, options?: BlobRequestOptions) =>
+      requestBlobInternal(path, { ...options, method: 'POST', body }),
     get: <T>(path: string, options?: Omit<RequestOptions<T>, 'method' | 'body'>) =>
       requestInternal<T>(path, { ...options, method: 'GET' }),
     post: <T>(path: string, body?: unknown, options?: Omit<RequestOptions<T>, 'method' | 'body'>) =>

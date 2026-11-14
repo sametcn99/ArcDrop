@@ -18,6 +18,7 @@ import {
   SHARED_TAG_STRINGS,
   SHARED_UPLOAD_STRINGS,
 } from '../strings';
+import { triggerBlobDownload } from '../utils/blobDownload';
 
 export interface CreateBookmarkActionInput {
   body: CreateBookmarkRequest;
@@ -125,21 +126,7 @@ export async function downloadBookmarkFileAction(bookmark: Bookmark): Promise<st
     const response = await bookmarksApi.getFileBlob(bookmark.id, { download: true });
     const resolvedFilename = response.filename ?? bookmark.fileName ?? 'download';
 
-    if (typeof URL.createObjectURL === 'function' && typeof document !== 'undefined') {
-      const objectUrl = URL.createObjectURL(response.blob);
-      try {
-        const link = document.createElement('a');
-        link.href = objectUrl;
-        link.download = resolvedFilename;
-        link.rel = 'noopener noreferrer';
-        link.style.display = 'none';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } finally {
-        URL.revokeObjectURL(objectUrl);
-      }
-    }
+    triggerBlobDownload(response.blob, resolvedFilename);
 
     useUiStore.getState().enqueueSnackbar({
       message: `${SHARED_BOOKMARK_STRINGS.toastFileDownloaded} (${resolvedFilename})`,

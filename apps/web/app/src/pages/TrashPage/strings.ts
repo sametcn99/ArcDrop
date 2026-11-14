@@ -1,6 +1,24 @@
 export const TRASH_PAGE_STRINGS = {
   title: 'Trash',
-  description:
-    'Trashed bookmarks, restore actions, permanent deletion, and retention status will arrive in W2/W7.',
-  milestone: 'W2 / W7',
+  subtitle: 'Review trashed bookmarks, restore items to your library, or purge them permanently.',
+  retentionPolicyPrefix: 'Trashed items are kept for',
+  retentionPolicySuffix: 'days before automatic permanent purge.',
+  retentionAdminNoteSuffix: 'Configured via server retention settings.',
+  retentionDefaultNoteSuffix: 'Default server retention policy applies.',
+  purgeAllLabel: 'Purge all',
+  purgeAllConfirmTitle: 'Purge all trashed bookmarks?',
+  purgeAllConfirmBody:
+    'This permanently deletes every bookmark in Trash along with their highlights, archived snapshots, and uploaded files. This action cannot be undone.',
+  purgeAllConfirmSubmit: 'Purge all permanently',
+  purgeAllCancel: 'Cancel',
+  restoreItemLabel: 'Restore',
+  purgeItemLabel: 'Purge',
+  trashedAtPrefix: 'Trashed',
+  emptyTitle: 'Trash is empty',
+  emptyDescription: 'Deleted bookmarks appear here so you can restore or permanently purge them.',
+  errorRetryLabel: 'Retry',
+  loadMoreLabel: 'Load more',
+  loadingMoreLabel: 'Loading more...',
+  countSingular: '1 trashed bookmark',
+  countPluralSuffix: 'trashed bookmarks',
 } as const;

@@ -34,3 +34,38 @@ export async function waitForCollectionReady(timeout = 30_000): Promise<void> {
     { timeout },
   );
 }
+
+export async function waitForHealthReady(timeout = 30_000): Promise<void> {
+  await waitFor(
+    () => {
+      expect(screen.queryByRole('progressbar', { name: 'Loading view' })).not.toBeInTheDocument();
+      expect(useSyncStore.getState().isBootstrapping).toBe(false);
+      expect(screen.queryByTestId('health-loading')).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Library health' })).toBeInTheDocument();
+    },
+    { timeout },
+  );
+}
+
+export async function waitForPortabilityReady(timeout = 30_000): Promise<void> {
+  await waitFor(
+    () => {
+      expect(screen.queryByRole('progressbar', { name: 'Loading view' })).not.toBeInTheDocument();
+      expect(useSyncStore.getState().isBootstrapping).toBe(false);
+      expect(screen.getByRole('heading', { name: 'Import & export' })).toBeInTheDocument();
+    },
+    { timeout },
+  );
+}
+
+export async function waitForTrashReady(timeout = 30_000): Promise<void> {
+  await waitFor(
+    () => {
+      expect(screen.queryByRole('progressbar', { name: 'Loading view' })).not.toBeInTheDocument();
+      expect(useSyncStore.getState().isBootstrapping).toBe(false);
+      expect(screen.queryByTestId('trash-loading')).not.toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Trash' })).toBeInTheDocument();
+    },
+    { timeout },
+  );
+}

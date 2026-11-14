@@ -196,8 +196,8 @@ export const bulkMoveModeSchema = z.enum(['assign', 'union']);
 
 export const bulkBookmarksRequestSchema = z.object({
   action: bulkBookmarkActionSchema,
-  ids: z.array(z.string()).min(1),
-  mode: bulkMoveModeSchema,
+  ids: z.array(z.string()).min(1).max(500),
+  mode: bulkMoveModeSchema.default('union'),
   collectionIds: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
 });
@@ -244,7 +244,9 @@ export type ReplaceBookmarkCollectionsRequest = z.infer<
 >;
 export type BookmarkCollectionRef = z.infer<typeof bookmarkCollectionRefSchema>;
 export type BookmarkCollectionsResponse = z.infer<typeof bookmarkCollectionsResponseSchema>;
-export type BulkBookmarksRequest = z.infer<typeof bulkBookmarksRequestSchema>;
+export type BulkBookmarkAction = z.infer<typeof bulkBookmarkActionSchema>;
+export type BulkMoveMode = z.infer<typeof bulkMoveModeSchema>;
+export type BulkBookmarksRequest = z.input<typeof bulkBookmarksRequestSchema>;
 export type BulkBookmarksResponse = z.infer<typeof bulkBookmarksResponseSchema>;
 
 export type BookmarkListQuery = NonNullable<operations['listBookmarks']['parameters']['query']>;
@@ -287,7 +289,7 @@ const _replaceCollectionsCheck: components['schemas']['ReplaceBookmarkCollection
 const _bookmarkCollectionsCheck: components['schemas']['BookmarkCollectionsDto'] | undefined =
   undefined as BookmarkCollectionsResponse | undefined;
 const _bulkBookmarksCheck: components['schemas']['BulkBookmarksDto'] | undefined = undefined as
-  BulkBookmarksRequest | undefined;
+  z.infer<typeof bulkBookmarksRequestSchema> | undefined;
 const _bulkBookmarksResponseCheck: components['schemas']['BulkBookmarksResponseDto'] | undefined =
   undefined as BulkBookmarksResponse | undefined;
 void _urlPartsCheck;

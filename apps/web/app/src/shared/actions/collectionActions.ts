@@ -5,7 +5,9 @@ import type {
   Collection,
   CollectionShareResponse,
   CreateCollectionRequest,
+  DeleteEmptyCollectionsResponse,
   MergeCollectionsResponse,
+  SortCollectionsResponse,
   UpdateCollectionRequest,
 } from '../../api/schemas/collections';
 import { ApiError, toApiError } from '../../api/schemas/problem';
@@ -107,6 +109,50 @@ export async function reorderSiblingCollectionsAction(
     await collectionsApi.reorder(items);
   } catch (err) {
     useLibraryStore.getState().restoreCollectionsSnapshot(snapshot);
+    const apiErr = toApiError(err);
+    useUiStore.getState().enqueueSnackbar({
+      message: apiErr.detail || SHARED_COLLECTION_STRINGS.errorGeneric,
+      severity: 'error',
+    });
+    throw apiErr;
+  }
+}
+
+export async function sortCollectionsAlphabeticalAction(): Promise<SortCollectionsResponse> {
+  try {
+    const res = await collectionsApi.sortAlphabetical();
+    await refreshCollectionsTreeAction().catch(() => undefined);
+    useUiStore.getState().enqueueSnackbar({
+      message:
+        res.updated > 0
+          ? `${SHARED_COLLECTION_STRINGS.toastSortedAlphabeticalPrefix} (${res.updated})`
+          : SHARED_COLLECTION_STRINGS.toastSortedAlphabeticalZero,
+      severity: 'success',
+    });
+    return res;
+  } catch (err) {
+    const apiErr = toApiError(err);
+    useUiStore.getState().enqueueSnackbar({
+      message: apiErr.detail || SHARED_COLLECTION_STRINGS.errorGeneric,
+      severity: 'error',
+    });
+    throw apiErr;
+  }
+}
+
+export async function deleteEmptyCollectionsAction(): Promise<DeleteEmptyCollectionsResponse> {
+  try {
+    const res = await collectionsApi.deleteEmpty();
+    await refreshCollectionsTreeAction().catch(() => undefined);
+    useUiStore.getState().enqueueSnackbar({
+      message:
+        res.trashed > 0
+          ? `${SHARED_COLLECTION_STRINGS.toastDeletedEmptyPrefix} ${res.trashed}`
+          : SHARED_COLLECTION_STRINGS.toastDeletedEmptyZero,
+      severity: 'info',
+    });
+    return res;
+  } catch (err) {
     const apiErr = toApiError(err);
     useUiStore.getState().enqueueSnackbar({
       message: apiErr.detail || SHARED_COLLECTION_STRINGS.errorGeneric,

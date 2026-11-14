@@ -33,6 +33,10 @@ const _problemCompatibilityCheck: _OpenApiProblemDetails | undefined = undefined
   ProblemDetails | undefined;
 void _problemCompatibilityCheck;
 
+export interface ApiErrorOptions {
+  retryAfterSeconds?: number;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -42,9 +46,10 @@ export class ApiError extends Error {
   readonly instance?: string;
   readonly requestId?: string;
   readonly errors?: ProblemFieldError[];
+  readonly retryAfterSeconds?: number;
   readonly problem: ProblemDetails;
 
-  constructor(problem: ProblemDetails) {
+  constructor(problem: ProblemDetails, options: ApiErrorOptions = {}) {
     super(problem.detail);
     this.name = 'ApiError';
     this.status = problem.status;
@@ -55,6 +60,7 @@ export class ApiError extends Error {
     this.instance = problem.instance;
     this.requestId = problem.requestId;
     this.errors = problem.errors;
+    this.retryAfterSeconds = options.retryAfterSeconds;
     this.problem = problem;
   }
 }

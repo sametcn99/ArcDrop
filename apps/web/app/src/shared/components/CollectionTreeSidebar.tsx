@@ -4,6 +4,7 @@ import ArrowUpwardOutlinedIcon from '@mui/icons-material/ArrowUpwardOutlined';
 import CallMergeOutlinedIcon from '@mui/icons-material/CallMergeOutlined';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import DeleteOutlineOutlinedIcon from '@mui/icons-material/DeleteOutlineOutlined';
+import DeleteSweepOutlinedIcon from '@mui/icons-material/DeleteSweepOutlined';
 import DragIndicatorOutlinedIcon from '@mui/icons-material/DragIndicatorOutlined';
 import DriveFileMoveOutlinedIcon from '@mui/icons-material/DriveFileMoveOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
@@ -12,6 +13,7 @@ import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import PublicOutlinedIcon from '@mui/icons-material/PublicOutlined';
 import ShareOutlinedIcon from '@mui/icons-material/ShareOutlined';
+import SortByAlphaOutlinedIcon from '@mui/icons-material/SortByAlphaOutlined';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
@@ -39,8 +41,10 @@ import type { Collection, CollectionNode } from '../../api/schemas/collections';
 import { selectSortedCollections, useLibraryStore } from '../../stores/libraryStore';
 import { useSyncStore } from '../../stores/syncStore';
 import {
+  deleteEmptyCollectionsAction,
   moveCollectionParentAction,
   reorderSiblingCollectionsAction,
+  sortCollectionsAlphabeticalAction,
 } from '../actions/collectionActions';
 import {
   buildCollectionDragId,
@@ -456,6 +460,7 @@ export function CollectionTreeSidebar({
   const [sharedItems, setSharedItems] = useState<Collection[] | null>(null);
   const [loadingShared, setLoadingShared] = useState(false);
 
+  const [toolsMenuAnchor, setToolsMenuAnchor] = useState<HTMLElement | null>(null);
   const [menuTarget, setMenuTarget] = useState<ContextMenuTarget | null>(null);
   const [formDialog, setFormDialog] = useState<{
     open: boolean;
@@ -554,6 +559,16 @@ export function CollectionTreeSidebar({
         </Stack>
 
         <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
+          <Tooltip title={SHARED_COLLECTION_STRINGS.collectionToolsTooltip}>
+            <IconButton
+              size="small"
+              aria-label={SHARED_COLLECTION_STRINGS.collectionToolsAriaLabel}
+              data-testid="collection-tools-button"
+              onClick={(event) => setToolsMenuAnchor(event.currentTarget)}
+            >
+              <MoreVertIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Tooltip title={SHARED_COLLECTION_STRINGS.mergeCollectionsTooltip}>
             <Box component="span" sx={{ display: 'inline-flex' }}>
               <IconButton
@@ -693,6 +708,39 @@ export function CollectionTreeSidebar({
           />
         </Box>
       )}
+
+      <Menu
+        open={Boolean(toolsMenuAnchor)}
+        anchorEl={toolsMenuAnchor}
+        onClose={() => setToolsMenuAnchor(null)}
+      >
+        <MenuItem
+          data-testid="collection-tools-sort"
+          disabled={sortedCollections.length < 2}
+          onClick={() => {
+            setToolsMenuAnchor(null);
+            void sortCollectionsAlphabeticalAction().catch(() => undefined);
+          }}
+        >
+          <ListItemIcon>
+            <SortByAlphaOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary={SHARED_COLLECTION_STRINGS.sortAlphabeticalLabel} />
+        </MenuItem>
+        <MenuItem
+          data-testid="collection-tools-delete-empty"
+          disabled={sortedCollections.length === 0}
+          onClick={() => {
+            setToolsMenuAnchor(null);
+            void deleteEmptyCollectionsAction().catch(() => undefined);
+          }}
+        >
+          <ListItemIcon>
+            <DeleteSweepOutlinedIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText primary={SHARED_COLLECTION_STRINGS.deleteEmptyLabel} />
+        </MenuItem>
+      </Menu>
 
       <Menu
         open={menuOpen}

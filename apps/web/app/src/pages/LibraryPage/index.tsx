@@ -7,6 +7,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { toggleBookmarkFavoriteAction } from '../../shared/actions/bookmarkActions';
 import { BookmarkLayouts } from '../../shared/components/BookmarkLayouts';
+import { BulkActionToolbar } from '../../shared/components/BulkActionToolbar';
 import { FilterChipsBar } from '../../shared/components/FilterChipsBar';
 import { SearchEmptyState } from '../../shared/components/SearchEmptyState';
 import { LibraryToolbar } from './components/LibraryToolbar';
@@ -75,6 +76,11 @@ export default function LibraryPage() {
         onCreatedRangeChange={setCreatedRange}
         onMatchOrChange={setMatchOr}
         onClearFilters={clearFilters}
+      />
+
+      <BulkActionToolbar
+        visibleBookmarkIds={items.map((item) => item.id)}
+        context="library"
       />
 
       {showPageError ? (

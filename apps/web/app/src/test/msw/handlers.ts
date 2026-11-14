@@ -8,8 +8,11 @@ import type {
   TagUsage,
 } from '../../api/schemas/bookmarks';
 import type { Collection, CollectionNode } from '../../api/schemas/collections';
+import type { DuplicateGroup } from '../../api/schemas/health';
 import type { Notification } from '../../api/schemas/notifications';
+import type { ImportSummary } from '../../api/schemas/portability';
 import type { ProblemDetails } from '../../api/schemas/problem';
+import type { Settings } from '../../api/schemas/settings';
 
 export function makeMockUser(overrides: Partial<User> = {}): User {
   return {
@@ -166,6 +169,53 @@ export function makeMockNotification(overrides: Partial<Notification> = {}): Not
     },
     createdAt: '2026-11-14T12:00:01.000Z',
     readAt: null,
+    ...overrides,
+  };
+}
+
+export function makeMockSettings(overrides: Partial<Settings> = {}): Settings {
+  return {
+    registrationOpen: false,
+    trashRetentionDays: 30,
+    changeLogRetentionDays: 90,
+    brokenLinkCheckMode: 'default',
+    archiveMaxBytes: 73_400_320,
+    fileMaxBytes: 314_572_800,
+    monthlyUploadQuotaBytes: 10_737_418_240,
+    ...overrides,
+  };
+}
+
+export function makeMockDuplicateGroup(overrides: Partial<DuplicateGroup> = {}): DuplicateGroup {
+  return {
+    normalizedUrl: overrides.normalizedUrl ?? 'arcdrop.test/docs/guide',
+    original:
+      overrides.original ??
+      makeMockBookmark({
+        id: 'bm-dup-orig',
+        title: 'Guide (Original)',
+        url: 'https://arcdrop.test/docs/guide',
+        tags: [{ id: 'tag-1', name: 'architecture' }],
+        createdAt: '2026-11-10T00:00:00.000Z',
+      }),
+    extras: overrides.extras ?? [
+      makeMockBookmark({
+        id: 'bm-dup-extra-1',
+        title: 'Guide Copy with Tracking',
+        url: 'https://www.arcdrop.test/docs/guide/?utm_source=feed',
+        tags: [{ id: 'tag-2', name: 'sync' }],
+        createdAt: '2026-11-12T00:00:00.000Z',
+      }),
+    ],
+  };
+}
+
+export function makeMockImportSummary(overrides: Partial<ImportSummary> = {}): ImportSummary {
+  return {
+    created: 3,
+    updated: 1,
+    skipped: [],
+    errors: [],
     ...overrides,
   };
 }
@@ -494,8 +544,18 @@ export const libraryHandlers = [
     const pageSize = Number(url.searchParams.get('pageSize') ?? '24');
     const favorite = url.searchParams.get('favorite');
     const unassignedOnly = url.searchParams.get('unassignedOnly');
+    const trashed = url.searchParams.get('trashed');
+    const broken = url.searchParams.get('broken');
 
     let items = makeDefaultBookmarkFixtures();
+    if (trashed === 'true') {
+      items = items.filter((item) => item.deletedAt !== null);
+    } else {
+      items = items.filter((item) => item.deletedAt === null);
+    }
+    if (broken === 'true') {
+      items = items.filter((item) => item.brokenAt !== null || item.brokenReason !== null);
+    }
     if (favorite === 'true') {
       items = items.filter((item) => item.favorite);
     }
@@ -618,6 +678,23 @@ export const libraryHandlers = [
     return HttpResponse.json({ items: [] }, { status: 200 });
   }),
 
+  http.get('*/api/v1/bookmarks/:id/highlights/export', ({ request, params }) => {
+    const url = new URL(request.url);
+    const format = url.searchParams.get('format') === 'csv' ? 'csv' : 'txt';
+    const id = String(params.id);
+    const body =
+      format === 'csv'
+        ? 'text,note,color,createdAt\n"Highlighted snippet","","amber","2026-11-14T00:12:00.000Z"\n'
+        : '> Highlighted snippet\n';
+    return new HttpResponse(body, {
+      status: 200,
+      headers: {
+        'Content-Type': format === 'csv' ? 'text/csv; charset=utf-8' : 'text/plain; charset=utf-8',
+        'Content-Disposition': `attachment; filename="highlights-${id}.${format}"`,
+      },
+    });
+  }),
+
   http.post('*/api/v1/bookmarks/:id/highlights', async ({ params, request }) => {
     const bookmarkId = String(params.id);
     const body = (await request.json()) as {
@@ -658,6 +735,53 @@ export const libraryHandlers = [
 
   http.delete('*/api/v1/highlights/:id', () => {
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get('*/api/v1/library/duplicates', () => {
+    return HttpResponse.json({ groups: [] }, { status: 200 });
+  }),
+
+  http.post('*/api/v1/library/duplicates/resolve', async ({ request }) => {
+    const body = (await request.json()) as { keepId: string; trashIds: string[] };
+    return HttpResponse.json(
+      {
+        kept: makeMockBookmark({ id: body.keepId }),
+        trashedIds: body.trashIds,
+      },
+      { status: 200 },
+    );
+  }),
+
+  http.post('*/api/v1/data/import', async () => {
+    return HttpResponse.json(makeMockImportSummary(), { status: 200 });
+  }),
+
+  http.post('*/api/v1/data/export', async ({ request }) => {
+    const body = (await request.json()) as {
+      format: 'json' | 'csv' | 'html' | 'txt';
+      includeFiles?: boolean;
+    };
+    const ext = body.includeFiles ? 'zip' : body.format;
+    const contentType = body.includeFiles
+      ? 'application/zip'
+      : body.format === 'json'
+        ? 'application/json; charset=utf-8'
+        : body.format === 'csv'
+          ? 'text/csv; charset=utf-8'
+          : body.format === 'html'
+            ? 'text/html; charset=utf-8'
+            : 'text/plain; charset=utf-8';
+    return new HttpResponse('exported-data', {
+      status: 200,
+      headers: {
+        'Content-Type': contentType,
+        'Content-Disposition': `attachment; filename="arcdrop-export.${ext}"`,
+      },
+    });
+  }),
+
+  http.get('*/api/v1/admin/settings', () => {
+    return HttpResponse.json(makeMockSettings(), { status: 200 });
   }),
 
   http.get('*/api/v1/notifications', () => {
