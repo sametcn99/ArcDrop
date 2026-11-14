@@ -120,6 +120,17 @@ export function createApiClient(config: ApiClientConfig = {}) {
     baseUrl = nextBaseUrl.trim().replace(/\/+$/, '');
   }
 
+  function getBaseUrl(): string {
+    return baseUrl;
+  }
+
+  function resolveUrl(
+    path: string,
+    query?: Record<string, string | number | boolean | undefined | null>,
+  ): string {
+    return buildApiUrl(baseUrl, path, query);
+  }
+
   function setTokens(nextTokens: TokenPair | null): void {
     tokens = nextTokens ? { ...nextTokens } : null;
   }
@@ -256,6 +267,8 @@ export function createApiClient(config: ApiClientConfig = {}) {
   return {
     setHooks,
     setBaseUrl,
+    getBaseUrl,
+    resolveUrl,
     setTokens,
     clearTokens,
     getAccessToken,

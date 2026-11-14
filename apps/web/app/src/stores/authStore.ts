@@ -10,6 +10,9 @@ import type {
   User,
 } from '../api/schemas/auth';
 import { toApiError, type ApiError } from '../api/schemas/problem';
+import { syncEngine } from '../api/sync-engine';
+import { useLibraryStore } from './libraryStore';
+import { useSyncStore } from './syncStore';
 import { useUiStore } from './uiStore';
 
 export type AuthStatus = 'unauthenticated' | 'authenticating' | 'totp_required' | 'authenticated';
@@ -43,6 +46,12 @@ export interface AuthState {
   reset: () => void;
 }
 
+function clearClientDataStores() {
+  syncEngine.stop();
+  useSyncStore.getState().reset();
+  useLibraryStore.getState().reset();
+}
+
 function attachClientHooks() {
   apiClient.setHooks({
     onSessionRefreshed(session) {
@@ -54,6 +63,7 @@ function attachClientHooks() {
       });
     },
     onSessionExpired(error) {
+      clearClientDataStores();
       useAuthStore.setState({
         user: null,
         status: 'unauthenticated',
@@ -192,6 +202,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   async logout() {
     const refreshToken = apiClient.getRefreshToken();
+    clearClientDataStores();
     try {
       if (refreshToken) {
         await authApi.logout(refreshToken);
@@ -220,6 +231,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   reset() {
+    clearClientDataStores();
     apiClient.clearTokens();
     attachClientHooks();
     set({
