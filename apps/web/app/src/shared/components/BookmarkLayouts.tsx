@@ -41,6 +41,7 @@ export interface BookmarkLayoutsProps {
   selectedBookmarkIds: Record<string, true>;
   onToggleFavorite: (bookmark: Bookmark) => void;
   onToggleSelect: (id: string) => void;
+  onTagClick?: (tagName: string) => void;
   draggableBookmarks?: boolean;
   sortableBookmarks?: boolean;
   onMoveBookmark?: (bookmarkId: string, direction: 'up' | 'down') => void;
@@ -282,6 +283,7 @@ function ListLayout({
   selectedBookmarkIds,
   onToggleFavorite,
   onToggleSelect,
+  onTagClick,
   draggableBookmarks = true,
   sortableBookmarks = false,
   onMoveBookmark,
@@ -372,7 +374,7 @@ function ListLayout({
                           reminderAt={bookmark.reminderAt}
                           remindedAt={bookmark.remindedAt}
                         />
-                        <TagChipList tags={bookmark.tags} maxVisible={5} />
+                        <TagChipList tags={bookmark.tags} maxVisible={5} onTagClick={onTagClick} />
                       </Stack>
                     </Box>
 
@@ -414,6 +416,7 @@ function GridLayout({
   selectedBookmarkIds,
   onToggleFavorite,
   onToggleSelect,
+  onTagClick,
   draggableBookmarks = true,
   sortableBookmarks = false,
   onMoveBookmark,
@@ -550,7 +553,7 @@ function GridLayout({
                       reminderAt={bookmark.reminderAt}
                       remindedAt={bookmark.remindedAt}
                     />
-                    <TagChipList tags={bookmark.tags} maxVisible={3} />
+                    <TagChipList tags={bookmark.tags} maxVisible={3} onTagClick={onTagClick} />
                   </Stack>
                 </CardContent>
               </Card>
@@ -688,6 +691,7 @@ function MoodboardLayout({
   selectedBookmarkIds,
   onToggleFavorite,
   onToggleSelect,
+  onTagClick,
   draggableBookmarks = true,
   sortableBookmarks = false,
   onMoveBookmark,
@@ -822,7 +826,7 @@ function MoodboardLayout({
                       reminderAt={bookmark.reminderAt}
                       remindedAt={bookmark.remindedAt}
                     />
-                    <TagChipList tags={bookmark.tags} />
+                    <TagChipList tags={bookmark.tags} onTagClick={onTagClick} />
                   </Stack>
                 </CardContent>
               </Card>
@@ -840,6 +844,7 @@ export function BookmarkLayouts({
   selectedBookmarkIds,
   onToggleFavorite,
   onToggleSelect,
+  onTagClick,
   draggableBookmarks = true,
   sortableBookmarks = false,
   onMoveBookmark,
@@ -853,6 +858,7 @@ export function BookmarkLayouts({
             selectedBookmarkIds={selectedBookmarkIds}
             onToggleFavorite={onToggleFavorite}
             onToggleSelect={onToggleSelect}
+            onTagClick={onTagClick}
             draggableBookmarks={draggableBookmarks}
             sortableBookmarks={sortableBookmarks}
             onMoveBookmark={onMoveBookmark}
@@ -877,6 +883,7 @@ export function BookmarkLayouts({
             selectedBookmarkIds={selectedBookmarkIds}
             onToggleFavorite={onToggleFavorite}
             onToggleSelect={onToggleSelect}
+            onTagClick={onTagClick}
             draggableBookmarks={draggableBookmarks}
             sortableBookmarks={sortableBookmarks}
             onMoveBookmark={onMoveBookmark}
@@ -890,6 +897,7 @@ export function BookmarkLayouts({
             selectedBookmarkIds={selectedBookmarkIds}
             onToggleFavorite={onToggleFavorite}
             onToggleSelect={onToggleSelect}
+            onTagClick={onTagClick}
             draggableBookmarks={draggableBookmarks}
             sortableBookmarks={sortableBookmarks}
             onMoveBookmark={onMoveBookmark}

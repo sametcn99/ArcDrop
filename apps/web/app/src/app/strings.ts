@@ -4,8 +4,6 @@ export const APP_STRINGS = {
   openNavigationLabel: 'Open navigation drawer',
   closeNavigationLabel: 'Close navigation drawer',
   toggleDesktopSidebarLabel: 'Toggle sidebar',
-  searchPlaceholder: 'Search bookmarks (arrives in W5)',
-  searchAriaLabel: 'Search bookmarks placeholder',
   quickAddLabel: 'Quick add',
   notificationsButtonLabel: 'Notifications',
   navAllBookmarks: 'All bookmarks',

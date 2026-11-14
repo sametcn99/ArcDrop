@@ -23,6 +23,8 @@ import { CollectionDeleteDialog } from '../../shared/components/CollectionDelete
 import { CollectionFormDialog } from '../../shared/components/CollectionFormDialog';
 import { CollectionMergeDialog } from '../../shared/components/CollectionMergeDialog';
 import { CollectionShareDialog } from '../../shared/components/CollectionShareDialog';
+import { FilterChipsBar } from '../../shared/components/FilterChipsBar';
+import { SearchEmptyState } from '../../shared/components/SearchEmptyState';
 import { useAppDnd, type DragItemData } from '../../shared/hooks/useAppDnd';
 import { CollectionToolbar } from './components/CollectionToolbar';
 import { useCollectionView } from './hooks/useCollectionView';
@@ -37,8 +39,24 @@ export default function CollectionPage() {
     collectionNotFound,
     sort,
     layoutMode,
+    filters,
+    hasSearchOrFilters,
+    searchError,
     setLayoutMode,
     setSort,
+    setSearch,
+    setType,
+    addTag,
+    removeTag,
+    toggleTag,
+    setFavorite,
+    setNotag,
+    setBroken,
+    setFile,
+    setCreatedRange,
+    setMatchOr,
+    clearFilters,
+    clearSearchAndFilters,
     items,
     totalCount,
     hasMore,
@@ -63,8 +81,10 @@ export default function CollectionPage() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
+  const canManualReorder = sort === 'manual' && !hasSearchOrFilters;
+
   const handleFallbackDragEnd = (event: DragEndEvent) => {
-    if (sort !== 'manual') return;
+    if (!canManualReorder) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
     const activeData = active.data.current as DragItemData | undefined;
@@ -94,13 +114,16 @@ export default function CollectionPage() {
     );
   }
 
+  const showPageError = Boolean(error && !searchError);
+
   const layoutsElement = (
     <BookmarkLayouts
       items={items}
       layoutMode={layoutMode}
       selectedBookmarkIds={selectedBookmarkIds}
       draggableBookmarks={true}
-      sortableBookmarks={sort === 'manual'}
+      sortableBookmarks={canManualReorder}
+      onTagClick={toggleTag}
       onMoveBookmark={(bookmarkId, direction) => {
         void moveBookmark(bookmarkId, direction);
       }}
@@ -127,11 +150,25 @@ export default function CollectionPage() {
         onDelete={() => setDeleteOpen(true)}
       />
 
-      {sort === 'manual' && items.length > 0 ? (
+      <FilterChipsBar
+        filters={filters}
+        onTypeChange={setType}
+        onAddTag={addTag}
+        onRemoveTag={removeTag}
+        onFavoriteChange={setFavorite}
+        onNotagChange={setNotag}
+        onBrokenChange={setBroken}
+        onFileChange={setFile}
+        onCreatedRangeChange={setCreatedRange}
+        onMatchOrChange={setMatchOr}
+        onClearFilters={clearFilters}
+      />
+
+      {canManualReorder && items.length > 0 ? (
         <Alert severity="info">{COLLECTION_PAGE_STRINGS.manualOrderHint}</Alert>
       ) : null}
 
-      {error ? (
+      {showPageError ? (
         <Alert
           severity="error"
           action={
@@ -151,12 +188,19 @@ export default function CollectionPage() {
           <Skeleton variant="rounded" height={96} />
         </Stack>
       ) : items.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h6">{COLLECTION_PAGE_STRINGS.emptyTitle}</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            {COLLECTION_PAGE_STRINGS.emptyDescription}
-          </Typography>
-        </Paper>
+        hasSearchOrFilters ? (
+          <SearchEmptyState
+            onClearSearchAndFilters={clearSearchAndFilters}
+            onSelectExample={(example) => setSearch(example)}
+          />
+        ) : (
+          <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h6">{COLLECTION_PAGE_STRINGS.emptyTitle}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              {COLLECTION_PAGE_STRINGS.emptyDescription}
+            </Typography>
+          </Paper>
+        )
       ) : (
         <>
           {hasProvider ? (

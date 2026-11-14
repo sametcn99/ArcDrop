@@ -3,8 +3,9 @@ import { createBookmarksApi } from './endpoints/bookmarks';
 import { createCollectionsApi } from './endpoints/collections';
 import { createSyncApi } from './endpoints/sync';
 import type { BookmarkListQuery } from './schemas/bookmarks';
-import { toApiError } from './schemas/problem';
+import { ApiError, toApiError } from './schemas/problem';
 import { syncWsFrameSchema } from './schemas/sync';
+import { buildBookmarkApiQuery } from '../shared/utils/searchFilters';
 import {
   buildCollectionViewKey,
   buildLibraryViewKey,
@@ -143,29 +144,51 @@ export function createSyncEngine(deps: SyncEngineDeps = {}) {
 
     if (parsed.kind === 'collection') {
       return {
-        viewKey: buildCollectionViewKey(parsed.collectionId, parsed.sort),
-        query: {
+        viewKey: buildCollectionViewKey(parsed.collectionId, parsed.sort, parsed.filters),
+        query: buildBookmarkApiQuery({
+          collectionId: parsed.collectionId,
+          sort: parsed.sort,
+          filters: parsed.filters,
           page: 1,
           pageSize: DEFAULT_LIBRARY_PAGE_SIZE,
-          sort: parsed.sort,
-          collectionId: parsed.collectionId,
-          trashed: false,
-        },
+        }),
       };
     }
 
-    const query: BookmarkListQuery = {
-      page: 1,
-      pageSize: DEFAULT_LIBRARY_PAGE_SIZE,
-      sort: parsed.sort,
-      trashed: false,
+    return {
+      viewKey: buildLibraryViewKey(parsed.scope, parsed.sort, parsed.filters),
+      query: buildBookmarkApiQuery({
+        scope: parsed.scope,
+        sort: parsed.sort,
+        filters: parsed.filters,
+        page: 1,
+        pageSize: DEFAULT_LIBRARY_PAGE_SIZE,
+      }),
     };
-    if (parsed.scope === 'favorites') {
-      query.favorite = true;
-    } else if (parsed.scope === 'unassigned') {
-      query.unassignedOnly = true;
+  }
+
+  async function fetchActiveListWithSearchFallback(viewKey: string, query: BookmarkListQuery) {
+    const libraryStore = useLibraryStore.getState();
+    try {
+      const listRes = await bookmarks.list(query);
+      if (query.search) {
+        libraryStore.clearSearchError();
+      }
+      return { listRes, searchBadRequest: null as ApiError | null };
+    } catch (err) {
+      const apiErr = toApiError(err);
+      if (apiErr instanceof ApiError && apiErr.status === 400 && query.search) {
+        libraryStore.setSearchError({
+          query: query.search,
+          status: apiErr.status,
+          code: apiErr.code,
+          detail: apiErr.detail,
+        });
+        libraryStore.setViewError(viewKey, apiErr.detail);
+        return { listRes: null, searchBadRequest: apiErr };
+      }
+      throw err;
     }
-    return { viewKey: buildLibraryViewKey(parsed.scope, parsed.sort), query };
   }
 
   async function performFullResync(token: number, adoptedCursor?: string): Promise<void> {
@@ -173,9 +196,9 @@ export function createSyncEngine(deps: SyncEngineDeps = {}) {
     const libraryStore = useLibraryStore.getState();
     const syncStore = useSyncStore.getState();
 
-    const [stateRes, listRes, colsRes, tagsRes, statsRes] = await Promise.all([
+    const [stateRes, listOutcome, colsRes, tagsRes, statsRes] = await Promise.all([
       adoptedCursor !== undefined ? Promise.resolve({ seq: adoptedCursor }) : sync.getState(),
-      bookmarks.list(query),
+      fetchActiveListWithSearchFallback(viewKey, query),
       collections.list(),
       bookmarks.tags(),
       bookmarks.stats(),
@@ -183,7 +206,9 @@ export function createSyncEngine(deps: SyncEngineDeps = {}) {
 
     if (!isActive(token)) return;
 
-    libraryStore.hydrateView(viewKey, listRes, false);
+    if (listOutcome.listRes) {
+      libraryStore.hydrateView(viewKey, listOutcome.listRes, false);
+    }
     libraryStore.hydrateCollections(colsRes.items);
     libraryStore.hydrateTags(tagsRes);
     libraryStore.hydrateStats(statsRes);
@@ -414,9 +439,9 @@ export function createSyncEngine(deps: SyncEngineDeps = {}) {
     libraryStore.setViewLoading(viewKey, true, false);
 
     try {
-      const [stateRes, listRes, colsRes, tagsRes, statsRes] = await Promise.all([
+      const [stateRes, listOutcome, colsRes, tagsRes, statsRes] = await Promise.all([
         sync.getState(),
-        bookmarks.list(query),
+        fetchActiveListWithSearchFallback(viewKey, query),
         collections.list(),
         bookmarks.tags(),
         bookmarks.stats(),
@@ -424,7 +449,9 @@ export function createSyncEngine(deps: SyncEngineDeps = {}) {
 
       if (!isActive(token)) return;
 
-      libraryStore.hydrateView(viewKey, listRes, false);
+      if (listOutcome.listRes) {
+        libraryStore.hydrateView(viewKey, listOutcome.listRes, false);
+      }
       libraryStore.hydrateCollections(colsRes.items);
       libraryStore.hydrateTags(tagsRes);
       libraryStore.hydrateStats(statsRes);

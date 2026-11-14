@@ -12,7 +12,6 @@ import LocalOfferOutlinedIcon from '@mui/icons-material/LocalOfferOutlined';
 import LogoutOutlinedIcon from '@mui/icons-material/LogoutOutlined';
 import MenuIcon from '@mui/icons-material/Menu';
 import NotificationsOutlinedIcon from '@mui/icons-material/NotificationsOutlined';
-import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import StarBorderOutlinedIcon from '@mui/icons-material/StarBorderOutlined';
 import {
@@ -37,7 +36,6 @@ import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import Drawer from '@mui/material/Drawer';
 import IconButton from '@mui/material/IconButton';
-import InputAdornment from '@mui/material/InputAdornment';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemButton from '@mui/material/ListItemButton';
@@ -47,7 +45,6 @@ import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
-import TextField from '@mui/material/TextField';
 import Toolbar from '@mui/material/Toolbar';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
@@ -64,6 +61,7 @@ import { fetchNotificationsAction } from '../shared/actions/notificationActions'
 import { CollectionTreeSidebar } from '../shared/components/CollectionTreeSidebar';
 import { NotificationsDrawer } from '../shared/components/NotificationsDrawer';
 import { QuickAddDialog, type QuickAddInitialValues } from '../shared/components/QuickAddDialog';
+import { SearchBar } from '../shared/components/SearchBar';
 import { SyncStatusIndicator } from '../shared/components/SyncStatusIndicator';
 import { TagManagerDialog } from '../shared/components/TagManagerDialog';
 import { ThemeSwitcher } from '../shared/components/ThemeSwitcher';
@@ -588,26 +586,7 @@ export function AppLayout() {
                 </Typography>
               ) : null}
 
-              <Box sx={{ flexGrow: 1, maxWidth: 440 }}>
-                <TextField
-                  size="small"
-                  fullWidth
-                  disabled
-                  placeholder={APP_STRINGS.searchPlaceholder}
-                  slotProps={{
-                    input: {
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <SearchOutlinedIcon fontSize="small" />
-                        </InputAdornment>
-                      ),
-                    },
-                    htmlInput: {
-                      'aria-label': APP_STRINGS.searchAriaLabel,
-                    },
-                  }}
-                />
-              </Box>
+              <SearchBar />
 
               <Box sx={{ flexGrow: 1, display: { xs: 'none', sm: 'block' } }} />
 

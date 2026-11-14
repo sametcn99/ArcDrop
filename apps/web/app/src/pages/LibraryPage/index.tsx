@@ -7,6 +7,8 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { toggleBookmarkFavoriteAction } from '../../shared/actions/bookmarkActions';
 import { BookmarkLayouts } from '../../shared/components/BookmarkLayouts';
+import { FilterChipsBar } from '../../shared/components/FilterChipsBar';
+import { SearchEmptyState } from '../../shared/components/SearchEmptyState';
 import { LibraryToolbar } from './components/LibraryToolbar';
 import { useLibraryView } from './hooks/useLibraryView';
 import { LIBRARY_PAGE_STRINGS } from './strings';
@@ -16,9 +18,25 @@ export default function LibraryPage() {
     scope,
     sort,
     layoutMode,
+    filters,
+    hasSearchOrFilters,
+    searchError,
     setLayoutMode,
     setScope,
     setSort,
+    setSearch,
+    setType,
+    addTag,
+    removeTag,
+    toggleTag,
+    setFavorite,
+    setNotag,
+    setBroken,
+    setFile,
+    setCreatedRange,
+    setMatchOr,
+    clearFilters,
+    clearSearchAndFilters,
     items,
     totalCount,
     hasMore,
@@ -30,6 +48,8 @@ export default function LibraryPage() {
     loadMore,
     retry,
   } = useLibraryView();
+
+  const showPageError = Boolean(error && !searchError);
 
   return (
     <Stack spacing={3}>
@@ -43,7 +63,21 @@ export default function LibraryPage() {
         onLayoutChange={setLayoutMode}
       />
 
-      {error ? (
+      <FilterChipsBar
+        filters={filters}
+        onTypeChange={setType}
+        onAddTag={addTag}
+        onRemoveTag={removeTag}
+        onFavoriteChange={setFavorite}
+        onNotagChange={setNotag}
+        onBrokenChange={setBroken}
+        onFileChange={setFile}
+        onCreatedRangeChange={setCreatedRange}
+        onMatchOrChange={setMatchOr}
+        onClearFilters={clearFilters}
+      />
+
+      {showPageError ? (
         <Alert
           severity="error"
           action={
@@ -63,18 +97,26 @@ export default function LibraryPage() {
           <Skeleton variant="rounded" height={96} />
         </Stack>
       ) : items.length === 0 ? (
-        <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
-          <Typography variant="h6">{LIBRARY_PAGE_STRINGS.emptyTitle}</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            {LIBRARY_PAGE_STRINGS.emptyDescription}
-          </Typography>
-        </Paper>
+        hasSearchOrFilters ? (
+          <SearchEmptyState
+            onClearSearchAndFilters={clearSearchAndFilters}
+            onSelectExample={(example) => setSearch(example)}
+          />
+        ) : (
+          <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
+            <Typography variant="h6">{LIBRARY_PAGE_STRINGS.emptyTitle}</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              {LIBRARY_PAGE_STRINGS.emptyDescription}
+            </Typography>
+          </Paper>
+        )
       ) : (
         <>
           <BookmarkLayouts
             items={items}
             layoutMode={layoutMode}
             selectedBookmarkIds={selectedBookmarkIds}
+            onTagClick={toggleTag}
             onToggleFavorite={(bookmark) => {
               void toggleBookmarkFavoriteAction(bookmark).catch(() => undefined);
             }}

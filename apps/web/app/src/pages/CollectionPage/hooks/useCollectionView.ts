@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useParams } from 'react-router';
 import { bookmarksApi } from '../../../api/endpoints/bookmarks';
 import { collectionsApi } from '../../../api/endpoints/collections';
-import type { BookmarkListQuery, BookmarkSort } from '../../../api/schemas/bookmarks';
 import { ApiError, toApiError } from '../../../api/schemas/problem';
 import { reorderCollectionBookmarksAction } from '../../../shared/actions/collectionActions';
 import { useAppDnd } from '../../../shared/hooks/useAppDnd';
+import { useUrlState } from '../../../shared/hooks/useUrlState';
 import { getCollectionAncestors } from '../../../shared/utils/collectionTree';
+import { buildBookmarkApiQuery } from '../../../shared/utils/searchFilters';
 import {
   buildCollectionViewKey,
-  DEFAULT_LIBRARY_PAGE_SIZE,
   selectViewBookmarks,
   useLibraryStore,
 } from '../../../stores/libraryStore';
@@ -17,32 +17,36 @@ import { useSyncStore } from '../../../stores/syncStore';
 
 const EMPTY_IDS: string[] = [];
 
-function parseCollectionSort(raw: string | null): BookmarkSort {
-  if (raw === 'created' || raw === 'title' || raw === 'manual') {
-    return raw;
-  }
-  return 'updated';
-}
-
-function buildCollectionListQuery(
-  collectionId: string,
-  sort: BookmarkSort,
-  page: number,
-): BookmarkListQuery {
-  return {
-    page,
-    pageSize: DEFAULT_LIBRARY_PAGE_SIZE,
-    sort,
-    collectionId,
-    trashed: false,
-  };
-}
-
 export function useCollectionView() {
   const { collectionId = '' } = useParams<{ collectionId: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const sort = parseCollectionSort(searchParams.get('sort'));
-  const viewKey = buildCollectionViewKey(collectionId, sort);
+  const {
+    urlState,
+    filters,
+    hasFilters,
+    hasSearchOrFilters,
+    setSort,
+    setLayout: setLayoutMode,
+    setSearch,
+    setType,
+    addTag,
+    removeTag,
+    toggleTag,
+    setFavorite,
+    setNotag,
+    setBroken,
+    setFile,
+    setCreatedRange,
+    setMatchOr,
+    clearFilters,
+    clearSearchAndFilters,
+  } = useUrlState({ allowManualSort: true });
+
+  const sort = urlState.sort;
+  const layoutMode = urlState.layout;
+  const viewKey = useMemo(
+    () => buildCollectionViewKey(collectionId, sort, filters),
+    [collectionId, filters, sort],
+  );
 
   const [notFoundCollectionId, setNotFoundCollectionId] = useState<string | null>(null);
   const [fetchErrorState, setFetchErrorState] = useState<{
@@ -61,8 +65,9 @@ export function useCollectionView() {
   const collectionsLoaded = useLibraryStore((s) => s.collectionsLoaded);
   const upsertCollection = useLibraryStore((s) => s.upsertCollection);
   const viewState = useLibraryStore((s) => s.views[viewKey]);
-  const layoutMode = useLibraryStore((s) => s.layoutMode);
-  const setLayoutMode = useLibraryStore((s) => s.setLayoutMode);
+  const searchError = useLibraryStore((s) => s.searchError);
+  const setSearchError = useLibraryStore((s) => s.setSearchError);
+  const clearSearchError = useLibraryStore((s) => s.clearSearchError);
   const setActiveViewKey = useLibraryStore((s) => s.setActiveViewKey);
   const hydrateView = useLibraryStore((s) => s.hydrateView);
   const setViewLoading = useLibraryStore((s) => s.setViewLoading);
@@ -134,14 +139,28 @@ export function useCollectionView() {
 
   const fetchPage = async (page: number, append: boolean) => {
     if (!collectionId) return;
+    const apiQuery = buildBookmarkApiQuery({
+      collectionId,
+      sort,
+      filters,
+      page,
+    });
     setViewLoading(viewKey, true, append);
     try {
-      const res = await bookmarksApi.list(buildCollectionListQuery(collectionId, sort, page));
+      const res = await bookmarksApi.list(apiQuery);
       hydrateView(viewKey, res, append);
+      clearSearchError();
     } catch (err) {
       const apiErr = toApiError(err);
       if (apiErr instanceof ApiError && apiErr.status === 404) {
         setNotFoundCollectionId(collectionId);
+      } else if (apiErr instanceof ApiError && apiErr.status === 400 && apiQuery.search) {
+        setSearchError({
+          query: apiQuery.search,
+          status: apiErr.status,
+          code: apiErr.code,
+          detail: apiErr.detail,
+        });
       }
       setViewError(viewKey, apiErr.detail);
     }
@@ -156,8 +175,13 @@ export function useCollectionView() {
     if (!collectionId || isBootstrapping || collectionNotFound) {
       return;
     }
-    const existingView = useLibraryStore.getState().views[viewKey];
-    if (existingView && !existingView.loading) {
+    const storeState = useLibraryStore.getState();
+    const existingView = storeState.views[viewKey];
+    if (
+      existingView &&
+      !existingView.loading &&
+      (!existingView.error || storeState.searchError !== null)
+    ) {
       return;
     }
     const inFlightViewKeys = inFlightViewKeysRef.current;
@@ -165,15 +189,23 @@ export function useCollectionView() {
       return;
     }
 
+    const apiQuery = buildBookmarkApiQuery({
+      collectionId,
+      sort,
+      filters,
+      page: 1,
+    });
+
     inFlightViewKeys.add(viewKey);
     setViewLoading(viewKey, true, false);
     let cancelled = false;
     void bookmarksApi
-      .list(buildCollectionListQuery(collectionId, sort, 1))
+      .list(apiQuery)
       .then((res) => {
         inFlightViewKeys.delete(viewKey);
         if (!cancelled) {
           hydrateView(viewKey, res, false);
+          clearSearchError();
         }
       })
       .catch((err) => {
@@ -182,6 +214,13 @@ export function useCollectionView() {
         const apiErr = toApiError(err);
         if (apiErr instanceof ApiError && apiErr.status === 404) {
           setNotFoundCollectionId(collectionId);
+        } else if (apiErr instanceof ApiError && apiErr.status === 400 && apiQuery.search) {
+          setSearchError({
+            query: apiQuery.search,
+            status: apiErr.status,
+            code: apiErr.code,
+            detail: apiErr.detail,
+          });
         }
         setViewError(viewKey, apiErr.detail);
       });
@@ -190,10 +229,13 @@ export function useCollectionView() {
       inFlightViewKeys.delete(viewKey);
     };
   }, [
+    clearSearchError,
     collectionId,
     collectionNotFound,
+    filters,
     hydrateView,
     isBootstrapping,
+    setSearchError,
     setViewError,
     setViewLoading,
     sort,
@@ -201,7 +243,7 @@ export function useCollectionView() {
   ]);
 
   useEffect(() => {
-    if (!collectionId || sort !== 'manual') {
+    if (!collectionId || sort !== 'manual' || hasSearchOrFilters) {
       setManualSortContext(null);
       return;
     }
@@ -213,17 +255,7 @@ export function useCollectionView() {
     return () => {
       setManualSortContext(null);
     };
-  }, [collectionId, orderedIds, setManualSortContext, sort, viewKey]);
-
-  const setSort = (nextSort: BookmarkSort) => {
-    const next = new URLSearchParams(searchParams);
-    if (nextSort === 'updated') {
-      next.delete('sort');
-    } else {
-      next.set('sort', nextSort);
-    }
-    setSearchParams(next);
-  };
+  }, [collectionId, hasSearchOrFilters, orderedIds, setManualSortContext, sort, viewKey]);
 
   const loadMore = async () => {
     if (!viewState || !viewState.hasMore || viewState.loadingMore || viewState.loading) {
@@ -273,12 +305,34 @@ export function useCollectionView() {
     sort,
     viewKey,
     layoutMode,
+    filters,
+    hasFilters,
+    hasSearchOrFilters,
+    searchError,
     setLayoutMode,
     setSort,
+    setSearch,
+    setType,
+    addTag,
+    removeTag,
+    toggleTag,
+    setFavorite,
+    setNotag,
+    setBroken,
+    setFile,
+    setCreatedRange,
+    setMatchOr,
+    clearFilters,
+    clearSearchAndFilters,
     items,
-    totalCount: viewState?.totalCount ?? collection?.bookmarkCount ?? items.length,
+    totalCount:
+      viewState?.totalCount ??
+      (hasSearchOrFilters ? items.length : (collection?.bookmarkCount ?? items.length)),
     hasMore: viewState?.hasMore ?? false,
-    loading: (viewState?.loading ?? (!viewState && isBootstrapping)) && items.length === 0,
+    loading:
+      !collectionNotFound &&
+      (viewState?.loading ?? (!viewState && (isBootstrapping || Boolean(collectionId)))) &&
+      items.length === 0,
     loadingMore: viewState?.loadingMore ?? false,
     error: viewState?.error ?? collectionFetchError,
     selectedBookmarkIds,

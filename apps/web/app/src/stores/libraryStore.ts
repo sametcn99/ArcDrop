@@ -10,11 +10,27 @@ import type {
 } from '../api/schemas/bookmarks';
 import type { Collection, CollectionSnapshot } from '../api/schemas/collections';
 import type { HighlightSnapshot, SyncChange, TagSnapshot } from '../api/schemas/sync';
+import {
+  DEFAULT_LIBRARY_PAGE_SIZE,
+  EMPTY_FILTER_STATE,
+  hasActiveSearchOrFilters,
+  parseFilterState,
+  serializeFilterKey,
+  type BookmarkFilterState,
+  type LibraryLayoutMode,
+  type LibraryScope,
+} from '../shared/utils/searchFilters';
 
-export type LibraryLayoutMode = 'list' | 'grid' | 'headlines' | 'moodboard';
-export type LibraryScope = 'all' | 'favorites' | 'unassigned';
+export { DEFAULT_LIBRARY_PAGE_SIZE, type LibraryLayoutMode, type LibraryScope };
 
 export const TREE_EXPANDED_STORAGE_KEY = 'arcdrop.collectionTree.expanded';
+
+export interface SearchErrorState {
+  query: string;
+  status: number;
+  code: string;
+  detail: string;
+}
 
 export interface LibraryViewState {
   ids: string[];
@@ -37,12 +53,15 @@ export interface LibraryState {
   views: Record<string, LibraryViewState>;
   activeViewKey: string;
   layoutMode: LibraryLayoutMode;
+  searchError: SearchErrorState | null;
   selectedBookmarkIds: Record<string, true>;
   pendingOptimistic: Record<string, Bookmark>;
   expandedCollectionIds: Record<string, boolean>;
   collectionsLoaded: boolean;
   setLayoutMode: (mode: LibraryLayoutMode) => void;
   setActiveViewKey: (viewKey: string) => void;
+  setSearchError: (error: SearchErrorState | null) => void;
+  clearSearchError: () => void;
   setViewLoading: (viewKey: string, loading: boolean, append?: boolean) => void;
   setViewError: (viewKey: string, error: string | null) => void;
   hydrateView: (viewKey: string, response: BookmarkListResponse, append?: boolean) => void;
@@ -76,36 +95,73 @@ export interface LibraryState {
   reset: () => void;
 }
 
-export const DEFAULT_LIBRARY_PAGE_SIZE = 24;
 export const COLLECTION_VIEW_PREFIX = 'collection:';
 
-export function buildLibraryViewKey(scope: LibraryScope, sort: BookmarkSort): string {
-  return `${scope}|${sort}`;
+export function buildLibraryViewKey(
+  scope: LibraryScope,
+  sort: BookmarkSort,
+  filters?: BookmarkFilterState,
+): string {
+  const base = `${scope}|${sort}`;
+  const filterKey = filters ? serializeFilterKey(filters) : '';
+  return filterKey ? `${base}?${filterKey}` : base;
 }
 
-export function buildCollectionViewKey(collectionId: string, sort: BookmarkSort): string {
-  return `${COLLECTION_VIEW_PREFIX}${collectionId}|${sort}`;
+export function buildCollectionViewKey(
+  collectionId: string,
+  sort: BookmarkSort,
+  filters?: BookmarkFilterState,
+): string {
+  const base = `${COLLECTION_VIEW_PREFIX}${collectionId}|${sort}`;
+  const filterKey = filters ? serializeFilterKey(filters) : '';
+  return filterKey ? `${base}?${filterKey}` : base;
 }
 
-export function parseViewKey(
-  viewKey: string,
-):
-  | { kind: 'collection'; collectionId: string; sort: BookmarkSort }
-  | { kind: 'library'; scope: LibraryScope; sort: BookmarkSort } {
-  const [rawScope = 'all', rawSort = 'updated'] = viewKey.split('|');
+export function parseViewKey(viewKey: string):
+  | {
+      kind: 'collection';
+      collectionId: string;
+      sort: BookmarkSort;
+      filters: BookmarkFilterState;
+      hasFilters: boolean;
+    }
+  | {
+      kind: 'library';
+      scope: LibraryScope;
+      sort: BookmarkSort;
+      filters: BookmarkFilterState;
+      hasFilters: boolean;
+    } {
+  const pipeIdx = viewKey.indexOf('|');
+  const rawScope = pipeIdx === -1 ? viewKey : viewKey.slice(0, pipeIdx);
+  const rest = pipeIdx === -1 ? '' : viewKey.slice(pipeIdx + 1);
+  const queryIdx = rest.indexOf('?');
+  const rawSort = queryIdx === -1 ? rest : rest.slice(0, queryIdx);
+  const rawFilterQuery = queryIdx === -1 ? '' : rest.slice(queryIdx + 1);
+
   const sort: BookmarkSort =
     rawSort === 'created' || rawSort === 'title' || rawSort === 'manual' ? rawSort : 'updated';
+  const filters = rawFilterQuery
+    ? parseFilterState(new URLSearchParams(rawFilterQuery))
+    : EMPTY_FILTER_STATE;
+  const hasFilters = hasActiveSearchOrFilters(filters);
 
   if (rawScope.startsWith(COLLECTION_VIEW_PREFIX)) {
     const collectionId = rawScope.slice(COLLECTION_VIEW_PREFIX.length);
     if (collectionId) {
-      return { kind: 'collection', collectionId, sort };
+      return { kind: 'collection', collectionId, sort, filters, hasFilters };
     }
   }
 
   const scope: LibraryScope =
     rawScope === 'favorites' || rawScope === 'unassigned' ? rawScope : 'all';
-  return { kind: 'library', scope, sort: sort === 'manual' ? 'updated' : sort };
+  return {
+    kind: 'library',
+    scope,
+    sort: sort === 'manual' ? 'updated' : sort,
+    filters,
+    hasFilters,
+  };
 }
 
 function readPersistedExpandedIds(): Record<string, boolean> {
@@ -182,6 +238,10 @@ function viewMatchesBookmark(viewKey: string, bookmark: Bookmark): boolean {
     return false;
   }
   const parsed = parseViewKey(viewKey);
+  if (parsed.hasFilters) {
+    // Filtered / searched views are evaluated server-side; keep explicit server fetches authoritative.
+    return false;
+  }
   if (parsed.kind === 'collection') {
     // BookmarkDto does not include collectionIds; keep explicit collection fetches authoritative.
     return false;
@@ -234,8 +294,11 @@ function insertBookmarkIntoViews(
         totalCount: view.totalCount + 1,
       };
     } else if (!matches && alreadyInView) {
-      // Only evict from 'unassigned' or 'collection:' views if the bookmark itself was trashed.
-      const keepUnlessTrashed = parsed.kind === 'collection' || parsed.scope === 'unassigned';
+      // Only evict from filtered, collection, or unassigned views if the bookmark itself was trashed.
+      const keepUnlessTrashed =
+        parsed.hasFilters ||
+        parsed.kind === 'collection' ||
+        (parsed.kind === 'library' && parsed.scope === 'unassigned');
       if (!keepUnlessTrashed || bookmark.deletedAt !== null) {
         changed = true;
         nextViews[key] = {
@@ -268,6 +331,7 @@ function createInitialLibraryState() {
     views: {} as Record<string, LibraryViewState>,
     activeViewKey: buildLibraryViewKey('all', 'updated'),
     layoutMode: 'list' as LibraryLayoutMode,
+    searchError: null as SearchErrorState | null,
     selectedBookmarkIds: {} as Record<string, true>,
     pendingOptimistic: {} as Record<string, Bookmark>,
     expandedCollectionIds: {} as Record<string, boolean>,
@@ -284,6 +348,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   setActiveViewKey(activeViewKey) {
     set({ activeViewKey });
+  },
+
+  setSearchError(searchError) {
+    set({ searchError });
+  },
+
+  clearSearchError() {
+    if (get().searchError !== null) {
+      set({ searchError: null });
+    }
   },
 
   setViewLoading(viewKey, loading, append = false) {
@@ -676,6 +750,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const nextViews = { ...state.views };
       for (const [key, view] of Object.entries(state.views)) {
         if (!key.startsWith(prefix)) continue;
+        if (parseViewKey(key).hasFilters) continue;
         if (view.ids.includes(bookmark.id)) continue;
         changed = true;
         nextViews[key] = {

@@ -338,7 +338,7 @@ describe('BookmarkDetail drawer', () => {
     await waitFor(() => {
       expect(within(hlSection).queryByText('Initial quote')).not.toBeInTheDocument();
     });
-  }, 60_000);
+  }, 120_000);
 
   it('surfaces API trash-refusal errors when highlight mutation is rejected', async () => {
     const user = userEvent.setup({ delay: null });

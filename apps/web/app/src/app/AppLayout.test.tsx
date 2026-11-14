@@ -22,7 +22,7 @@ function renderAtRoute(path: string) {
 }
 
 describe('AppLayout and router shell', () => {
-  it('renders the AppBar, search placeholder, sync indicator, Drawer nav, and Library on / when authenticated', async () => {
+  it('renders the AppBar, live SearchBar, sync indicator, Drawer nav, and Library on / when authenticated', async () => {
     useAuthStore.getState().setSession(
       makeMockSession({
         user: { role: 'admin', email: 'admin@arcdrop.test' },
@@ -35,7 +35,7 @@ describe('AppLayout and router shell', () => {
     expect(screen.getAllByText('ArcDrop').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Collections').length).toBeGreaterThan(0);
     expect(screen.getByText('admin@arcdrop.test')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Search bookmarks (arrives in W5)')).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Search bookmarks' })).toBeEnabled();
 
     await waitFor(() => {
       expect(screen.getByTestId('sync-status-indicator')).toHaveAttribute(

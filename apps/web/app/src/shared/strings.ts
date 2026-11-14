@@ -172,3 +172,85 @@ export const SHARED_QUICK_ADD_STRINGS = {
   submittingLabel: 'Saving...',
   toastCreated: 'Bookmark saved.',
 } as const;
+
+export const SHARED_SEARCH_STRINGS = {
+  placeholder: 'Search bookmarks, #tags, type:video, -exclude...',
+  ariaLabel: 'Search bookmarks',
+  clearLabel: 'Clear search',
+  helpButtonLabel: 'Search syntax help',
+  cheatsheetTitle: 'Search operator cheatsheet',
+  cheatsheetSubtitle:
+    'Combine terms, phrases, exclusions, and operators. Click an example to insert.',
+  tagSuggestionsHeading: 'Matching tags',
+  closeCheatsheetLabel: 'Close syntax help',
+  dismissErrorLabel: 'Dismiss search error',
+  reservedOperatorHint:
+    'This search operator is reserved and not available yet. Open the syntax cheatsheet (?) for supported operators.',
+  unknownOperatorHint: 'Open the syntax cheatsheet (?) to view supported search operators.',
+  emptyResultsTitle: 'No bookmarks match your search',
+  emptyResultsDescription:
+    'Try broadening your terms, toggling match:OR, or removing a filter chip.',
+  emptyHintsHeading: 'Search grammar tips',
+  emptyClearAction: 'Clear search & filters',
+  cheatsheetGroups: [
+    {
+      label: 'Terms & exclusions',
+      examples: ['"exact phrase"', '-spam', '-"draft notes"', 'match:OR'],
+    },
+    {
+      label: 'Tags & fields',
+      examples: ['#architecture', '#"reading list"', '-#archive', 'title:guide', 'link:github.com'],
+    },
+    {
+      label: 'Metadata & files',
+      examples: ['type:video', 'favorite:true', 'notag:true', 'broken:true', 'file:pdf'],
+    },
+    {
+      label: 'Reminders, cache & dates',
+      examples: [
+        'reminder:true',
+        'cache.status:ready',
+        'created:>=2026-01-01',
+        'lastUpdate:2026-11',
+      ],
+    },
+  ],
+} as const;
+
+export const SHARED_FILTER_STRINGS = {
+  barAriaLabel: 'Bookmark filters',
+  typeLabel: 'Type',
+  typeAllOption: 'All types',
+  tagLabel: 'Tag filter',
+  tagPlaceholder: 'Filter by tag...',
+  favoriteLabel: 'Favorite',
+  notagLabel: 'No tags',
+  brokenLabel: 'Broken',
+  fileLabel: 'Files',
+  createdButtonLabel: 'Created date',
+  createdPopoverTitle: 'Created date range',
+  createdFromLabel: 'From',
+  createdToLabel: 'To',
+  createdApplyLabel: 'Apply',
+  createdClearLabel: 'Clear',
+  matchOrLabel: 'match:OR',
+  matchOrTooltip: 'Match any positive term (match:OR) instead of requiring all terms (AND)',
+  clearFiltersLabel: 'Clear filters',
+  chipTypePrefix: 'Type',
+  chipFavorite: 'Favorite',
+  chipNotag: 'No tags',
+  chipBroken: 'Broken',
+  chipFile: 'Files',
+  chipCreatedPrefix: 'Created',
+  chipMatchOr: 'match:OR',
+  removeChipLabelPrefix: 'Remove',
+  contentTypeLabels: {
+    article: 'Article',
+    image: 'Image',
+    video: 'Video',
+    audio: 'Audio',
+    document: 'Document',
+    book: 'Book',
+    link: 'Link',
+  },
+} as const;

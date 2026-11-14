@@ -2,7 +2,7 @@
 
 Client-side React + MUI SPA for ArcDrop, located in `apps/web/app` as a Bun workspace package.
 
-**Status:** **W4 — Item richness**. Builds on W0–W3 with full item enrichment: tag chip autocomplete & exact-set replacement (`PUT /bookmarks/:id/tags`), sidebar-footer `TagManagerDialog` (rename, merge warning + execution, delete-detach with usage counts), highlight CRUD (`HighlightsSection` with semantic palette colors and trash-state read-only enforcement), Markdown notes (`MarkdownNoteEditor` Edit/Preview toggle rendering `react-markdown` through MUI `Typography`/`Link`/`Paper`/`Divider`), reminders (`@mui/x-date-pickers` `DateTimePicker` set/clear + `ReminderBadge` across all 4 shared `BookmarkLayouts`), live reminder notifications (WS `reminder` frame -> snackbar + unread badge + `NotificationsDrawer` with list & mark-read one/all), and the duplicate-friendly `QuickAddDialog` (AppBar trigger + `/quick-add` query-param route).
+**Status:** **W5 — Search & filters**. Builds on W0–W4 with operator-grade M11 search (`SearchBar` with 250ms debounce, live grammar cheatsheet `Popper` + `#tag` autocomplete, inline 400 reserved/unknown-operator errors), composable filters (`FilterChipsBar`: `type`, `tag` autocomplete, `favorite`, `notag`, `broken`, `file`, `created` date range, `match:OR` toggle, and removable chips), URL-shareable state (`useUrlState` + `searchFilters` persisting `view`, `sort`, `layout`, and all filter/search params with browser Back/Forward support), card tag-chip filtering, and `SearchEmptyState` with grammar hints.
 
 ## Scripts
 
@@ -42,7 +42,7 @@ apps/web/app/src/
 ├─ api/
 │  ├─ types.ts            # Generated OpenAPI paths & components (openapi-typescript)
 │  ├─ client.ts           # Resilient fetch wrapper (in-memory tokens, single-flight refresh, problem+json)
-│  ├─ sync-engine.ts      # Real-time sync engine (bootstrap, WS ticket, deltas, reminder frames, polling fallback, resync)
+│  ├─ sync-engine.ts      # Real-time sync engine (bootstrap, WS ticket, deltas, reminder frames, polling fallback, resync, filtered active-view resolution)
 │  ├─ endpoints/
 │  │  ├─ auth.ts          # /api/v1/auth/* endpoint methods
 │  │  ├─ bookmarks.ts     # /api/v1/bookmarks* create, CRUD, replaceTags, collection membership/bulk, icon URL helpers
@@ -62,11 +62,11 @@ apps/web/app/src/
 │  ├─ authStore.ts        # Authentication state, in-memory token wiring, sync cleanup on logout/expiry
 │  ├─ uiStore.ts          # Snackbar queue & dialog state
 │  ├─ syncStore.ts        # Sync connectionState ('live' | 'polling' | 'offline'), cursor, sync flags
-│  ├─ libraryStore.ts     # Single client cache (WD1): bookmarks, collections, tags, highlights, views, selection
+│  ├─ libraryStore.ts     # Single client cache (WD1): bookmarks, collections, tags, highlights, filtered views, searchError, selection
 │  └─ notificationsStore.ts # Notifications inbox items, unreadCount, drawerOpen, needsRefresh
 ├─ app/
 │  ├─ AppProviders.tsx    # Top-level provider composition (ThemeController -> RouterProvider -> SnackbarHost)
-│  ├─ AppLayout.tsx       # Authenticated shell, unified DndContext, sidebar (collections + Manage tags), notifications, quick-add
+│  ├─ AppLayout.tsx       # Authenticated shell, live SearchBar, unified DndContext, sidebar (collections + Manage tags), notifications, quick-add
 │  ├─ guards.tsx          # RequireAuth, RequireAdmin, PublicOnly route wrappers
 │  ├─ redirect.ts         # Safe post-login return-URL resolver
 │  ├─ routes.tsx          # Lazy-loaded route table (including /quick-add query-param route)
@@ -79,21 +79,22 @@ apps/web/app/src/
 │  ├─ components.ts       # Shared MUI component defaultProps & styleOverrides
 │  └─ ThemeController.tsx # MUI ThemeProvider (cssVariables: true) + LocalizationProvider (AdapterDayjs) + hook
 ├─ shared/
-│  ├─ strings.ts          # Central shared bookmark, collection, tag, notification & quick-add UI copy (WD3)
-│  ├─ components/         # Cross-page MUI components: AuthPageShell, PlaceholderPage, SnackbarHost, ThemeSwitcher, SyncStatusIndicator, BookmarkIconBadge, BookmarkLayouts (with ReminderBadge & TagChipList), ContentTypeChip, ContentTypeIcon, FavoriteToggleButton, TagChipList, TagAutocompleteInput, TagManagerDialog, MarkdownPreview, NotificationsDrawer, QuickAddDialog, ReminderBadge, CollectionTreeSidebar, CollectionFormDialog, CollectionDeleteDialog, CollectionShareDialog, CollectionMergeDialog
-│  ├─ hooks/              # Cross-page hooks (`useAppDnd.ts` DndContext coordination & drag/drop ID helpers)
-│  ├─ utils/              # Cross-page pure helpers (`collectionTree.ts`)
+│  ├─ strings.ts          # Central shared bookmark, collection, tag, notification, quick-add, search & filter UI copy (WD3)
+│  ├─ components/         # Cross-page MUI components: AuthPageShell, PlaceholderPage, SnackbarHost, ThemeSwitcher, SyncStatusIndicator, SearchBar, FilterChipsBar, SearchEmptyState, BookmarkIconBadge, BookmarkLayouts (with ReminderBadge & TagChipList), ContentTypeChip, ContentTypeIcon, FavoriteToggleButton, TagChipList, TagAutocompleteInput, TagManagerDialog, MarkdownPreview, NotificationsDrawer, QuickAddDialog, ReminderBadge, CollectionTreeSidebar, CollectionFormDialog, CollectionDeleteDialog, CollectionShareDialog, CollectionMergeDialog
+│  ├─ hooks/              # Cross-page hooks (`useAppDnd.ts`, `useUrlState.ts`)
+│  ├─ utils/              # Cross-page pure helpers (`collectionTree.ts`, `searchFilters.ts`)
 │  └─ actions/            # Cross-page optimistic mutations (`bookmarkActions.ts`, `collectionActions.ts`, `tagActions.ts`, `highlightActions.ts`, `notificationActions.ts`)
 ├─ test/
 │  ├─ setup.ts            # Vitest setup (RTL matchers, MSW server, FakeWebSocket install, macrotask teardown flush, store/engine resets)
+│  ├─ waiters.ts          # Readiness waiters (`waitForBootstrapReady`, `waitForLibraryReady`, `waitForCollectionReady`)
 │  ├─ msw/
 │  │  ├─ handlers.ts      # Default auth, library, collection, tag, highlight, notification & sync MSW handlers + fixture factories
 │  │  └─ server.ts        # msw/node setupServer instance
 │  └─ ws/
 │     └─ fake-ws.ts       # FakeWebSocket + FakeWebSocketController for deterministic sync & reminder testing
 └─ pages/
-   ├─ LibraryPage/        # 4 layouts (shared BookmarkLayouts), sort, scope tabs, load-more paging
-   ├─ CollectionPage/     # /collections/:collectionId scoped library, breadcrumbs, sort=manual drag/arrow reorder
+   ├─ LibraryPage/        # 4 layouts (shared BookmarkLayouts), sort, scope tabs, FilterChipsBar, SearchEmptyState, load-more paging
+   ├─ CollectionPage/     # /collections/:collectionId scoped library, breadcrumbs, FilterChipsBar, SearchEmptyState, sort=manual drag/arrow reorder
    ├─ BookmarkDetail/     # /bookmarks/:bookmarkId right-hand MUI Drawer (fields, MarkdownNoteEditor, TagAutocompleteInput, ReminderSection, HighlightsSection, trash/restore)
    └─ <PageName>/         # Page-private folder: index.tsx, strings.ts, components/, hooks/, actions/
 ```
@@ -104,11 +105,17 @@ apps/web/app/src/
 2. Page-local files are **strictly private** to that page — another page must never import from `../OtherPage/...`.
 3. Anything reused by two or more pages belongs in `src/shared/{components,hooks,utils,actions}/`.
 
-## Library Cache, Sync Engine, Item Richness & W5 Handoff Notes
+## Library Cache, Sync Engine, Item Richness, Search & W6 Handoff Notes
 
 - **Single client cache (`useLibraryStore` — WD1)**:
-  - Stores normalized entities (`bookmarksById`, `collectionsById`, `tagsById`, `highlightsByBookmarkId`, `highlightsLoadedByBookmarkId`, `stats`), per-view paginated ID lists (`views[viewKey]`, supporting both `library:...` and `collection:<id>|<sort>` keys), `layoutMode` (`'list' | 'grid' | 'headlines' | 'moodboard'`), `expandedCollectionIds` (`arcdrop.collectionTree.expanded`), `selectedBookmarkIds` (consumed by W7 bulk actions), and `pendingOptimistic` snapshots for instant rollback on mutation failure.
+  - Stores normalized entities (`bookmarksById`, `collectionsById`, `tagsById`, `highlightsByBookmarkId`, `highlightsLoadedByBookmarkId`, `stats`), per-view paginated ID lists (`views[viewKey]`, supporting both unfiltered `library|sort` / `collection:<id>|sort` keys and filtered `?search=...` view keys parsed via `parseViewKey`), `layoutMode` (`'list' | 'grid' | 'headlines' | 'moodboard'`), `searchError` (for 400 search syntax/operator errors), `expandedCollectionIds` (`arcdrop.collectionTree.expanded`), `selectedBookmarkIds` (consumed by W7 bulk actions), and `pendingOptimistic` snapshots for instant rollback on mutation failure.
+  - Filtered views (`parseViewKey(key).hasFilters === true`) keep server-fetched membership authoritative (`viewMatchesBookmark` returns `false`, `insertBookmarkIntoViews` preserves items unless trashed, and `addBookmarkToCollectionViews` skips filtered views).
   - **Do not write to `localStorage` automatically on initial mount** (W1's `LoginPage` suite asserts `localStorage.length === 0` after login). `syncExpandedFromStorage()` only reads `localStorage.getItem`; `localStorage.setItem` runs strictly on explicit user expand/collapse or collection nesting interactions.
+- **Search & Composable Filters (W5)**:
+  - `src/shared/utils/searchFilters.ts` + `src/shared/hooks/useUrlState.ts` synchronize `view`, `sort`, `layout`, and all filter parameters (`search`, `type`, repeated `tag`, `favorite`, `notag`, `broken`, `file`, `createdFrom`, `createdTo`, `match=OR`) with React Router `useSearchParams` (Back/Forward and direct URL sharing work identically on `/` and `/collections/:collectionId`).
+  - `buildBookmarkApiQuery` maps single-tag chips (`tags.length === 1`) to REST `tag=<name>`, multi-tag selections into M11 `#tag` / `#"quoted tag"` tokens inside `search`, boolean REST params (`type`, `favorite`, `broken`, `file`, `collectionId`, `unassignedOnly`), and M11 grammar filters (`match:OR`, `notag:true`, `created:>=YYYY-MM-DD`, `created:<=YYYY-MM-DD`) into `search`, composing `AND` with collection/view scope.
+  - `SearchBar` (`src/shared/components/SearchBar.tsx`) provides a 250ms debounced input, Enter immediate submit, Clear button, `Popper` (`disablePortal`) cheatsheet + live `#tag` prefix suggestions, and inline `<Alert data-testid="search-inline-error">` for HTTP 400 `RESERVED_OPERATOR` / unknown-operator responses. Both `sync-engine.ts` (`fetchActiveListWithSearchFallback`) and `useLibraryView` / `useCollectionView` catch 400 search errors without dropping sync state to `offline`.
+  - Clicking a `#tag` chip on any card in `BookmarkLayouts` invokes `toggleTag`, and when `hasSearchOrFilters` is active on `CollectionPage`, `sort=manual` drag/move sorting is disabled while filtering.
 - **Tags, Highlights, Markdown Notes & Reminders (W4 — WD4)**:
   - `ThemeController` mounts `@mui/x-date-pickers`' `<LocalizationProvider dateAdapter={AdapterDayjs}>` at the provider root so `DateTimePicker` works in every route and test harness.
   - `MarkdownPreview` (`src/shared/components/MarkdownPreview.tsx`) maps `react-markdown` elements exclusively to MUI components (`Typography`, `Link`, `Box`, `Paper`, `Divider`) to comply with `react/forbid-elements` and active light/dark theme tokens.
@@ -120,13 +127,14 @@ apps/web/app/src/
   - `CollectionPage` also wraps `BookmarkLayouts` in a fallback `<DndContext>` when rendered outside `AppLayout` (`!hasProvider`).
 - **Collection count reconciliation (`CollectionSnapshot` caveat)**:
   - Because `CollectionSnapshotDto` in sync events omits `bookmarkCount`, `collectionActions.ts` reconciles multi-row mutations (cascade delete, merge, bookmark-to-collection membership add/replace) via `refreshCollectionsTreeAction()` (`GET /collections/tree`) alongside bookmark `stats` refresh.
-- **Handoff for W5 (Search & Filters)**:
-  - `AppLayout` already renders the global search `TextField` in the `AppBar` (currently `disabled` with `APP_STRINGS.searchPlaceholder` — enable and wire to W5's `/search` route or library search state).
-  - Tag autocomplete & usage lists are already hydrated in `useLibraryStore.tagsById` (`selectSortedTags`), and `TagChipList` is rendered on shared cards in `BookmarkLayouts` — clicking a tag chip can be wired to `#tag` / `tags` filter navigation in W5.
-  - Note: `src/shared/actions/bookmarkActions.ts` + `src/api/endpoints/bookmarks.ts` already expose `replaceCollections` (`PUT /bookmarks/:id/collections`) and `BookmarkListQuery` supports API query filters (`q`, `tags`, `contentType`, `favorite`, `collectionId`, `trashed`, `unassignedOnly`, `broken`).
+- **Handoff for W6 (Files & Archive Reader)**:
+  - File-backed bookmarks already hydrate into `Bookmark` (`storageKind: 'file'`, `fileRef`, `fileName`, `fileMime`, `fileSize`) and `FilterChipsBar` already exposes `file=true` (`Files`) filtering. Check `apps/api/README.md` + generated `src/api/types.ts` for multipart file upload (`POST /bookmarks/files`), authenticated blob download (`GET /bookmarks/:id/file` or file ref endpoint), archive retrieval (`GET /bookmarks/:id/archive`), and reindex endpoints (`POST /bookmarks/:id/archive/reindex` or `cache` reindex).
+  - For the archive reader HTML view in `BookmarkDetail`, render archived HTML inside a sandboxed `<Box component="iframe" srcDoc={html} sandbox="" ... />` (wait — verify `sandbox=""` without `allow-scripts`, and use MUI `<Box component="iframe">` to satisfy `react/forbid-elements`!).
+  - When `storageKind === 'file'` in `BookmarkDetail`, hide/disable URL editing and expose download + file metadata; keep `cacheStatus` chip (`pending | ready | failed | invalid-origin | skipped`) refreshable and test with `src/test/waiters.ts`.
 
 ## Testing, MSW & Fake WebSocket Patterns (`src/test/`)
 
+- **Readiness waiters (`src/test/waiters.ts`)**: All integration tests rendering authenticated routes MUST await `waitForBootstrapReady()`, `waitForLibraryReady()`, or `waitForCollectionReady()` before interacting or asserting so bootstrap/skeleton loading never races renders.
 - **MSW v2 (`msw@^2.15.0`) + FakeWebSocket**: `src/test/setup.ts` installs `FakeWebSocket` (`src/test/ws/fake-ws.ts`) on `globalThis.WebSocket` (`autoOpen = true` by default so shell/routing tests reach `'live'` cleanly), registers default `authHandlers`, `libraryHandlers`, and `syncHandlers`, and runs a deterministic async teardown sequence (`cleanup()` -> `syncEngine.stop()` -> `testFakeWsController.reset()` -> `vi.clearAllTimers()` / `vi.useRealTimers()` -> macrotask flush -> `server.resetHandlers()` -> store resets) to prevent dangling promises across tests.
 - Note on `SnackbarHost` tests: `SnackbarHost` displays one queued snackbar at a time (`autoHideDuration` default 5000ms); if a test triggers an earlier toast (e.g. a live reminder) and then checks a subsequent toast without fake timers, dismiss the active Alert (`Close` button) first.
 - Sync engine unit tests (`src/api/sync-engine.test.ts`) instantiate isolated `createSyncEngine({ client, WebSocketCtor })` instances with `autoOpen: false` to test ticket URLs, delta/tombstone ordering, `resyncRequired`, and `live -> polling -> offline -> live` transitions deterministically.

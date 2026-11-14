@@ -1,47 +1,51 @@
-import { useCallback, useEffect } from 'react';
-import { useSearchParams } from 'react-router';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { bookmarksApi } from '../../../api/endpoints/bookmarks';
-import type { BookmarkListQuery, BookmarkSort } from '../../../api/schemas/bookmarks';
-import { toApiError } from '../../../api/schemas/problem';
+import { ApiError, toApiError } from '../../../api/schemas/problem';
+import { useUrlState } from '../../../shared/hooks/useUrlState';
+import { buildBookmarkApiQuery } from '../../../shared/utils/searchFilters';
 import {
   buildLibraryViewKey,
-  DEFAULT_LIBRARY_PAGE_SIZE,
   selectViewBookmarks,
   useLibraryStore,
-  type LibraryScope,
 } from '../../../stores/libraryStore';
 import { useSyncStore } from '../../../stores/syncStore';
 
-function parseScope(raw: string | null): LibraryScope {
-  if (raw === 'favorites' || raw === 'unassigned') return raw;
-  return 'all';
-}
-
-function parseSort(raw: string | null): BookmarkSort {
-  if (raw === 'created' || raw === 'title') return raw;
-  return 'updated';
-}
-
-function buildListQuery(scope: LibraryScope, sort: BookmarkSort, page: number): BookmarkListQuery {
-  return {
-    page,
-    pageSize: DEFAULT_LIBRARY_PAGE_SIZE,
-    sort,
-    trashed: false,
-    ...(scope === 'favorites' ? { favorite: true } : {}),
-    ...(scope === 'unassigned' ? { unassignedOnly: true } : {}),
-  };
-}
-
 export function useLibraryView() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const scope = parseScope(searchParams.get('view'));
-  const sort = parseSort(searchParams.get('sort'));
-  const viewKey = buildLibraryViewKey(scope, sort);
+  const {
+    urlState,
+    filters,
+    hasFilters,
+    hasSearchOrFilters,
+    setView: setScope,
+    setSort,
+    setLayout: setLayoutMode,
+    setSearch,
+    setType,
+    addTag,
+    removeTag,
+    toggleTag,
+    setFavorite,
+    setNotag,
+    setBroken,
+    setFile,
+    setCreatedRange,
+    setMatchOr,
+    clearFilters,
+    clearSearchAndFilters,
+  } = useUrlState({ allowManualSort: false });
+
+  const scope = urlState.view;
+  const sort = urlState.sort === 'manual' ? 'updated' : urlState.sort;
+  const layoutMode = urlState.layout;
+
+  const viewKey = useMemo(() => buildLibraryViewKey(scope, sort, filters), [filters, scope, sort]);
+
+  const inFlightViewKeysRef = useRef<Set<string>>(new Set());
 
   const viewState = useLibraryStore((s) => s.views[viewKey]);
-  const layoutMode = useLibraryStore((s) => s.layoutMode);
-  const setLayoutMode = useLibraryStore((s) => s.setLayoutMode);
+  const searchError = useLibraryStore((s) => s.searchError);
+  const setSearchError = useLibraryStore((s) => s.setSearchError);
+  const clearSearchError = useLibraryStore((s) => s.clearSearchError);
   const setActiveViewKey = useLibraryStore((s) => s.setActiveViewKey);
   const hydrateView = useLibraryStore((s) => s.hydrateView);
   const setViewLoading = useLibraryStore((s) => s.setViewLoading);
@@ -61,16 +65,50 @@ export function useLibraryView() {
 
   const fetchPage = useCallback(
     async (page: number, append: boolean) => {
+      const apiQuery = buildBookmarkApiQuery({
+        scope,
+        sort,
+        filters,
+        page,
+      });
+      if (!append) {
+        inFlightViewKeysRef.current.add(viewKey);
+      }
       setViewLoading(viewKey, true, append);
       try {
-        const res = await bookmarksApi.list(buildListQuery(scope, sort, page));
+        const res = await bookmarksApi.list(apiQuery);
+        if (!append) {
+          inFlightViewKeysRef.current.delete(viewKey);
+        }
         hydrateView(viewKey, res, append);
+        clearSearchError();
       } catch (err) {
+        if (!append) {
+          inFlightViewKeysRef.current.delete(viewKey);
+        }
         const apiErr = toApiError(err);
+        if (apiErr instanceof ApiError && apiErr.status === 400 && apiQuery.search) {
+          setSearchError({
+            query: apiQuery.search,
+            status: apiErr.status,
+            code: apiErr.code,
+            detail: apiErr.detail,
+          });
+        }
         setViewError(viewKey, apiErr.detail);
       }
     },
-    [hydrateView, scope, setViewError, setViewLoading, sort, viewKey],
+    [
+      clearSearchError,
+      filters,
+      hydrateView,
+      scope,
+      setSearchError,
+      setViewError,
+      setViewLoading,
+      sort,
+      viewKey,
+    ],
   );
 
   useEffect(() => {
@@ -78,31 +116,23 @@ export function useLibraryView() {
   }, [setActiveViewKey, viewKey]);
 
   useEffect(() => {
-    if (viewState || isBootstrapping) {
+    if (isBootstrapping) {
+      return;
+    }
+    const storeState = useLibraryStore.getState();
+    const existingView = storeState.views[viewKey];
+    if (
+      existingView &&
+      !existingView.loading &&
+      (!existingView.error || storeState.searchError !== null)
+    ) {
+      return;
+    }
+    if (inFlightViewKeysRef.current.has(viewKey)) {
       return;
     }
     void fetchPage(1, false);
-  }, [fetchPage, isBootstrapping, viewState]);
-
-  const setScope = (nextScope: LibraryScope) => {
-    const next = new URLSearchParams(searchParams);
-    if (nextScope === 'all') {
-      next.delete('view');
-    } else {
-      next.set('view', nextScope);
-    }
-    setSearchParams(next);
-  };
-
-  const setSort = (nextSort: BookmarkSort) => {
-    const next = new URLSearchParams(searchParams);
-    if (nextSort === 'updated') {
-      next.delete('sort');
-    } else {
-      next.set('sort', nextSort);
-    }
-    setSearchParams(next);
-  };
+  }, [fetchPage, isBootstrapping, viewKey]);
 
   const loadMore = async () => {
     if (!viewState || !viewState.hasMore || viewState.loadingMore || viewState.loading) {
@@ -112,6 +142,7 @@ export function useLibraryView() {
   };
 
   const retry = () => {
+    inFlightViewKeysRef.current.delete(viewKey);
     void fetchPage(1, false);
   };
 
@@ -120,13 +151,30 @@ export function useLibraryView() {
     sort,
     viewKey,
     layoutMode,
+    filters,
+    hasFilters,
+    hasSearchOrFilters,
+    searchError,
     setLayoutMode,
     setScope,
     setSort,
+    setSearch,
+    setType,
+    addTag,
+    removeTag,
+    toggleTag,
+    setFavorite,
+    setNotag,
+    setBroken,
+    setFile,
+    setCreatedRange,
+    setMatchOr,
+    clearFilters,
+    clearSearchAndFilters,
     items,
     totalCount: viewState?.totalCount ?? items.length,
     hasMore: viewState?.hasMore ?? false,
-    loading: (viewState?.loading ?? (!viewState && isBootstrapping)) && items.length === 0,
+    loading: (viewState?.loading ?? !viewState) && items.length === 0,
     loadingMore: viewState?.loadingMore ?? false,
     error: viewState?.error ?? null,
     selectedBookmarkIds,
