@@ -319,6 +319,8 @@ const EXPECTED_TOOLS = [
   'exportData',
   'importData',
   'exportBookmarkHighlights',
+  'findDuplicates',
+  'resolveDuplicates',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -750,7 +752,7 @@ describe('MCP server (e2e)', () => {
         }
       ).tools;
       const mutationTools = toolList.filter((t) => t.annotations.readOnlyHint === false);
-      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 11); // 11 read tools (M10 added listHighlights)
+      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 12); // 12 read tools (M12 added findDuplicates)
 
       let checked = 0;
       for (const tool of mutationTools) {
@@ -767,7 +769,7 @@ describe('MCP server (e2e)', () => {
         expect(text).toContain(tool.name);
         checked += 1;
       }
-      expect(checked).toBe(20);
+      expect(checked).toBe(21);
 
       // read tools DO run for the same token
       const read = await mcpPost(

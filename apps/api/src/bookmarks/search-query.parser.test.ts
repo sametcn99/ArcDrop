@@ -250,14 +250,14 @@ describe('SearchQueryParser', () => {
     ]);
   });
 
-  it('parses type:, favorite:, and notag: including negations and case-insensitivity', () => {
+  it('parses type:, favorite:, notag:, and broken: including negations and case-insensitivity', () => {
     for (const type of CONTENT_TYPES) {
       const parsed = parseSearchQuery(`type:${type.toUpperCase()}`);
       expect(parsed.clauses).toEqual([{ kind: 'type', value: type, negated: false, position: 0 }]);
     }
 
     const combined = parseSearchQuery(
-      '-type:video favorite:true -favorite:FALSE notag:true -notag:false',
+      '-type:video favorite:true -favorite:FALSE notag:true -notag:false broken:true -broken:FALSE',
     );
     expect(combined.clauses).toEqual([
       { kind: 'type', value: 'video', negated: true, position: 0 },
@@ -265,6 +265,8 @@ describe('SearchQueryParser', () => {
       { kind: 'favorite', value: false, negated: true, position: 26 },
       { kind: 'notag', value: true, negated: false, position: 42 },
       { kind: 'notag', value: false, negated: true, position: 53 },
+      { kind: 'broken', value: true, negated: false, position: 66 },
+      { kind: 'broken', value: false, negated: true, position: 78 },
     ]);
 
     expectParseError('type:podcast', { code: 'INVALID_VALUE', position: 5, operator: 'type' });
@@ -274,6 +276,8 @@ describe('SearchQueryParser', () => {
       operator: 'favorite',
     });
     expectParseError('notag:0', { code: 'INVALID_VALUE', position: 6, operator: 'notag' });
+    expectParseError('broken:maybe', { code: 'INVALID_VALUE', position: 7, operator: 'broken' });
+    expectParseError('broken:', { code: 'MISSING_VALUE', position: 7, operator: 'broken' });
   });
 
   it('parses created: and lastUpdate: with YYYY[-MM[-DD]] and <, >, <=, >= prefixes', () => {
@@ -363,7 +367,7 @@ describe('SearchQueryParser', () => {
   });
 
   it('rejects reserved-but-inactive operators with "operator not available yet"', () => {
-    for (const op of ['broken:true', '-broken:false', 'file:true', 'reminder:true', 'broken:']) {
+    for (const op of ['file:true', 'reminder:true', 'file:']) {
       const name = op.replace(/^-/, '').split(':')[0]!.toLowerCase();
       expectParseError(op, {
         code: 'RESERVED_OPERATOR',

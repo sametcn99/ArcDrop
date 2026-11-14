@@ -22,6 +22,11 @@ export interface FetchedDocument {
   finalUrl: string;
 }
 
+export interface ProbeResult {
+  status: number;
+  finalUrl: string;
+}
+
 /**
  * The failure vocabulary for refused/failed fetches. The metadata pipeline
  * treats EVERY error here as "silent failure" — the bookmark keeps its
@@ -57,7 +62,8 @@ export interface SecureFetchOptions {
 }
 
 /**
- * SSRF-hardened document fetcher (plan M6, ticket M6 — hard requirement):
+ * SSRF-hardened document fetcher (plan M6, ticket M6 — hard requirement;
+ * reused by M12 broken-links checker):
  *
  * - **DNS is resolved BEFORE connecting** and every resolved address
  *   (IPv4 + IPv6) must be public. Unresolvable or unclassifiable hostnames
@@ -114,6 +120,82 @@ export class SsrfSafeFetchService {
   /** Fetches an image (cover / favicon → icon cache). */
   fetchImage(url: string, opts: SecureFetchOptions = {}): Promise<FetchedDocument> {
     return this.secureFetch(url, { ...opts, imageOnly: true });
+  }
+
+  /**
+   * Lightweight reachability probe for M12 broken-link checking: runs the exact
+   * same SSRF-guarded hop walk using `HEAD`, falling back to `GET` if a server
+   * rejects `HEAD` with 405 or 501, and immediately cancels any response body.
+   * Returns any non-redirect HTTP status (`200`, `404`, `500`, …) so the caller
+   * can apply detection-mode policy; throws `MetadataFetchError` on SSRF
+   * refusal, DNS failure, timeout, network error, or redirect failures.
+   */
+  async probeUrl(url: string, opts: { deadlineMs?: number } = {}): Promise<ProbeResult> {
+    const deadline = Date.now() + (opts.deadlineMs ?? FETCH_DEADLINE_MS);
+    let current = this.validatedUrl(url);
+    let method: 'HEAD' | 'GET' = 'HEAD';
+
+    for (let hop = 0; ; hop++) {
+      // The allowPrivate affordance (tests/dev) relaxes ONLY hop 0.
+      const strict = !(hop === 0 && this.config.metadataAllowPrivate);
+      await this.assertSafeTarget(current, strict);
+
+      let response = await this.sendHopRequest(current, method, deadline);
+      if ((response.status === 405 || response.status === 501) && method === 'HEAD') {
+        void response.body?.cancel().catch(() => {});
+        method = 'GET';
+        response = await this.sendHopRequest(current, method, deadline);
+      }
+
+      if (REDIRECT_STATUSES.has(response.status)) {
+        const location = response.headers.get('location');
+        void response.body?.cancel().catch(() => {});
+        if (!location) {
+          throw new MetadataFetchError(
+            'redirect-without-location',
+            `no Location on ${response.status} from ${current.href}`,
+          );
+        }
+        if (hop >= MAX_REDIRECTS) {
+          throw new MetadataFetchError(
+            'too-many-redirects',
+            `more than ${MAX_REDIRECTS} redirects`,
+          );
+        }
+        current = this.validatedUrl(new URL(location, current).href);
+        continue;
+      }
+
+      void response.body?.cancel().catch(() => {});
+      return { status: response.status, finalUrl: current.href };
+    }
+  }
+
+  private async sendHopRequest(
+    target: URL,
+    method: 'HEAD' | 'GET',
+    deadline: number,
+  ): Promise<Response> {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new MetadataFetchError('timeout');
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), remaining);
+    try {
+      return await this.fetchFn(target.href, {
+        method,
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+    } catch (error) {
+      const reason = controller.signal.aborted ? 'timeout' : 'network-error';
+      throw new MetadataFetchError(
+        reason,
+        `${reason} fetching ${target.href}: ${(error as Error).message}`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

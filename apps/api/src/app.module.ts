@@ -19,6 +19,7 @@ import { MetadataModule } from './metadata/metadata.module';
 import { SyncModule } from './sync/sync.module';
 import { McpModule } from './mcp/mcp.module';
 import { PortabilityModule } from './portability/portability.module';
+import { LibraryHealthModule } from './library-health/library-health.module';
 import { ProblemJsonFilter } from './common/problem-json/problem-json.filter';
 import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 
@@ -26,7 +27,8 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
  * ArcDrop API root module (plan M1 — API foundation, M2 — auth & users,
  * M3 — bookmarks core, M4 — collections, M5 — sync, M6 — metadata & icons,
  * M7 — MCP server + personal access tokens + audit, M8 — portability,
- * M9 — hardening & ops).
+ * M9 — hardening & ops, M10 — enrichment, M11 — search operators,
+ * M12 — library health).
  *
  * Import order matters for DI resolution: config first, then logging (so the
  * pino-backed Nest logger exists before anything logs), then infrastructure
@@ -57,6 +59,7 @@ import { RateLimitModule } from './common/rate-limit/rate-limit.module';
     BookmarksModule,
     CollectionsModule,
     SyncModule,
+    LibraryHealthModule,
     McpModule,
     PortabilityModule,
   ],

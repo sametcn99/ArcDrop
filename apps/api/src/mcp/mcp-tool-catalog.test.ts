@@ -5,6 +5,7 @@ import type { BookmarksService } from '@api/bookmarks/bookmarks.service';
 import type { HighlightsService } from '@api/bookmarks/highlights.service';
 import type { TagsService } from '@api/bookmarks/tags.service';
 import type { CollectionsService } from '@api/collections/collections.service';
+import type { DuplicatesService } from '@api/library-health/duplicates.service';
 import type { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import type { PortabilityService } from '@api/portability/portability.service';
 import type { SyncService } from '@api/sync/sync.service';
@@ -16,13 +17,14 @@ const stubs = {} as {
   highlights: HighlightsService;
   tags: TagsService;
   collections: CollectionsService;
+  duplicates: DuplicatesService;
   metadata: MetadataFetchService;
   sync: SyncService;
   syncTickets: SyncTicketService;
   portability: PortabilityService;
 };
 
-/** The catalog per the tickets — M8 added portability tools; M10 added highlights CRUD. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -35,6 +37,8 @@ const EXPECTED_TOOLS = [
   'reindexBookmark',
   'getBookmarkStats',
   'listBookmarkTags',
+  'findDuplicates',
+  'resolveDuplicates',
   'listHighlights',
   'createHighlight',
   'updateHighlight',
@@ -57,7 +61,7 @@ const EXPECTED_TOOLS = [
   'exportBookmarkHighlights',
 ] as const;
 
-describe('MCP tool catalog (M7)', () => {
+describe('MCP tool catalog (M7/M12)', () => {
   const catalog = buildToolCatalog(stubs);
   const byName = new Map(catalog.map((tool) => [tool.name, tool]));
 
@@ -80,6 +84,7 @@ describe('MCP tool catalog (M7)', () => {
         'getBookmark',
         'getBookmarkStats',
         'listBookmarkTags',
+        'findDuplicates',
         'listHighlights',
         'listCollections',
         'getCollectionTree',

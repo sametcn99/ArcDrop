@@ -55,7 +55,7 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 
 /**
- * Bookmark surface (plan M3, extended M10/M11). All routes are bearer-authenticated
+ * Bookmark surface (plan M3, extended M10/M11/M12). All routes are bearer-authenticated
  * (global guard) and user-scoped; `GET /bookmarks/tags` and `PUT /bookmarks/{id}/tags`
  * expose tags, `GET/POST /bookmarks/{id}/highlights` expose highlights.
  */
@@ -108,15 +108,15 @@ export class BookmarksController {
     summary: 'Search / filter / page the caller’s bookmarks',
     description:
       'Searches and filters bookmarks. The `search` (or alias `q`) query parameter parses ' +
-      'the canonical M11 Raindrop-compatible operator grammar: plain `word` / `"exact phrase"` ' +
+      'the canonical M11/M12 Raindrop-compatible operator grammar: plain `word` / `"exact phrase"` ' +
       '(case-insensitive ILIKE across title, excerpt, note, url, and tag names), ' +
       '`-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
       'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable), ' +
       '`type:<article|image|video|audio|document|book|link>`, `favorite:true|false`, `notag:true|false`, ' +
-      '`created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` ' +
-      '(OR positive terms; exclusions stay ANDed). Reserved operators (`broken:`, `file:`, `reminder:`) ' +
+      '`broken:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` ' +
+      '(OR positive terms; exclusions stay ANDed). Reserved operators (`file:`, `reminder:`) ' +
       'and unknown operators return `400 BAD_REQUEST` with character position. ' +
-      'Composes with `collectionId` (membership is membership), `tag`, `domain`, `favorite`, `type`, ' +
+      'Composes with `collectionId` (membership is membership), `tag`, `domain`, `favorite`, `broken`, `type`, ' +
       '`unassignedOnly`, `trashed`, and `updatedSince` via AND. ' +
       '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc (default), `createdAt` desc or `title` asc.',
   })
@@ -164,7 +164,7 @@ export class BookmarksController {
     operationId: 'updateBookmark',
     summary: 'Update a bookmark (PUT: provided fields replace, null clears)',
     description:
-      'Changing `url` re-runs the URL decomposition (plan D12). Refuses trashed bookmarks.',
+      'Changing `url` re-runs the URL decomposition (plan D12) and clears any broken-link flag (M12). Refuses trashed bookmarks.',
   })
   @ApiOkResponse({ type: BookmarkDto })
   update(

@@ -193,7 +193,7 @@ export class UpdateBookmarkDto {
 
 export class ListBookmarksQueryDto {
   /**
-   * Search query using the M11 operator grammar (D10/D19). Plain terms remain
+   * Search query using the M11/M12 operator grammar (D10/D19). Plain terms remain
    * the degenerate case (case-insensitive ILIKE across title, excerpt, note,
    * url, and tag names).
    */
@@ -206,10 +206,10 @@ export class ListBookmarksQueryDto {
       '`#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
       'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable with `-`), ' +
       '`type:<article|image|video|audio|document|book|link>`, ' +
-      '`favorite:true|false`, `notag:true|false`, ' +
+      '`favorite:true|false`, `notag:true|false`, `broken:true|false`, ' +
       '`created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), ' +
       'and `match:OR` (OR positive terms; exclusions stay ANDed). ' +
-      'Reserved (`broken:`, `file:`, `reminder:`) and unknown operators fail with 400 BAD_REQUEST.',
+      'Reserved (`file:`, `reminder:`) and unknown operators fail with 400 BAD_REQUEST.',
   })
   @IsOptional()
   @IsString()
@@ -220,7 +220,7 @@ export class ListBookmarksQueryDto {
   @ApiPropertyOptional({
     maxLength: 500,
     description:
-      'Alias for `search` — accepts the same M11 search operator grammar. ' +
+      'Alias for `search` — accepts the same M11/M12 search operator grammar. ' +
       'Provide either `search` or `q`, not both.',
   })
   @IsOptional()
@@ -258,6 +258,14 @@ export class ListBookmarksQueryDto {
   @Transform(toBoolean)
   @IsBoolean()
   favorite?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Filter by broken-link status (`true` = flagged broken, `false` = healthy)',
+  })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  broken?: boolean;
 
   @ApiPropertyOptional({ enum: CONTENT_TYPES, description: 'Filter by detected content type' })
   @IsOptional()
@@ -457,6 +465,26 @@ export class BookmarkDto {
 
   @ApiProperty({ type: [TagDto] })
   tags!: TagDto[];
+
+  @ApiProperty({
+    nullable: true,
+    format: 'date-time',
+    description: 'Timestamp of the last broken-link check (M12)',
+  })
+  lastCheckedAt!: Date | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Machine reason why the URL was flagged broken, null when healthy (M12)',
+  })
+  brokenReason!: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    format: 'date-time',
+    description: 'When the bookmark was first flagged broken, null when healthy (M12)',
+  })
+  brokenAt!: Date | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

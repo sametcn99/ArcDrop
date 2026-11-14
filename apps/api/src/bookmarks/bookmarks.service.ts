@@ -30,9 +30,9 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 
 /**
  * Bookmark CRUD, trash/restore, server-side search + paging and stats
- * (plan M3, D10/D12/D13/D17; enriched M10; operator grammar M11). Every route
- * is user-scoped — a row another user owns simply does not exist (404, never
- * 403: existence is not leaked).
+ * (plan M3, D10/D12/D13/D17; enriched M10; operator grammar M11;
+ * broken-link state M12). Every route is user-scoped — a row another user
+ * owns simply does not exist (404, never 403: existence is not leaked).
  *
  * Every mutation runs through `ChangeLogService.transact` so the ChangeEvent
  * is appended in the mutation's own transaction with a gapless per-user seq,
@@ -63,7 +63,7 @@ export class BookmarksService {
   }
 
   /**
-   * Search + filters + paging (plan D10, M10, M11). Defaults: active set
+   * Search + filters + paging (plan D10, M10, M11, M12). Defaults: active set
    * (trashed excluded), sort by `updatedAt` desc, pageSize 20 clamped to 200.
    */
   async list(user: RequestUser, query: ListBookmarksQueryDto): Promise<BookmarkListDto> {
@@ -117,6 +117,12 @@ export class BookmarksService {
 
     if (query.favorite !== undefined) {
       qb.andWhere('b.favorite = :favorite', { favorite: query.favorite });
+    }
+
+    if (query.broken === true) {
+      qb.andWhere('b.brokenAt IS NOT NULL');
+    } else if (query.broken === false) {
+      qb.andWhere('b.brokenAt IS NULL');
     }
 
     if (query.type !== undefined) {
@@ -238,6 +244,9 @@ export class BookmarksService {
         contentType: 'link',
         coverRef: null,
         iconRef: null,
+        lastCheckedAt: null,
+        brokenReason: null,
+        brokenAt: null,
         ...parts,
         createdAt: now,
         updatedAt: now,
@@ -266,8 +275,9 @@ export class BookmarksService {
 
   /**
    * PUT semantics: provided fields replace (explicit null clears), absent
-   * fields stay. A url change re-runs the decomposition (D12). Refuses
-   * trashed bookmarks (404 among the active set).
+   * fields stay. A url change re-runs the decomposition (D12) and clears any
+   * broken-link flag (`brokenAt`, `brokenReason`, `lastCheckedAt` = null, M12).
+   * Refuses trashed bookmarks (404 among the active set).
    *
    * A url change also schedules the M6 pipeline in `refresh` mode after the
    * commit: coverRef/iconRef/contentType belong to the page THE URL pointed at,
@@ -286,7 +296,12 @@ export class BookmarksService {
       const patch: Partial<Bookmark> = {};
       if (dto.url !== undefined) {
         Object.assign(patch, this.urls.decompose(dto.url), { url: dto.url });
-        if (dto.url !== row.url) urlChangedTo = dto.url;
+        if (dto.url !== row.url) {
+          urlChangedTo = dto.url;
+          patch.brokenAt = null;
+          patch.brokenReason = null;
+          patch.lastCheckedAt = null;
+        }
       }
       if (dto.title !== undefined) patch.title = dto.title;
       if (dto.excerpt !== undefined) patch.excerpt = dto.excerpt;
@@ -468,6 +483,9 @@ export function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
       fragment: row.fragment,
     },
     tags,
+    lastCheckedAt: row.lastCheckedAt ?? null,
+    brokenReason: row.brokenReason ?? null,
+    brokenAt: row.brokenAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null, // in-memory entities may carry undefined

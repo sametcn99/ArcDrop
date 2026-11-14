@@ -484,7 +484,7 @@ describe('Search operators M11 (e2e)', () => {
   });
 
   it('returns 400 problem+json ("operator not available yet") for reserved operators', async () => {
-    for (const op of ['broken:true', 'file:pdf', 'reminder:true']) {
+    for (const op of ['file:pdf', 'reminder:true']) {
       const res = await call(baseUrl, 'GET', `/bookmarks?search=${encodeURIComponent(op)}`, {
         bearer: admin.accessToken,
       });
@@ -570,7 +570,7 @@ describe('Search operators M11 (e2e)', () => {
         inputSchema: { properties?: Record<string, unknown> };
       }>
     ).find((t) => t.name === 'listBookmarks');
-    expect(listTool?.description).toContain('M11 operator grammar');
+    expect(listTool?.description).toContain('M11/M12 operator grammar');
     expect(listTool?.inputSchema.properties?.['q']).toBeDefined();
 
     const ok = await mcpPost(

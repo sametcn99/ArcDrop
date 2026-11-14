@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M11 — search operators (**Wave 2: M0–M11**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (31 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; plus M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract). **Next:** Wave 2 — M12 (library health — duplicates & broken-link scanner).
+**Status:** M12 — library health (**Wave 2: M0–M12**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (33 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); plus M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation). **Next:** Wave 2 — M13 (bulk operations).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -118,10 +118,12 @@ generated migrations.
   `users.sync_seq`), `M4Collections1794611852359` (collections + the
   `bookmark_collections.collection_id` FK ON DELETE CASCADE + the `collection`
   value on the `change_entity` enum), `M7TokensAudit1794619559850`
-  (personal_access_tokens + audit_log_entries), and
+  (personal_access_tokens + audit_log_entries),
   `M10BookmarkEnrichment1794626882385` (`highlights` table, `bookmarks.favorite`,
   `bookmark_content_type` enum + `bookmarks.content_type`, and `'highlight'` on
-  `change_entity`). M5/M6/M8/M9 needed NO schema work.
+  `change_entity`), and `M12LibraryHealth1794629705566` (`bookmarks.last_checked_at`,
+  `bookmarks.broken_reason`, `bookmarks.broken_at`, and `IX_bookmarks_user_broken_at`).
+  M5/M6/M8/M9/M11 needed NO schema work.
 
 ### Migration workflow
 
@@ -498,8 +500,8 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 + M10/M11 catalog (31 tools):** bookmarks `listBookmarks` (incl. M11
-  `search`/`q` operator grammar, `favorite`, and `type` filters), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
+- **v1 + M10–M12 catalog (33 tools):** bookmarks `listBookmarks` (incl. M11/M12
+  `search`/`q` operator grammar, `favorite`, `type`, and `broken` filters + broken-status fields), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
   `favorite` toggle), `deleteBookmark` (trash), `restoreBookmark`,
   `replaceBookmarkTags`, `replaceBookmarkCollections` (membership sync),
   `reindexBookmark`, `getBookmarkStats` (incl. `favorites`),
@@ -511,7 +513,8 @@ like extra REST JSON bodies (DTO whitelist), never errors.
   `PUT /tags/{name}`), `deleteTag`; sync `getSyncState`, `listSyncChanges`,
   `createSyncTicket` (ws push — an agent can watch the library the same way a
   device does); portability (M8/M10) `exportData`, `importData`,
-  `exportBookmarkHighlights`. Tools return
+  `exportBookmarkHighlights`; library health (M12) `findDuplicates`,
+  `resolveDuplicates`. Tools return
   `structuredContent` (the exact service result; void operations return a
   bare `ok`) plus the same JSON as readable text content. Annotations carry
   `readOnlyHint` (derived from the REST method) and `idempotentHint`.
@@ -1360,19 +1363,34 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 | `notag:true\|false`                       | Untagged (`true`) or has ≥1 tag (`false`)                                                  | Negatable (`-notag:true`)                                                                                            |
 | `created:` / `lastUpdate:`                | UTC date/range filter with optional `<`, `>`, `<=`, `>=` prefix and `YYYY[-MM[-DD]]` value | `created:2025-05` matches `[2025-05-01T00:00Z, 2025-06-01T00:00Z)`; calendar-validated (incl. leap years); negatable |
 | `match:OR` / `match:AND`                  | Match mode (`AND` default)                                                                 | In `OR` mode, positive clauses are OR'd and exclusions (`-...`) stay ANDed outside                                   |
-| `broken:` / `file:` / `reminder:`         | Reserved Wave-2 operators (M12 / M18 / M14)                                                | Fail explicitly with `400 BAD_REQUEST` (`"operator not available yet"`)                                              |
+| `broken:true\|false`                      | Broken-link state (`brokenAt IS NOT NULL` / `IS NULL`) — active since M12                  | Negatable (`-broken:true`); reflects instance `brokenLinkCheckMode` sweeps                                           |
+| `file:` / `reminder:`                     | Reserved Wave-2 operators (M18 / M14)                                                      | Fail explicitly with `400 BAD_REQUEST` (`"operator not available yet"`)                                              |
 
 - **Error contract:** invalid syntax, unknown operators (`foo:bar`), bad dates, reserved operators, or supplying both `search` and `q` return `400 BAD_REQUEST` (`application/problem+json` on REST, `CallToolResult { isError: true }` on MCP) with the exact character `position` in the message. Bare URLs (`https://…`), time-like numbers (`12:30`), lone `-`, and `--flags` stay plain text terms.
 - **Composability & M17 extensibility:** compiled grammar predicates compose via `AND` with all REST query parameters (`collectionId`, `tag`, `domain`, `favorite`, `type`, `unassignedOnly`, `trashed`, `updatedSince`). `DEFAULT_TEXT_SEARCH_FIELDS` and `DEFAULT_TEXT_FIELD_BUILDERS` are registry-driven so M17 can plug in full-text `content` / `highlights` fields without rewriting the parser.
 
-## Wave-2 Handoff (for M12+)
+## Library health (M12 — D13, D19, Raindrop parity G10, G11)
 
-M0–M11 are complete and green (291 unit / 169 e2e tests across 44 test files). Next is **M12 (library health — duplicate detector & broken-link scanner)**:
+- **Scope note (URL bookmarks only):** File-backed bookmarks do not exist yet (arriving in M18), so both duplicate grouping and broken-link sweeping operate solely on active URL bookmarks.
+- **Duplicates finder (`GET /api/v1/library/duplicates`, operationId `findDuplicates`):** Groups the caller's non-trashed URL bookmarks using `normalizeBookmarkParts` (`src/library-health/url-normalize.ts`, built over D12 `urlParts` without altering verbatim `url` storage per D13): ignores scheme, strips leading `www.` on multi-label hosts (keeping non-`www.` subdomains), preserves non-default ports, strips trailing slashes on non-root paths while preserving case sensitivity, drops fragments, removes tracking parameters (`utm_*`, `fbclid`, `gclid`, `ref`, `mc_cid`, `mc_eid`, case-insensitive), and sorts remaining query parameters deterministically. Groups with `≥ 2` rows return `{ normalizedUrl, original, extras[] }` ordered oldest-first (`createdAt ASC, id ASC`).
+- **Transactional resolve (`POST /api/v1/library/duplicates/resolve`, operationId `resolveDuplicates`):** Validates `keepId` and `trashIds[]` (active, owned, `keepId ∉ trashIds`), merges unique tags and collection memberships onto `keepId`, soft-trashes `trashIds` (`deletedAt = now`), and records change events for the modified keeper, touched collections, and trashed extras inside one `ChangeLogService.transact` transaction so sync cursors reconstruct the exact merged state.
+- **Broken-links scanner:** Adds `lastCheckedAt`, `brokenReason`, and `brokenAt` on `Bookmark` (migration `M12LibraryHealth1794629705566`, exposed on `BookmarkDto` and sync snapshots) plus the instance setting `brokenLinkCheckMode` (`'off' | 'basic' | 'default' | 'strict'`, default `'default'`, admin-managed via `PUT /admin/settings`):
+  - `off`: scanner never checks.
+  - `basic`: marks `404` / `410` only.
+  - `default`: `basic` + DNS resolution failure (`dns-resolution-failed`).
+  - `strict`: `default` + `5xx` + timeouts / redirect loops / missing-location redirects / network errors.
+- **SSRF & gentle scheduling:** `BrokenLinksService` reuses M6's `SsrfSafeFetchService.probeUrl` (DNS-resolve-first, private-IP blocking on hop 0 when `ALLOW_PRIVATE=false` and strictly on every hop `≥ 1`, `HEAD` with `405` → `GET` fallback). Policy refusals (`private-address-blocked`, `scheme-refused`, `invalid-url`, `unclassifiable-address`) are skipped without connecting or flagging broken. `BrokenLinksJob` runs daily at `06:00` (staggered behind `03:00` trash purge, `04:00` sync retention, `05:00` icon eviction) with concurrency capped at `≤ 5` and jittered intervals. Successful recovery (`2xx–3xx`) or editing a bookmark's URL (`PUT /bookmarks/{id}`) clears `brokenAt`/`brokenReason` (and records `bookmark:update` on sweep status changes).
+- **Filtering & MCP parity:** `GET /bookmarks?broken=true|false` and M11 grammar `broken:true|false` (`-broken:true`) filter active/trashed lists; `findDuplicates` and `resolveDuplicates` are registered in `src/mcp/mcp-tool-catalog.ts` (33 tools total: 12 reads, 21 mutations, with read-only PAT enforcement on `resolveDuplicates`).
 
-- **Normalization surface for M12 duplicates finder:** `UrlDecompositionService` (`src/bookmarks/url-decomposition.service.ts`) already decomposes `scheme`, `host`, `domain`, `port`, `path`, `query`, and `fragment` on every bookmark write (D12). Layer canonical/duplicate URL normalization alongside it without altering existing `url` verbatim storage (D13).
-- **Activating `broken:` in M12:** `SearchQueryParser` (`src/bookmarks/search-query.parser.ts`) already tracks `RESERVED_OPERATORS.broken` and accepts `SearchParserOptions.enabledReservedOperators`. When M12 adds broken-link status to `Bookmark`, wire `broken:true|false` in `search-query.parser.ts` + `search-query.compiler.ts` (and enable it in `BookmarksService.list`) while leaving `file:` (M18) and `reminder:` (M14) returning `"operator not available yet"`.
-- **MCP & OpenAPI parity:** keep adding every new authenticated non-admin REST route to `src/mcp/mcp-tool-catalog.ts` and `EXPECTED_TOOLS` in `test/mcp.e2e.test.ts` (any new `ListBookmarksQueryDto` fields auto-propagate to `listBookmarks`'s schema).
-- **Guard, migration & formatting discipline:** keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun run test:unit && bun run test:e2e`.
+## Wave-2 Handoff (for M13+)
+
+M0–M12 are complete and green (307 unit / 175 e2e tests across 47 test files). Next is **M13 (bulk operations)**:
+
+- **Change-log atomicity & sync convergence:** M12's `DuplicatesService.resolveDuplicates` demonstrates batching multi-bookmark updates + membership merges inside one `ChangeLogService.transact` transaction with exact event emission per affected bookmark and collection. Reuse that pattern for M13 bulk tag/collection/favorite/trash/restore/move endpoints (chunking large batches carefully if needed to avoid holding `users.sync_seq` locks excessively long).
+- **URL edit broken-flag reset & metadata reindex:** Any bulk URL rewrite path (if applicable) must clear `brokenAt`/`brokenReason`/`lastCheckedAt` and re-run `UrlDecompositionService.decompose` (D12); bulk trash/restore must keep plain `deletedAt` scoping and preserve tag/collection invariants.
+- **MCP & OpenAPI parity:** Add every new authenticated non-admin M13 REST operation to `src/mcp/mcp-tool-catalog.ts` (with `@ApiOperation({ operationId })` matching the tool name) and extend `EXPECTED_TOOLS` in `test/mcp.e2e.test.ts` (read-only PAT enforcement derives automatically from the REST HTTP method).
+- **Reserved search operators remaining:** `broken:` is now active (M12); `file:` (M18) and `reminder:` (M14) remain reserved in `src/bookmarks/search-query.parser.ts`.
+- **Guard, migration & formatting discipline:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun test src && bun test e2e`.
 
 ## Decisions recorded (M4)
 

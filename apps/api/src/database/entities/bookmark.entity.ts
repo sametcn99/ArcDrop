@@ -40,7 +40,7 @@ export interface UrlParts {
 }
 
 /**
- * A user's bookmark (plan M3, D12/D13; enriched M10).
+ * A user's bookmark (plan M3, D12/D13; enriched M10; library health M12).
  *
  * - `url` is stored VERBATIM — never rewritten, never client-writable derived
  *   columns. The `urlParts` columns are derived on every url write via
@@ -55,6 +55,7 @@ export interface UrlParts {
 @Index('IX_bookmarks_user_host', ['userId', 'host'])
 @Index('IX_bookmarks_user_favorite', ['userId', 'favorite'])
 @Index('IX_bookmarks_user_content_type', ['userId', 'contentType'])
+@Index('IX_bookmarks_user_broken_at', ['userId', 'brokenAt'])
 export class Bookmark {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -129,6 +130,18 @@ export class Bookmark {
   /** Fragment WITHOUT the leading `#`; `null` when the url has none. */
   @Column({ type: 'text', nullable: true })
   fragment!: string | null;
+
+  // -- Library health / broken-link state (M12) ----------------------------
+
+  @Column({ type: 'timestamptz', name: 'last_checked_at', nullable: true })
+  lastCheckedAt!: Date | null;
+
+  @Column({ type: 'text', name: 'broken_reason', nullable: true })
+  brokenReason!: string | null;
+
+  /** Null = healthy (or not yet checked); non-null = flagged broken since this timestamp. */
+  @Column({ type: 'timestamptz', name: 'broken_at', nullable: true })
+  brokenAt!: Date | null;
 
   // -- Lifecycle ------------------------------------------------------------
 

@@ -26,6 +26,8 @@ import {
   UpdateCollectionDto,
 } from '@api/collections/collections.dto';
 import { CollectionsService } from '@api/collections/collections.service';
+import { DuplicatesService } from '@api/library-health/duplicates.service';
+import { ResolveDuplicatesDto } from '@api/library-health/library-health.dto';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import {
   ExportDataDto,
@@ -77,11 +79,11 @@ function define(
 
 /**
  * The ArcDrop MCP tool catalog (plan M7/D23) — one tool per REST operation
- * of the user-facing surface (bookmarks, highlights, collections, tags, sync,
- * reindex). Names ARE the REST `operationId`s; input schemas are generated
- * from the same DTO classes the REST routes validate; every call goes
- * through the SAME services — identical validation, user scoping and
- * change-log semantics. An agent is just another client.
+ * of the user-facing surface (bookmarks, highlights, collections, tags,
+ * library health, sync, reindex). Names ARE the REST `operationId`s; input
+ * schemas are generated from the same DTO classes the REST routes validate;
+ * every call goes through the SAME services — identical validation, user
+ * scoping and change-log semantics. An agent is just another client.
  *
  * NOT mirrored on purpose: `/auth/*` and `/admin/*` (unreachable via PAT),
  * `/me/tokens` (a PAT must not mint credentials), health/icons/metrics
@@ -92,19 +94,29 @@ export function buildToolCatalog(deps: {
   highlights: HighlightsService;
   tags: TagsService;
   collections: CollectionsService;
+  duplicates: DuplicatesService;
   metadata: MetadataFetchService;
   sync: SyncService;
   syncTickets: SyncTicketService;
   portability: PortabilityService;
 }): McpToolDefinition[] {
-  const { bookmarks, highlights, tags, collections, metadata, sync, syncTickets, portability } =
-    deps;
+  const {
+    bookmarks,
+    highlights,
+    tags,
+    collections,
+    duplicates,
+    metadata,
+    sync,
+    syncTickets,
+    portability,
+  } = deps;
   return [
-    // -- bookmarks (M3/M6/M10/M11) -----------------------------------------
+    // -- bookmarks (M3/M6/M10/M11/M12) ---------------------------------------
     define(
       'listBookmarks',
       'GET',
-      'Search / filter / page bookmarks. `search` (or alias `q`) parses the canonical M11 operator grammar: `word`, `"exact phrase"` (across title/excerpt/note/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `favorite:true|false`, `notag:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`broken:`, `file:`, `reminder:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, type, updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
+      'Search / filter / page bookmarks (including broken-link fields lastCheckedAt/brokenReason/brokenAt). `search` (or alias `q`) parses the canonical M11/M12 operator grammar: `word`, `"exact phrase"` (across title/excerpt/note/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`file:`, `reminder:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, type, updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
       [ListBookmarksQueryDto],
       (user, [query]) => bookmarks.list(user, query as ListBookmarksQueryDto),
     ),
@@ -125,7 +137,7 @@ export function buildToolCatalog(deps: {
     define(
       'updateBookmark',
       'PUT',
-      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle), explicit null clears, absent fields stay; a url change re-runs URL decomposition and refreshes cover/icon/contentType from the new page. Refuses trashed bookmarks.',
+      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle), explicit null clears, absent fields stay; a url change re-runs URL decomposition, clears any broken-link flag, and refreshes cover/icon/contentType from the new page. Refuses trashed bookmarks.',
       [BookmarkIdParamDto, UpdateBookmarkDto],
       (user, [p, dto]) =>
         bookmarks.update(user, (p as BookmarkIdParamDto).id, dto as UpdateBookmarkDto),
@@ -191,6 +203,22 @@ export function buildToolCatalog(deps: {
       'The caller’s tags with usage counts (ACTIVE bookmarks), sorted by name.',
       [],
       (user) => tags.listUsage(user.id),
+    ),
+
+    // -- library health (M12) ------------------------------------------------
+    define(
+      'findDuplicates',
+      'GET',
+      'Group the caller’s active URL bookmarks by normalized URL (ignoring scheme, leading www., trailing slash except root /, fragment, and tracking params utm_*/fbclid/gclid/ref/mc_cid/mc_eid). Returns { groups: [{ normalizedUrl, original, extras[] }] } with oldest bookmark as original.',
+      [],
+      (user) => duplicates.findDuplicates(user.id),
+    ),
+    define(
+      'resolveDuplicates',
+      'POST',
+      'Merge tags and collection memberships from trashIds into keepId and move trashIds to the trash in one change-logged transaction. Returns { kept, trashedIds }.',
+      [ResolveDuplicatesDto],
+      (user, [dto]) => duplicates.resolveDuplicates(user.id, dto as ResolveDuplicatesDto),
     ),
 
     // -- highlights (M10 / D6) ---------------------------------------------

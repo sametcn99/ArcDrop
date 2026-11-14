@@ -151,6 +151,14 @@ function compileClause(
       };
     }
 
+    case 'broken': {
+      const wantBroken = clause.negated ? !clause.value : clause.value;
+      return {
+        negated: clause.negated,
+        sql: wantBroken ? 'b.brokenAt IS NOT NULL' : 'b.brokenAt IS NULL',
+      };
+    }
+
     case 'date': {
       const col = clause.field === 'createdAt' ? 'b.createdAt' : 'b.updatedAt';
       let positiveSql: string;

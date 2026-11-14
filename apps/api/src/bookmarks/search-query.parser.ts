@@ -21,10 +21,9 @@ export type ScopedBookmarkField = (typeof FIELD_SCOPE_MAP)[FieldScopeOperator];
 /**
  * Operators reserved for upcoming Wave-2 milestones. Parsed explicitly so
  * clients receive an honest 400 ("operator not available yet") rather than
- * silent fallback to plain-text matching.
+ * silent fallback to plain-text matching. (`broken:` activated in M12.)
  */
 export const RESERVED_OPERATORS = {
-  broken: 'M12',
   reminder: 'M14',
   file: 'M18',
 } as const;
@@ -75,6 +74,12 @@ export type SearchClause =
       position: number;
     }
   | {
+      kind: 'broken';
+      value: boolean;
+      negated: boolean;
+      position: number;
+    }
+  | {
       kind: 'date';
       field: 'createdAt' | 'updatedAt';
       comparator: DateComparator;
@@ -93,7 +98,7 @@ export interface ParsedSearchQuery {
 export interface SearchParserOptions {
   /** Override the field set targeted by bare words and `"exact phrases"`. */
   defaultTextFields?: readonly string[];
-  /** Reserved operators explicitly enabled (for M12/M14/M18 integration). */
+  /** Reserved operators explicitly enabled (for M14/M18 integration). */
   enabledReservedOperators?: readonly ReservedOperatorName[];
 }
 
@@ -126,7 +131,7 @@ const isWhitespace = (ch: string): boolean => /\s/.test(ch);
 
 /**
  * Pure parser for ArcDrop's Raindrop-compatible search operator grammar
- * (plan M11, D19, parity G9).
+ * (plan M11, D19, parity G9; extended M12).
  *
  * Grammar summary:
  * - Bare `word` or `"exact phrase"` (supports `\"` and `\\` escapes)
@@ -134,9 +139,9 @@ const isWhitespace = (ch: string): boolean => /\s/.test(ch);
  * - `#tag` and `#"multi word tag"` (and `-#tag` / `-#"multi word tag"`)
  * - `match:OR` / `match:AND` (default `AND`)
  * - Field-scoped: `title:`, `excerpt:`, `note:`, `link:`
- * - Metadata: `type:<contentType>`, `favorite:true|false`, `notag:true|false`
+ * - Metadata: `type:<contentType>`, `favorite:true|false`, `notag:true|false`, `broken:true|false`
  * - Dates: `created:` and `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]`
- * - Reserved (fail with 400 until implemented): `broken:`, `file:`, `reminder:`
+ * - Reserved (fail with 400 until implemented): `file:`, `reminder:`
  */
 export function parseSearchQuery(
   input: string,
@@ -432,6 +437,17 @@ export function parseSearchQuery(
         const boolVal = parseBooleanValue(readValue(valuePos, rawName).value, rawName, valuePos);
         clauses.push({
           kind: 'notag',
+          value: boolVal,
+          negated,
+          position: termPos,
+        });
+        continue;
+      }
+
+      if (opKey === 'broken') {
+        const boolVal = parseBooleanValue(readValue(valuePos, rawName).value, rawName, valuePos);
+        clauses.push({
+          kind: 'broken',
           value: boolVal,
           negated,
           position: termPos,

@@ -418,4 +418,93 @@ describe('SsrfSafeFetchService', () => {
       .catch((e: MetadataFetchError) => e);
     expect((error as MetadataFetchError).reason).toBe('http-status');
   });
+
+  describe('probeUrl (M12 broken-links checker)', () => {
+    it('uses HEAD by default and returns non-2xx statuses without throwing', async () => {
+      const methods: string[] = [];
+      const fetcher = makeFetcher({
+        dns: { 'a.example.test': ['93.184.216.34'] },
+        route: (url, init) => {
+          methods.push(init?.method ?? 'GET');
+          if (url.endsWith('/404')) return new Response(null, { status: 404 });
+          if (url.endsWith('/500')) return new Response(null, { status: 500 });
+          return new Response(null, { status: 200 });
+        },
+      });
+      expect(await fetcher.probeUrl('http://a.example.test/ok')).toEqual({
+        status: 200,
+        finalUrl: 'http://a.example.test/ok',
+      });
+      expect(await fetcher.probeUrl('http://a.example.test/404')).toEqual({
+        status: 404,
+        finalUrl: 'http://a.example.test/404',
+      });
+      expect(await fetcher.probeUrl('http://a.example.test/500')).toEqual({
+        status: 500,
+        finalUrl: 'http://a.example.test/500',
+      });
+      expect(methods).toEqual(['HEAD', 'HEAD', 'HEAD']);
+    });
+
+    it('falls back to GET when HEAD returns 405 or 501', async () => {
+      const methods: string[] = [];
+      const fetcher = makeFetcher({
+        dns: { 'a.example.test': ['93.184.216.34'] },
+        route: (url, init) => {
+          const method = init?.method ?? 'GET';
+          methods.push(method);
+          if (method === 'HEAD') {
+            return new Response(null, { status: url.endsWith('/501') ? 501 : 405 });
+          }
+          return new Response('ok', { status: 200 });
+        },
+      });
+      expect(await fetcher.probeUrl('http://a.example.test/405')).toEqual({
+        status: 200,
+        finalUrl: 'http://a.example.test/405',
+      });
+      expect(await fetcher.probeUrl('http://a.example.test/501')).toEqual({
+        status: 200,
+        finalUrl: 'http://a.example.test/501',
+      });
+      expect(methods).toEqual(['HEAD', 'GET', 'HEAD', 'GET']);
+    });
+
+    it('enforces the same SSRF, DNS, redirect-cap, and timeout guards', async () => {
+      const fetcher = makeFetcher({
+        allowPrivate: true,
+        dns: {
+          '127.0.0.1': ['127.0.0.1'],
+          'public.example.test': ['93.184.216.34'],
+        },
+        route: (url) => {
+          if (url.includes('/redirect-priv')) {
+            return new Response(null, {
+              status: 302,
+              headers: { location: 'http://127.0.0.1:99/x' },
+            });
+          }
+          if (url.includes('/loop')) {
+            return new Response(null, { status: 302, headers: { location: '/loop' } });
+          }
+          return new Response(null, { status: 200 });
+        },
+      });
+
+      const privHop = await fetcher
+        .probeUrl('http://127.0.0.1:8080/redirect-priv')
+        .catch((e: MetadataFetchError) => e);
+      expect((privHop as MetadataFetchError).reason).toBe('private-address-blocked');
+
+      const dnsDead = await fetcher
+        .probeUrl('http://dead.example.test/x')
+        .catch((e: MetadataFetchError) => e);
+      expect((dnsDead as MetadataFetchError).reason).toBe('dns-resolution-failed');
+
+      const tooMany = await fetcher
+        .probeUrl('http://public.example.test/loop')
+        .catch((e: MetadataFetchError) => e);
+      expect((tooMany as MetadataFetchError).reason).toBe('too-many-redirects');
+    });
+  });
 });

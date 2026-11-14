@@ -57,6 +57,7 @@ interface SettingsView {
   registrationOpen: boolean;
   trashRetentionDays: number;
   changeLogRetentionDays: number;
+  brokenLinkCheckMode: 'off' | 'basic' | 'default' | 'strict';
 }
 
 interface CallResult<T> {
@@ -187,6 +188,7 @@ describe('Auth & users (e2e)', () => {
         registrationOpen: false,
         trashRetentionDays: 30,
         changeLogRetentionDays: 90,
+        brokenLinkCheckMode: 'default',
       });
     });
 
