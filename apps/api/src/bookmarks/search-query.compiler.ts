@@ -159,6 +159,14 @@ function compileClause(
       };
     }
 
+    case 'reminder': {
+      const wantReminder = clause.negated ? !clause.value : clause.value;
+      return {
+        negated: clause.negated,
+        sql: wantReminder ? 'b.reminderAt IS NOT NULL' : 'b.reminderAt IS NULL',
+      };
+    }
+
     case 'date': {
       const col = clause.field === 'createdAt' ? 'b.createdAt' : 'b.updatedAt';
       let positiveSql: string;

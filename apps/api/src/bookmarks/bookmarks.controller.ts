@@ -58,7 +58,7 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import { ReindexBookmarkResponseDto } from '@api/metadata/metadata.dto';
 
 /**
- * Bookmark surface (plan M3, extended M10/M11/M12/M13). All routes are
+ * Bookmark surface (plan M3, extended M10/M11/M12/M13/M14). All routes are
  * bearer-authenticated (global guard) and user-scoped; `GET /bookmarks/tags`
  * and `PUT /bookmarks/{id}/tags` expose tags, `GET/POST /bookmarks/{id}/highlights`
  * expose highlights, and `POST /bookmarks/bulk` executes transactional bulk ops.
@@ -84,7 +84,8 @@ export class BookmarksController {
       'Stores the URL verbatim and derives the filterable URL parts server-side ' +
       '(plan D12). Saving the same URL twice creates two bookmarks (plan D13). ' +
       'Supports quick-add query params (`?url=…&title=…&collection=…`) for RSS readers ' +
-      'and share sheets using the same validation and metadata pipeline.',
+      'and share sheets using the same validation and metadata pipeline. ' +
+      'Optional `reminderAt` is stored in UTC (clients render local time).',
   })
   @ApiCreatedResponse({ type: BookmarkDto })
   async create(
@@ -98,6 +99,7 @@ export class BookmarksController {
       excerpt: body.excerpt !== undefined ? body.excerpt : query.excerpt,
       note: body.note !== undefined ? body.note : query.note,
       favorite: body.favorite !== undefined ? body.favorite : query.favorite,
+      reminderAt: body.reminderAt,
     };
     const dto = plainToInstance(CreateBookmarkDto, merged);
     const errors = await validate(dto, { whitelist: true });
@@ -113,15 +115,15 @@ export class BookmarksController {
     summary: 'Search / filter / page the caller’s bookmarks',
     description:
       'Searches and filters bookmarks. The `search` (or alias `q`) query parameter parses ' +
-      'the canonical M11/M12 operator grammar: plain `word` / `"exact phrase"` ' +
+      'the canonical M11/M12/M14 operator grammar: plain `word` / `"exact phrase"` ' +
       '(case-insensitive ILIKE across title, excerpt, note, url, and tag names), ' +
       '`-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
       'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable), ' +
       '`type:<article|image|video|audio|document|book|link>`, `favorite:true|false`, `notag:true|false`, ' +
-      '`broken:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` ' +
-      '(OR positive terms; exclusions stay ANDed). Reserved operators (`file:`, `reminder:`) ' +
+      '`broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` ' +
+      '(OR positive terms; exclusions stay ANDed). Reserved operators (`file:`) ' +
       'and unknown operators return `400 BAD_REQUEST` with character position. ' +
-      'Composes with `collectionId` (membership is membership), `tag`, `domain`, `favorite`, `broken`, `type`, ' +
+      'Composes with `collectionId` (membership is membership), `tag`, `domain`, `favorite`, `broken`, `reminder`, `type`, ' +
       '`unassignedOnly`, `trashed`, and `updatedSince` via AND. ' +
       '`pageSize` above 200 is clamped to 200. Sorted by `updatedAt` desc (default), `createdAt` desc or `title` asc.',
   })
@@ -192,7 +194,9 @@ export class BookmarksController {
     operationId: 'updateBookmark',
     summary: 'Update a bookmark (PUT: provided fields replace, null clears)',
     description:
-      'Changing `url` re-runs the URL decomposition (plan D12) and clears any broken-link flag (M12). Refuses trashed bookmarks.',
+      'Changing `url` re-runs the URL decomposition (plan D12) and clears any broken-link flag (M12). ' +
+      'Setting `reminderAt` schedules a one-time reminder in UTC (clients render local time; explicit `null` cancels it). ' +
+      'Refuses trashed bookmarks.',
   })
   @ApiOkResponse({ type: BookmarkDto })
   update(

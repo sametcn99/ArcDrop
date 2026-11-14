@@ -79,6 +79,16 @@ export class CreateBookmarkDto {
   @IsOptional()
   @IsBoolean()
   favorite?: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'date-time',
+    description:
+      'Optional one-time reminder instant in ISO-8601 format (stored in UTC; clients render local time).',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  reminderAt?: string | null;
 }
 
 /**
@@ -119,6 +129,16 @@ export class CreateBookmarkBodyDto {
   @IsOptional()
   @IsBoolean()
   favorite?: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'date-time',
+    description:
+      'Optional one-time reminder instant in ISO-8601 format (stored in UTC; clients render local time).',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  reminderAt?: string | null;
 }
 
 /**
@@ -205,6 +225,16 @@ export class UpdateBookmarkDto {
   @IsOptional()
   @IsBoolean()
   favorite?: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    format: 'date-time',
+    description:
+      'One-time reminder timestamp in ISO-8601 format (stored in UTC; clients render local time). Explicit null clears a pending reminder.',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  reminderAt?: string | null;
 }
 
 export class BulkBookmarksDto {
@@ -282,9 +312,9 @@ export class BulkBookmarksResponseDto {
 
 export class ListBookmarksQueryDto {
   /**
-   * Search query using the M11/M12 operator grammar (D10/D19). Plain terms remain
-   * the degenerate case (case-insensitive ILIKE across title, excerpt, note,
-   * url, and tag names).
+   * Search query using the M11/M12/M14 operator grammar (D10/D19). Plain terms
+   * remain the degenerate case (case-insensitive ILIKE across title, excerpt,
+   * note, url, and tag names).
    */
   @ApiPropertyOptional({
     maxLength: 500,
@@ -295,10 +325,10 @@ export class ListBookmarksQueryDto {
       '`#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, ' +
       'field-scoped `title:`, `excerpt:`, `note:`, `link:` (negatable with `-`), ' +
       '`type:<article|image|video|audio|document|book|link>`, ' +
-      '`favorite:true|false`, `notag:true|false`, `broken:true|false`, ' +
+      '`favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, ' +
       '`created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), ' +
       'and `match:OR` (OR positive terms; exclusions stay ANDed). ' +
-      'Reserved (`file:`, `reminder:`) and unknown operators fail with 400 BAD_REQUEST.',
+      'Reserved (`file:`) and unknown operators fail with 400 BAD_REQUEST.',
   })
   @IsOptional()
   @IsString()
@@ -309,7 +339,7 @@ export class ListBookmarksQueryDto {
   @ApiPropertyOptional({
     maxLength: 500,
     description:
-      'Alias for `search` — accepts the same M11/M12 search operator grammar. ' +
+      'Alias for `search` — accepts the same M11/M12/M14 search operator grammar. ' +
       'Provide either `search` or `q`, not both.',
   })
   @IsOptional()
@@ -355,6 +385,14 @@ export class ListBookmarksQueryDto {
   @Transform(toBoolean)
   @IsBoolean()
   broken?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Filter by reminder existence (`true` = reminderAt set, `false` = none)',
+  })
+  @IsOptional()
+  @Transform(toBoolean)
+  @IsBoolean()
+  reminder?: boolean;
 
   @ApiPropertyOptional({ enum: CONTENT_TYPES, description: 'Filter by detected content type' })
   @IsOptional()
@@ -574,6 +612,22 @@ export class BookmarkDto {
     description: 'When the bookmark was first flagged broken, null when healthy (M12)',
   })
   brokenAt!: Date | null;
+
+  @ApiProperty({
+    nullable: true,
+    format: 'date-time',
+    description:
+      'One-time reminder timestamp stored in UTC (M14; clients render local time). Null when unset.',
+  })
+  reminderAt!: Date | null;
+
+  @ApiProperty({
+    nullable: true,
+    format: 'date-time',
+    description:
+      'UTC timestamp when the current reminder fired (M14), preventing refires. Null while pending or unset.',
+  })
+  remindedAt!: Date | null;
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: Date;

@@ -11,12 +11,13 @@ import { createDataSource } from '../src/database/data-source';
 import { installTestEnv } from './helpers';
 
 /**
- * M11 — Search operators (plan D19 / parity G9) — real HTTP + MCP against real
- * Postgres. Covers every operator in the canonical grammar, precedence
- * (`match:OR` vs default AND, exclusions always ANDed), NULL-safe negations,
- * `q` alias + `search`+`q` conflict, composability with REST filters
- * (`collectionId`, `trashed`, `domain`, `updatedSince`), reserved-operator 400s,
- * unknown-operator 400s with position, OpenAPI docs, and MCP `listBookmarks`.
+ * M11 — Search operators (plan D19 / parity G9; extended M12/M14) — real HTTP
+ * + MCP against real Postgres. Covers every operator in the canonical grammar,
+ * precedence (`match:OR` vs default AND, exclusions always ANDed), NULL-safe
+ * negations, `q` alias + `search`+`q` conflict, composability with REST
+ * filters (`collectionId`, `trashed`, `domain`, `updatedSince`),
+ * reserved-operator 400s, unknown-operator 400s with position, OpenAPI docs,
+ * and MCP `listBookmarks`.
  */
 
 interface Problem {
@@ -145,6 +146,7 @@ async function bootApp(): Promise<{
 }
 
 async function wipeData(dataSource: DataSource): Promise<void> {
+  await dataSource.query('DELETE FROM notification_outbox');
   await dataSource.query('DELETE FROM audit_log_entries');
   await dataSource.query('DELETE FROM personal_access_tokens');
   await dataSource.query('DELETE FROM change_events');
@@ -484,7 +486,7 @@ describe('Search operators M11 (e2e)', () => {
   });
 
   it('returns 400 problem+json ("operator not available yet") for reserved operators', async () => {
-    for (const op of ['file:pdf', 'reminder:true']) {
+    for (const op of ['file:pdf']) {
       const res = await call(baseUrl, 'GET', `/bookmarks?search=${encodeURIComponent(op)}`, {
         bearer: admin.accessToken,
       });
@@ -526,7 +528,7 @@ describe('Search operators M11 (e2e)', () => {
     expect(problem(unterminated).detail).toContain('position 0');
   });
 
-  it('documents search and q parameters with M11 grammar in OpenAPI', () => {
+  it('documents search and q parameters with M11/M12/M14 grammar in OpenAPI', () => {
     const listOp = (
       document.paths['/api/v1/bookmarks'] as {
         get: {
@@ -537,13 +539,14 @@ describe('Search operators M11 (e2e)', () => {
     ).get;
     expect(listOp.description).toContain('match:OR');
     expect(listOp.description).toContain('broken:');
+    expect(listOp.description).toContain('reminder:');
     const searchParam = listOp.parameters?.find((p) => p.name === 'search' && p.in === 'query');
     const qParam = listOp.parameters?.find((p) => p.name === 'q' && p.in === 'query');
     expect(searchParam?.description).toContain('notag:true|false');
     expect(qParam?.description).toContain('Alias for `search`');
   });
 
-  it('supports M11 search grammar and error propagation through MCP listBookmarks', async () => {
+  it('supports M11/M12/M14 search grammar and error propagation through MCP listBookmarks', async () => {
     const init = await mcpPost(baseUrl, patToken, {
       jsonrpc: '2.0',
       id: 1,
@@ -570,7 +573,7 @@ describe('Search operators M11 (e2e)', () => {
         inputSchema: { properties?: Record<string, unknown> };
       }>
     ).find((t) => t.name === 'listBookmarks');
-    expect(listTool?.description).toContain('M11/M12 operator grammar');
+    expect(listTool?.description).toContain('M11/M12/M14 operator grammar');
     expect(listTool?.inputSchema.properties?.['q']).toBeDefined();
 
     const ok = await mcpPost(
@@ -603,7 +606,7 @@ describe('Search operators M11 (e2e)', () => {
         method: 'tools/call',
         params: {
           name: 'listBookmarks',
-          arguments: { search: 'reminder:true' },
+          arguments: { search: 'file:pdf' },
         },
       },
       sessionId,

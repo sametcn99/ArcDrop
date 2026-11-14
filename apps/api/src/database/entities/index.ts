@@ -6,6 +6,7 @@ import { AuditLogEntry } from './audit-log-entry.entity';
 import { ChangeEvent } from './change-event.entity';
 import { Collection } from './collection.entity';
 import { Highlight } from './highlight.entity';
+import { NotificationOutbox } from './notification-outbox.entity';
 import { OneTimeToken } from './one-time-token.entity';
 import { PersonalAccessToken } from './personal-access-token.entity';
 import { RefreshToken } from './refresh-token.entity';
@@ -35,5 +36,6 @@ export const entities: Array<EntityCtor | EntitySchema> = [
   BookmarkCollection,
   Collection,
   Highlight,
+  NotificationOutbox,
   ChangeEvent,
 ];

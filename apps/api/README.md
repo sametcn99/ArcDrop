@@ -2,7 +2,7 @@
 
 NestJS REST API for ArcDrop — self-hosted, multi-user bookmark platform. Runs on Bun.
 
-**Status:** M13 — bulk operations (**Wave 2: M0–M13**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (37 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); plus M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit. **Next:** Wave 2 — M14 (reminders & notifications).
+**Status:** M14 — reminders & notifications (**Wave 2: M0–M14**). Includes foundation + fail-fast config + health/ready/metrics/OpenAPI; bearer JWT auth with rotating refresh tokens, sessions, invite/reset tokens, DB settings, throttling; bookmarks core with URL decomposition, tags, search/paging, trash + auto-purge, and gapless change log; hierarchical collections; `/sync/state`, `/sync/changes`, ws push + tickets, and retention compaction; SSRF-hardened metadata pipeline + content-type classification + icon cache + reindex/eviction/backfill; PATs, MCP server at `/api/v1/mcp` (39 DTO-parity tools), and audit log; portability export/import across JSON/CSV/HTML/TXT/ENEX/ZIP with persisted highlights; M9 hardening & ops; M10 highlights (`D6`) CRUD + sync snapshots, favorites + `stats.favorites`, content-type detection (`article|image|video|audio|document|book|link`) + `type=` filter, and quick-add query params; M11 Raindrop-grade search operator grammar (`search`/`q`, field-scoped/tag/metadata/date/OR/exclusion operators, and reserved-operator 400 contract); M12 library health (normalized-URL duplicates finder + transactional resolve, scheduled SSRF-safe broken-links checker with `off|basic|default|strict` modes, `broken=` filter + `broken:` operator activation); M13 transactional bulk operations (`POST /bookmarks/bulk`, `POST /collections/merge`, `POST /collections/sort-alphabetical`, `POST /collections/delete-empty`) with shared REST/MCP `bulk` rate limit; plus M14 per-bookmark one-time reminders (`reminderAt`/`remindedAt`, `reminder=` filter + `reminder:` search operator) with WS-only live delivery (`D20`), `NotificationOutbox` persistence, and offline inbox (`GET /notifications`, `POST /notifications/read`). **Next:** Wave 2 — M15 (2FA & account lifecycle).
 
 The full build plan (M0–M9) covers: API foundation, auth & users, bookmarks core,
 collections, sync, metadata & icons, MCP, portability, hardening & ops.
@@ -110,7 +110,7 @@ generated migrations.
   `User`, `RefreshToken`, `OneTimeToken`, `PersonalAccessToken` (M7 agent auth),
   `Setting` (D16 runtime settings), `AuditLogEntry` (M7 tool-call audit),
   `Bookmark`, `Highlight` (M10 / D6), `Tag`, `BookmarkTag`, `BookmarkCollection`,
-  `Collection`, `ChangeEvent` (M3/M4/M10).
+  `Collection`, `ChangeEvent` (M3/M4/M10), `NotificationOutbox` (M14 / D20).
 - `src/database/migrations/` — explicit migration list + the no-op
   `InitialSetup1763000000000` pipeline proof, `M2AuthUsers1794606603617`
   (users/refresh_tokens/one_time_tokens/settings + the three enum types),
@@ -121,8 +121,11 @@ generated migrations.
   (personal_access_tokens + audit_log_entries),
   `M10BookmarkEnrichment1794626882385` (`highlights` table, `bookmarks.favorite`,
   `bookmark_content_type` enum + `bookmarks.content_type`, and `'highlight'` on
-  `change_entity`), and `M12LibraryHealth1794629705566` (`bookmarks.last_checked_at`,
-  `bookmarks.broken_reason`, `bookmarks.broken_at`, and `IX_bookmarks_user_broken_at`).
+  `change_entity`), `M12LibraryHealth1794629705566` (`bookmarks.last_checked_at`,
+  `bookmarks.broken_reason`, `bookmarks.broken_at`, and `IX_bookmarks_user_broken_at`),
+  and `M14RemindersNotifications1794632472998` (`bookmarks.reminder_at`,
+  `bookmarks.reminded_at`, `IX_bookmarks_user_reminder_at`,
+  `IX_bookmarks_reminder_due`, `notification_outbox`, and `notification_type` enum).
   M5/M6/M8/M9/M11/M13 needed NO schema work.
 
 ### Migration workflow
@@ -500,9 +503,9 @@ metadata; a unit test re-derives the schemas and the e2e suite asserts
 the live `/openapi.json`.** Unknown extra arguments are stripped exactly
 like extra REST JSON bodies (DTO whitelist), never errors.
 
-- **v1 + M10–M13 catalog (37 tools):** bookmarks `listBookmarks` (incl. M11/M12
-  `search`/`q` operator grammar, `favorite`, `type`, and `broken` filters + broken-status fields), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
-  `favorite` toggle), `deleteBookmark` (trash), `restoreBookmark`,
+- **v1 + M10–M14 catalog (39 tools):** bookmarks `listBookmarks` (incl. M11/M12/M14
+  `search`/`q` operator grammar, `favorite`, `type`, `broken`, and `reminder` filters + broken/reminder fields), `getBookmark`, `createBookmark`, `updateBookmark` (incl.
+  `favorite` toggle & `reminderAt`), `deleteBookmark` (trash), `restoreBookmark`,
   `bulkBookmarks` (M13: move/addTags/removeTags/trash/restore/delete),
   `replaceBookmarkTags`, `replaceBookmarkCollections` (membership sync),
   `reindexBookmark`, `getBookmarkStats` (incl. `favorites`),
@@ -516,7 +519,8 @@ like extra REST JSON bodies (DTO whitelist), never errors.
   `createSyncTicket` (ws push — an agent can watch the library the same way a
   device does); portability (M8/M10) `exportData`, `importData`,
   `exportBookmarkHighlights`; library health (M12) `findDuplicates`,
-  `resolveDuplicates`. Tools return
+  `resolveDuplicates`; notifications (M14) `listNotifications`,
+  `markNotificationsRead`. Tools return
   `structuredContent` (the exact service result; void operations return a
   bare `ok`) plus the same JSON as readable text content. Annotations carry
   `readOnlyHint` (derived from the REST method) and `idempotentHint`.
@@ -1032,6 +1036,10 @@ src/
                            /bookmarks/{id}/highlights/export (txt/csv — M8
                            contract, M10 storage); pure parsers under import/,
                            pure renderers under export/
+  notifications/           M14: `GET /notifications` & `POST /notifications/read`
+                           inbox backed by `NotificationOutbox`; `RemindersService`
+                           & per-minute `RemindersJob` (`FOR UPDATE OF b SKIP LOCKED`
+                           + post-commit `SyncGateway.pushToUser`, WS-only per D20)
 test/
   helpers.ts               e2e env bootstrap (only ARCDROP__DATABASE__URL must be preset;
                            metadata pipeline DISABLED by default — see the M6 section)
@@ -1067,6 +1075,11 @@ test/
                                 `sort-alphabetical`, `delete-empty`, mid-list invalid rollback,
                                 2nd-device cursor sync reconstruction, MCP parity, shared
                                 isolated per-user `bulk` rate limit)
+  reminders-notifications.e2e.test.ts  M14 suite (live WS reminder push + outbox persistence,
+                                concurrent double-run exactly-once sweep, offline inbox catch-up
+                                & mark-read, cancel/trash/delete paths, disabled-user skip,
+                                `reminder=` / `reminder:` filter & operator, UTC normalization,
+                                MCP parity, D20 zero-SMTP check)
   zip-builder.ts               test-only minimal ZIP WRITER (inverse of the M8
                                 reader) — builds stored/deflate archives for fixtures
 ```
@@ -1399,16 +1412,21 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
 - **Delete empty (`POST /api/v1/collections/delete-empty`, `operationId: deleteEmptyCollections`):** Pure `findRecursivelyEmptyCollectionIds` identifies active collections whose active subtree contains zero active (non-trashed) bookmarks (collections holding only trashed bookmarks count as empty), soft-trashes them in one transaction, and returns `{ trashed, kept }`.
 - **Atomicity, rate limit & MCP parity:** Any mid-list invalid/foreign ID or state conflict rolls back the entire transaction cleanly with zero partial writes and zero sync events. All 4 routes and their mirrored MCP tools share the per-user `bulk` bucket (`ARCDROP__RATE_LIMIT__BULK_PER_MINUTE`, default `30/min`). MCP catalog now holds **37 tools** (12 reads, 25 mutations).
 
-## Wave-2 Handoff (for M14+)
+## Reminders & notifications (M14 — D19, D20, Raindrop parity G12)
 
-M0–M13 are complete and green (311 unit / 184 e2e tests across 49 test files). Next is **M14 (reminders & notifications)**:
+- **Bookmark reminder fields (`M14RemindersNotifications1794632472998`):** Adds nullable `timestamptz` columns `reminderAt` and `remindedAt` on `Bookmark` (with `IX_bookmarks_user_reminder_at` and partial due index `IX_bookmarks_reminder_due`). Both are stored in **UTC** (clients render local time; documented in OpenAPI on `BookmarkDto`, `CreateBookmarkDto`, `CreateBookmarkBodyDto`, `UpdateBookmarkDto`, and `NotificationPayloadDto`). Set/clear via `PUT /bookmarks/{id}` (and optional on `POST /bookmarks`). Re-sending the same `reminderAt` preserves `remindedAt` (already-fired reminders never re-fire); sending a new timestamp clears `remindedAt` to arm a fresh one-time reminder; explicit `null` clears both `reminderAt` and `remindedAt`. Every change is recorded through `ChangeLogService.transact` (`bookmark:update`).
+- **Due-reminder sweep (`RemindersJob` + `RemindersService`):** Runs every minute via `@nestjs/schedule` (`@Cron(CronExpression.EVERY_MINUTE)` with an in-process `running` overlap guard). Queries active (non-trashed) bookmarks with `reminder_at <= now AND reminded_at IS NULL` joined to `users.status = 'active'` using `FOR UPDATE OF b SKIP LOCKED`, writes durable `NotificationOutbox` rows (`{ id, userId, type: 'reminder', bookmarkId, payload, createdAt, readAt }`), stamps `remindedAt`, and records `bookmark:update` change events atomically. Strictly **after commit**, calls `SyncGateway.pushToUser(userId, { type: 'reminder', bookmarkId, title })` — WS-only delivery with **no SMTP** (D20). Clearing `reminderAt`, trashing (single or bulk), or deleting cancels pending fires; disabled users skip.
+- **Notifications inbox:** `GET /api/v1/notifications?unread=true|false&page=&pageSize=` (`operationId: listNotifications`, `pageSize` clamped to 200) and `POST /api/v1/notifications/read` (`operationId: markNotificationsRead`, accepting `{ ids }` or `{ all: true }`, idempotent, rejecting empty or both with `400 BAD_REQUEST`) provide the offline catch-up path. `NotificationOutbox.bookmarkId` uses `ON DELETE SET NULL` while retaining `payload` history when a bookmark is purged.
+- **Filtering, search grammar & MCP parity:** Activates `reminder:true|false` (`-reminder:true`) in `search-query.parser.ts` & `search-query.compiler.ts` (only `file:` remains reserved for M18) and `GET /bookmarks?reminder=true|false`. Adds `listNotifications` and `markNotificationsRead` to `src/mcp/mcp-tool-catalog.ts` (39 tools total: 13 reads, 26 mutations).
 
-- **M5 WebSocket gateway contract (critical for M14 real-time reminders):**
-  - Ticket minting: `POST /api/v1/sync/ticket` issues a 60s single-use opaque ticket (sha256-hashed in an in-memory `Map`).
-  - Handshake & room isolation: clients connect to `/api/v1/sync/ws?ticket=<ticket>` (raw `ws` adapter via `@nestjs/platform-ws`, fixed path bypassing prefix/versioning; missing/invalid/replayed tickets close with **1008**; 30s protocol ping/pong heartbeat). `SyncConnections` maps `userId → Set<WebSocket>` in `src/sync/`.
-  - Event fan-out discipline: `ChangeLogService.transact` collects `change_events` during the SQL transaction and publishes to `ChangeEventBus` strictly **after commit**, emitting `{ seq, entity, id, action }` JSON frames (no payload — clients reconcile via `GET /api/v1/sync/changes?since=cursor`). Keep any M14 reminder/notification push post-commit so rolled-back reminders never notify connected sockets; check the M5 ws gateway tests in `src/sync/` and `test/sync.e2e.test.ts` before extending or adding frame types.
-- **Reserved search operators:** M14 should activate `reminder:` in `src/bookmarks/search-query.parser.ts` & `search-query.compiler.ts` (leaving only `file:` reserved for M18).
-- **MCP, migrations & verification discipline:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, add all new authenticated non-admin M14 operations to `src/mcp/mcp-tool-catalog.ts` (matching `operationId` and flat `class-validator-jsonschema`-friendly DTOs) + `test/mcp.e2e.test.ts`, update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun test src && bun test e2e`.
+## Wave-2 Handoff (for M15+)
+
+M0–M14 are complete and green (318 unit / 191 e2e tests across 52 test files). Next is **M15 (2FA & account lifecycle)**:
+
+- **Lifecycle wipe scope (`POST /me/reset-data` & `DELETE /me`):** `notification_outbox` (added in M14) holds per-user rows with `user_id` (`ON DELETE CASCADE`) and `bookmark_id` (`ON DELETE SET NULL`). `POST /me/reset-data` must explicitly wipe `notification_outbox` alongside bookmarks, collections, tags, highlights, and change events so a library reset leaves a completely clean slate; `DELETE /me` cascades via `users.id`. Also update any e2e `wipeData` helpers if new tables are added in M15.
+- **D15 / D20 posture:** Continue with zero SMTP recovery paths (2FA recovery codes are hashed single-use tokens shown once, same discipline as PATs/one-time tokens; document the recovery-code caveat in `apps/api/README.md`).
+- **Reserved search operators:** Only `file:` remains reserved in `src/bookmarks/search-query.parser.ts` (reserved for M18).
+- **MCP, migrations & verification discipline:** Keep `src/database/entities/index.ts` and `src/database/migrations/index.ts` explicit (no globs), use `queryRows()` for raw `RETURNING` SQL, mirror any new authenticated non-admin REST operations in `src/mcp/mcp-tool-catalog.ts` + `test/mcp.e2e.test.ts` (if M15 adds any beyond `/auth/*` and `/me/reset-data` / `DELETE /me` — check credential-surface boundaries consistent with `/auth` and `/me/tokens`!), update `apps/api/README.md`, and run `bun run lint && bun run format:check && bun run typecheck && bun run build && bun test src && bun test e2e`.
 
 ## Decisions recorded (M4)
 

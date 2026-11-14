@@ -31,8 +31,9 @@ import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 /**
  * Bookmark CRUD, trash/restore, server-side search + paging and stats
  * (plan M3, D10/D12/D13/D17; enriched M10; operator grammar M11;
- * broken-link state M12). Every route is user-scoped — a row another user
- * owns simply does not exist (404, never 403: existence is not leaked).
+ * broken-link state M12; reminders M14). Every route is user-scoped — a row
+ * another user owns simply does not exist (404, never 403: existence is not
+ * leaked).
  *
  * Every mutation runs through `ChangeLogService.transact` so the ChangeEvent
  * is appended in the mutation's own transaction with a gapless per-user seq,
@@ -63,8 +64,8 @@ export class BookmarksService {
   }
 
   /**
-   * Search + filters + paging (plan D10, M10, M11, M12). Defaults: active set
-   * (trashed excluded), sort by `updatedAt` desc, pageSize 20 clamped to 200.
+   * Search + filters + paging (plan D10, M10, M11, M12, M14). Defaults: active
+   * set (trashed excluded), sort by `updatedAt` desc, pageSize 20 clamped to 200.
    */
   async list(user: RequestUser, query: ListBookmarksQueryDto): Promise<BookmarkListDto> {
     if (query.search !== undefined && query.q !== undefined) {
@@ -123,6 +124,12 @@ export class BookmarksService {
       qb.andWhere('b.brokenAt IS NOT NULL');
     } else if (query.broken === false) {
       qb.andWhere('b.brokenAt IS NULL');
+    }
+
+    if (query.reminder === true) {
+      qb.andWhere('b.reminderAt IS NOT NULL');
+    } else if (query.reminder === false) {
+      qb.andWhere('b.reminderAt IS NULL');
     }
 
     if (query.type !== undefined) {
@@ -221,6 +228,10 @@ export class BookmarksService {
     if (trimmedCollection === '') {
       throw new BadRequestException('collection must not be empty');
     }
+    const reminderAt =
+      dto.reminderAt !== undefined && dto.reminderAt !== null
+        ? parseReminderAt(dto.reminderAt)
+        : null;
 
     const now = new Date();
 
@@ -247,6 +258,8 @@ export class BookmarksService {
         lastCheckedAt: null,
         brokenReason: null,
         brokenAt: null,
+        reminderAt,
+        remindedAt: null,
         ...parts,
         createdAt: now,
         updatedAt: now,
@@ -277,7 +290,11 @@ export class BookmarksService {
    * PUT semantics: provided fields replace (explicit null clears), absent
    * fields stay. A url change re-runs the decomposition (D12) and clears any
    * broken-link flag (`brokenAt`, `brokenReason`, `lastCheckedAt` = null, M12).
-   * Refuses trashed bookmarks (404 among the active set).
+   * Setting `reminderAt` to a new instant resets `remindedAt` to null; setting
+   * `reminderAt` to null clears both `reminderAt` and `remindedAt`; resending
+   * the unchanged `reminderAt` preserves `remindedAt` so already-fired
+   * reminders never re-arm idempotently. Refuses trashed bookmarks (404 among
+   * the active set).
    *
    * A url change also schedules the M6 pipeline in `refresh` mode after the
    * commit: coverRef/iconRef/contentType belong to the page THE URL pointed at,
@@ -307,6 +324,18 @@ export class BookmarksService {
       if (dto.excerpt !== undefined) patch.excerpt = dto.excerpt;
       if (dto.note !== undefined) patch.note = dto.note;
       if (dto.favorite !== undefined) patch.favorite = dto.favorite;
+      if (dto.reminderAt !== undefined) {
+        if (dto.reminderAt === null) {
+          patch.reminderAt = null;
+          patch.remindedAt = null;
+        } else {
+          const nextReminderAt = parseReminderAt(dto.reminderAt);
+          patch.reminderAt = nextReminderAt;
+          if (row.reminderAt === null || row.reminderAt.getTime() !== nextReminderAt.getTime()) {
+            patch.remindedAt = null;
+          }
+        }
+      }
 
       if (Object.keys(patch).length > 0) {
         await manager.update(Bookmark, { id: row.id }, patch); // bumps updatedAt
@@ -458,6 +487,14 @@ export class BookmarksService {
   }
 }
 
+function parseReminderAt(raw: string): Date {
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new BadRequestException('reminderAt must be a valid ISO-8601 timestamp');
+  }
+  return parsed;
+}
+
 /**
  * Maps a `Bookmark` row to the wire shape. Exported so the sync module's
  * snapshot assembly (M5) serves byte-identical bookmark payloads.
@@ -486,6 +523,8 @@ export function toBookmarkDto(row: Bookmark, tags: TagDto[]): BookmarkDto {
     lastCheckedAt: row.lastCheckedAt ?? null,
     brokenReason: row.brokenReason ?? null,
     brokenAt: row.brokenAt ?? null,
+    reminderAt: row.reminderAt ?? null,
+    remindedAt: row.remindedAt ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt ?? null, // in-memory entities may carry undefined

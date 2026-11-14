@@ -5,6 +5,7 @@ import { M4Collections1794611852359 } from './1794611852359-M4Collections';
 import { M7TokensAudit1794619559850 } from './1794619559850-M7TokensAudit';
 import { M10BookmarkEnrichment1794626882385 } from './1794626882385-M10BookmarkEnrichment';
 import { M12LibraryHealth1794629705566 } from './1794629705566-M12LibraryHealth';
+import { M14RemindersNotifications1794632472998 } from './1794632472998-M14RemindersNotifications';
 
 /**
  * Migration registry — EXPLICIT list, same rule as `entities`: no globs
@@ -18,4 +19,5 @@ export const migrations = [
   M7TokensAudit1794619559850,
   M10BookmarkEnrichment1794626882385,
   M12LibraryHealth1794629705566,
+  M14RemindersNotifications1794632472998,
 ];

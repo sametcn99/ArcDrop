@@ -22,16 +22,20 @@ const CLOSE_POLICY_VIOLATION = 1008; // ticket missing/invalid/expired/replayed
 const CLOSE_GOING_AWAY = 1001; // server shutdown
 
 /**
- * Websocket push channel (plan D4, ticket M5). Adapter: RAW `ws` (via
- * `@nestjs/platform-ws`), not socket.io — see the README's M5 section for
- * the trade-off record.
+ * Websocket push channel (plan D4, ticket M5; extended M14 for reminder
+ * notifications). Adapter: RAW `ws` (via `@nestjs/platform-ws`), not
+ * socket.io — see the README's M5 section for the trade-off record.
  *
  * Semantics:
- * - **Notifications only.** Each committed change (the `ChangeEventBus`
+ * - **Sync notifications.** Each committed change (the `ChangeEventBus`
  *   publishes strictly post-commit) is pushed as
  *   `{ seq, entity, id, action }` to the owning user's connections. The
  *   message carries NO snapshot — clients pull `/sync/changes?since=cursor`
  *   on every notification; the REST delta is the source of truth.
+ * - **Reminder notifications (M14).** Due reminders push
+ *   `{ type: 'reminder', bookmarkId, title }` post-commit via `pushToUser`
+ *   to the owning user's active connections; offline devices read the durable
+ *   `NotificationOutbox` via `GET /notifications`.
  * - **Rooms.** `ws` has no room concept; the per-user registry
  *   (`SyncConnections`) routes each event strictly to its owner's
  *   connections — cross-user isolation is structural.
@@ -117,16 +121,15 @@ export class SyncGateway implements OnGatewayInit, OnApplicationShutdown {
     this.connections.clear();
   }
 
-  /** `{ seq, entity, id, action }` — seq as a decimal string (bigint-safe). */
-  private fanOut(event: ChangeEventNotification): void {
-    const targets = this.connections.connectionsOf(event.userId);
+  /**
+   * Pushes a JSON frame to every open ws connection in `userId`'s room.
+   * Callers MUST invoke this strictly post-commit so clients never observe
+   * rolled-back work.
+   */
+  pushToUser(userId: string, frame: Record<string, unknown>): void {
+    const targets = this.connections.connectionsOf(userId);
     if (targets.length === 0) return;
-    const payload = JSON.stringify({
-      seq: event.seq,
-      entity: event.entity,
-      id: event.entityId,
-      action: event.action,
-    });
+    const payload = JSON.stringify(frame);
     for (const client of targets) {
       if (client.readyState !== WebSocket.OPEN) continue;
       try {
@@ -140,6 +143,16 @@ export class SyncGateway implements OnGatewayInit, OnApplicationShutdown {
         }
       }
     }
+  }
+
+  /** `{ seq, entity, id, action }` — seq as a decimal string (bigint-safe). */
+  private fanOut(event: ChangeEventNotification): void {
+    this.pushToUser(event.userId, {
+      seq: event.seq,
+      entity: event.entity,
+      id: event.entityId,
+      action: event.action,
+    });
   }
 
   /** Two missed pongs → the peer is gone; terminate triggers the cleanup. */

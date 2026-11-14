@@ -33,6 +33,11 @@ import { DuplicatesService } from '@api/library-health/duplicates.service';
 import { ResolveDuplicatesDto } from '@api/library-health/library-health.dto';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
 import {
+  ListNotificationsQueryDto,
+  MarkNotificationsReadDto,
+} from '@api/notifications/notifications.dto';
+import { NotificationsService } from '@api/notifications/notifications.service';
+import {
   ExportDataDto,
   ExportHighlightsQueryDto,
   ImportDataToolDto,
@@ -83,10 +88,11 @@ function define(
 /**
  * The ArcDrop MCP tool catalog (plan M7/D23) — one tool per REST operation
  * of the user-facing surface (bookmarks, highlights, collections, tags,
- * library health, bulk operations, sync, reindex). Names ARE the REST
- * `operationId`s; input schemas are generated from the same DTO classes the
- * REST routes validate; every call goes through the SAME services — identical
- * validation, user scoping and change-log semantics. An agent is just another client.
+ * library health, bulk operations, sync, notifications, reindex). Names ARE
+ * the REST `operationId`s; input schemas are generated from the same DTO classes
+ * the REST routes validate; every call goes through the SAME services —
+ * identical validation, user scoping and change-log semantics. An agent is
+ * just another client.
  *
  * NOT mirrored on purpose: `/auth/*` and `/admin/*` (unreachable via PAT),
  * `/me/tokens` (a PAT must not mint credentials), health/icons/metrics
@@ -100,6 +106,7 @@ export function buildToolCatalog(deps: {
   collections: CollectionsService;
   duplicates: DuplicatesService;
   metadata: MetadataFetchService;
+  notifications: NotificationsService;
   sync: SyncService;
   syncTickets: SyncTicketService;
   portability: PortabilityService;
@@ -112,16 +119,17 @@ export function buildToolCatalog(deps: {
     collections,
     duplicates,
     metadata,
+    notifications,
     sync,
     syncTickets,
     portability,
   } = deps;
   return [
-    // -- bookmarks (M3/M6/M10/M11/M12/M13) -----------------------------------
+    // -- bookmarks (M3/M6/M10/M11/M12/M13/M14) --------------------------------
     define(
       'listBookmarks',
       'GET',
-      'Search / filter / page bookmarks (including broken-link fields lastCheckedAt/brokenReason/brokenAt). `search` (or alias `q`) parses the canonical M11/M12 operator grammar: `word`, `"exact phrase"` (across title/excerpt/note/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`file:`, `reminder:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, type, updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
+      'Search / filter / page bookmarks (including broken-link fields lastCheckedAt/brokenReason/brokenAt and reminder fields reminderAt/remindedAt). `search` (or alias `q`) parses the canonical M11/M12/M14 operator grammar: `word`, `"exact phrase"` (across title/excerpt/note/url/tags; `\\"` / `\\\\` escapes), `-word` / `-"phrase"` exclusions, `#tag` / `-#tag` / `#"multi word tag"` / `-#"multi word tag"`, field-scoped `title:` / `excerpt:` / `note:` / `link:` (negatable), `type:` (`article|image|video|audio|document|book|link`), `favorite:true|false`, `notag:true|false`, `broken:true|false`, `reminder:true|false`, `created:` / `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]` (UTC), and `match:OR` (OR positive terms; exclusions stay ANDed); reserved (`file:`) and unknown operators fail with 400. Composes via AND with filters: collectionId, tag, domain, unassignedOnly, trashed, favorite, broken, reminder, type, updatedSince; sorted by updated-desc (default), created-desc or title-asc; pageSize clamps to 200. Returns { items, totalCount, page, pageSize }.',
       [ListBookmarksQueryDto],
       (user, [query]) => bookmarks.list(user, query as ListBookmarksQueryDto),
     ),
@@ -135,14 +143,14 @@ export function buildToolCatalog(deps: {
     define(
       'createBookmark',
       'POST',
-      'Create a bookmark from a url (stored verbatim) plus optional title/excerpt/note/favorite. Duplicates of the same URL are allowed. Missing title/excerpt and contentType are filled asynchronously from the page (never overwriting provided values). Returns the full bookmark.',
+      'Create a bookmark from a url (stored verbatim) plus optional title/excerpt/note/favorite/reminderAt (UTC ISO-8601; clients render local time). Duplicates of the same URL are allowed. Missing title/excerpt and contentType are filled asynchronously from the page (never overwriting provided values). Returns the full bookmark.',
       [CreateBookmarkDto],
       (user, [dto]) => bookmarks.create(user, dto as CreateBookmarkDto),
     ),
     define(
       'updateBookmark',
       'PUT',
-      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle), explicit null clears, absent fields stay; a url change re-runs URL decomposition, clears any broken-link flag, and refreshes cover/icon/contentType from the new page. Refuses trashed bookmarks.',
+      'Update a bookmark. PUT semantics: provided fields replace (including favorite toggle and reminderAt UTC ISO-8601 timestamp), explicit null clears (including clearing a pending reminder), absent fields stay; a url change re-runs URL decomposition, clears any broken-link flag, and refreshes cover/icon/contentType from the new page. Refuses trashed bookmarks.',
       [BookmarkIdParamDto, UpdateBookmarkDto],
       (user, [p, dto]) =>
         bookmarks.update(user, (p as BookmarkIdParamDto).id, dto as UpdateBookmarkDto),
@@ -378,6 +386,22 @@ export function buildToolCatalog(deps: {
       (user) => collections.deleteEmpty(user),
     ),
 
+    // -- notifications (M14) -----------------------------------------------
+    define(
+      'listNotifications',
+      'GET',
+      'List reminder notifications from the caller’s durable inbox (paged, newest first). Pass unread=true for offline catch-up. All timestamps are UTC; clients render local time.',
+      [ListNotificationsQueryDto],
+      (user, [q]) => notifications.list(user.id, q as ListNotificationsQueryDto),
+    ),
+    define(
+      'markNotificationsRead',
+      'POST',
+      'Mark reminder notifications as read using either `ids` (1–500 UUIDs) or `all: true`. Idempotent; returns { updated }.',
+      [MarkNotificationsReadDto],
+      (user, [dto]) => notifications.markRead(user.id, dto as MarkNotificationsReadDto),
+    ),
+
     // -- sync (M5) ---------------------------------------------------------
     define(
       'getSyncState',
@@ -399,7 +423,7 @@ export function buildToolCatalog(deps: {
     define(
       'createSyncTicket',
       'POST',
-      'Mint a one-time websocket ticket (single use, 60 s) for the push channel /api/v1/sync/ws?ticket=… — change notifications {seq, entity, id, action} per committed mutation.',
+      'Mint a one-time websocket ticket (single use, 60 s) for the push channel /api/v1/sync/ws?ticket=… — change notifications {seq, entity, id, action} per committed mutation and live reminder frames {type: "reminder", bookmarkId, title}.',
       [],
       (user) => Promise.resolve(syncTickets.issue(user.id)),
     ),

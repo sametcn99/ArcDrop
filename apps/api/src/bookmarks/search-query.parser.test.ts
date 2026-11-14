@@ -250,14 +250,14 @@ describe('SearchQueryParser', () => {
     ]);
   });
 
-  it('parses type:, favorite:, notag:, and broken: including negations and case-insensitivity', () => {
+  it('parses type:, favorite:, notag:, broken:, and reminder: including negations and case-insensitivity', () => {
     for (const type of CONTENT_TYPES) {
       const parsed = parseSearchQuery(`type:${type.toUpperCase()}`);
       expect(parsed.clauses).toEqual([{ kind: 'type', value: type, negated: false, position: 0 }]);
     }
 
     const combined = parseSearchQuery(
-      '-type:video favorite:true -favorite:FALSE notag:true -notag:false broken:true -broken:FALSE',
+      '-type:video favorite:true -favorite:FALSE notag:true -notag:false broken:true -broken:FALSE reminder:true -reminder:FALSE',
     );
     expect(combined.clauses).toEqual([
       { kind: 'type', value: 'video', negated: true, position: 0 },
@@ -267,6 +267,8 @@ describe('SearchQueryParser', () => {
       { kind: 'notag', value: false, negated: true, position: 53 },
       { kind: 'broken', value: true, negated: false, position: 66 },
       { kind: 'broken', value: false, negated: true, position: 78 },
+      { kind: 'reminder', value: true, negated: false, position: 92 },
+      { kind: 'reminder', value: false, negated: true, position: 106 },
     ]);
 
     expectParseError('type:podcast', { code: 'INVALID_VALUE', position: 5, operator: 'type' });
@@ -278,6 +280,12 @@ describe('SearchQueryParser', () => {
     expectParseError('notag:0', { code: 'INVALID_VALUE', position: 6, operator: 'notag' });
     expectParseError('broken:maybe', { code: 'INVALID_VALUE', position: 7, operator: 'broken' });
     expectParseError('broken:', { code: 'MISSING_VALUE', position: 7, operator: 'broken' });
+    expectParseError('reminder:maybe', {
+      code: 'INVALID_VALUE',
+      position: 9,
+      operator: 'reminder',
+    });
+    expectParseError('reminder:', { code: 'MISSING_VALUE', position: 9, operator: 'reminder' });
   });
 
   it('parses created: and lastUpdate: with YYYY[-MM[-DD]] and <, >, <=, >= prefixes', () => {
@@ -367,7 +375,7 @@ describe('SearchQueryParser', () => {
   });
 
   it('rejects reserved-but-inactive operators with "operator not available yet"', () => {
-    for (const op of ['file:true', 'reminder:true', 'file:']) {
+    for (const op of ['file:true', 'file:']) {
       const name = op.replace(/^-/, '').split(':')[0]!.toLowerCase();
       expectParseError(op, {
         code: 'RESERVED_OPERATOR',

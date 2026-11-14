@@ -13,8 +13,8 @@ import { SyncService } from './sync.service';
 import { SyncTicketService } from './sync-ticket.service';
 
 /**
- * Sync integration (plan M5, D4): the change log as the multi-device
- * backbone.
+ * Sync integration (plan M5, D4; extended M14): the change log as the
+ * multi-device backbone.
  *
  * - `ChangeLogModule` supplies the committed-event bus the gateway
  *   subscribes to (single instance, in-process fan-out — Redis scale-out
@@ -40,6 +40,6 @@ import { SyncTicketService } from './sync-ticket.service';
     ChangeLogRetentionService,
     ChangeLogRetentionJob,
   ],
-  exports: [SyncService, SyncTicketService],
+  exports: [SyncService, SyncTicketService, SyncGateway],
 })
 export class SyncModule {}

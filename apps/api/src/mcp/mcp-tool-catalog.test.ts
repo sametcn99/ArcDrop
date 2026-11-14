@@ -8,6 +8,7 @@ import type { TagsService } from '@api/bookmarks/tags.service';
 import type { CollectionsService } from '@api/collections/collections.service';
 import type { DuplicatesService } from '@api/library-health/duplicates.service';
 import type { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
+import type { NotificationsService } from '@api/notifications/notifications.service';
 import type { PortabilityService } from '@api/portability/portability.service';
 import type { SyncService } from '@api/sync/sync.service';
 import type { SyncTicketService } from '@api/sync/sync-ticket.service';
@@ -21,12 +22,13 @@ const stubs = {} as {
   collections: CollectionsService;
   duplicates: DuplicatesService;
   metadata: MetadataFetchService;
+  notifications: NotificationsService;
   sync: SyncService;
   syncTickets: SyncTicketService;
   portability: PortabilityService;
 };
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -59,6 +61,8 @@ const EXPECTED_TOOLS = [
   'mergeCollections',
   'sortCollectionsAlphabetical',
   'deleteEmptyCollections',
+  'listNotifications',
+  'markNotificationsRead',
   'getSyncState',
   'listSyncChanges',
   'createSyncTicket',
@@ -67,7 +71,7 @@ const EXPECTED_TOOLS = [
   'exportBookmarkHighlights',
 ] as const;
 
-describe('MCP tool catalog (M7/M12/M13)', () => {
+describe('MCP tool catalog (M7/M12/M13/M14)', () => {
   const catalog = buildToolCatalog(stubs);
   const byName = new Map(catalog.map((tool) => [tool.name, tool]));
 
@@ -95,6 +99,7 @@ describe('MCP tool catalog (M7/M12/M13)', () => {
         'listCollections',
         'getCollectionTree',
         'getCollection',
+        'listNotifications',
         'getSyncState',
         'listSyncChanges',
         'exportBookmarkHighlights',

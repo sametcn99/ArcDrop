@@ -21,10 +21,10 @@ export type ScopedBookmarkField = (typeof FIELD_SCOPE_MAP)[FieldScopeOperator];
 /**
  * Operators reserved for upcoming Wave-2 milestones. Parsed explicitly so
  * clients receive an honest 400 ("operator not available yet") rather than
- * silent fallback to plain-text matching. (`broken:` activated in M12.)
+ * silent fallback to plain-text matching. (`broken:` activated in M12;
+ * `reminder:` activated in M14.)
  */
 export const RESERVED_OPERATORS = {
-  reminder: 'M14',
   file: 'M18',
 } as const;
 export type ReservedOperatorName = keyof typeof RESERVED_OPERATORS;
@@ -80,6 +80,12 @@ export type SearchClause =
       position: number;
     }
   | {
+      kind: 'reminder';
+      value: boolean;
+      negated: boolean;
+      position: number;
+    }
+  | {
       kind: 'date';
       field: 'createdAt' | 'updatedAt';
       comparator: DateComparator;
@@ -98,7 +104,7 @@ export interface ParsedSearchQuery {
 export interface SearchParserOptions {
   /** Override the field set targeted by bare words and `"exact phrases"`. */
   defaultTextFields?: readonly string[];
-  /** Reserved operators explicitly enabled (for M14/M18 integration). */
+  /** Reserved operators explicitly enabled (for M18 integration). */
   enabledReservedOperators?: readonly ReservedOperatorName[];
 }
 
@@ -131,7 +137,7 @@ const isWhitespace = (ch: string): boolean => /\s/.test(ch);
 
 /**
  * Pure parser for ArcDrop's Raindrop-compatible search operator grammar
- * (plan M11, D19, parity G9; extended M12).
+ * (plan M11, D19, parity G9; extended M12, M14).
  *
  * Grammar summary:
  * - Bare `word` or `"exact phrase"` (supports `\"` and `\\` escapes)
@@ -139,9 +145,10 @@ const isWhitespace = (ch: string): boolean => /\s/.test(ch);
  * - `#tag` and `#"multi word tag"` (and `-#tag` / `-#"multi word tag"`)
  * - `match:OR` / `match:AND` (default `AND`)
  * - Field-scoped: `title:`, `excerpt:`, `note:`, `link:`
- * - Metadata: `type:<contentType>`, `favorite:true|false`, `notag:true|false`, `broken:true|false`
+ * - Metadata: `type:<contentType>`, `favorite:true|false`, `notag:true|false`,
+ *   `broken:true|false`, `reminder:true|false`
  * - Dates: `created:` and `lastUpdate:` with `[<|>|<=|>=]YYYY[-MM[-DD]]`
- * - Reserved (fail with 400 until implemented): `file:`, `reminder:`
+ * - Reserved (fail with 400 until implemented): `file:`
  */
 export function parseSearchQuery(
   input: string,
@@ -448,6 +455,17 @@ export function parseSearchQuery(
         const boolVal = parseBooleanValue(readValue(valuePos, rawName).value, rawName, valuePos);
         clauses.push({
           kind: 'broken',
+          value: boolVal,
+          negated,
+          position: termPos,
+        });
+        continue;
+      }
+
+      if (opKey === 'reminder') {
+        const boolVal = parseBooleanValue(readValue(valuePos, rawName).value, rawName, valuePos);
+        clauses.push({
+          kind: 'reminder',
           value: boolVal,
           negated,
           position: termPos,

@@ -25,6 +25,7 @@ import { TagsService } from '@api/bookmarks/tags.service';
 import { CollectionsService } from '@api/collections/collections.service';
 import { DuplicatesService } from '@api/library-health/duplicates.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
+import { NotificationsService } from '@api/notifications/notifications.service';
 import { PortabilityService } from '@api/portability/portability.service';
 import { SyncService } from '@api/sync/sync.service';
 import { SyncTicketService } from '@api/sync/sync-ticket.service';
@@ -70,6 +71,7 @@ export class McpService implements OnModuleDestroy {
     collections: CollectionsService,
     duplicates: DuplicatesService,
     metadata: MetadataFetchService,
+    notifications: NotificationsService,
     sync: SyncService,
     syncTickets: SyncTicketService,
     portability: PortabilityService,
@@ -84,6 +86,7 @@ export class McpService implements OnModuleDestroy {
       collections,
       duplicates,
       metadata,
+      notifications,
       sync,
       syncTickets,
       portability,

@@ -75,6 +75,10 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addTag('Bookmarks', 'Bookmark CRUD, trash/restore, search + paging, stats, per-bookmark tags')
     .addTag('Tags', 'Tag rename/merge and delete-detach (plan M3)')
     .addTag('Sync', 'Change-log sync: state poll, cursor deltas, ws push + tickets (plan M5/D4)')
+    .addTag(
+      'Notifications',
+      'Reminder notifications inbox and read receipts (ws-only live delivery, plan M14/D20)',
+    )
     .addTag('Metadata', 'SSRF-hardened metadata enrichment + reindex (plan M6)')
     .addTag('Icons', 'Public unguessable icon cache (plan M6/D18)')
     .addTag('Tokens', 'Personal access tokens — agent auth (plan M7/D23)')

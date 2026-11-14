@@ -49,10 +49,10 @@ describe('compileSearchQuery', () => {
     expect(compiled!.sql).not.toContain(' OR (EXISTS');
   });
 
-  it('compiles field, tag, type, favorite, notag, broken, and date operators', () => {
+  it('compiles field, tag, type, favorite, notag, broken, reminder, and date operators', () => {
     const compiled = compileSearchQuery(
       parseSearchQuery(
-        'note:"key idea" link:docs.rs #Reading -favorite:true notag:false broken:true -broken:false created:2025-05 lastUpdate:<=2025-06-01',
+        'note:"key idea" link:docs.rs #Reading -favorite:true notag:false broken:true -broken:false reminder:true -reminder:false created:2025-05 lastUpdate:<=2025-06-01',
       ),
     );
     expect(compiled).not.toBeNull();
@@ -64,6 +64,7 @@ describe('compileSearchQuery', () => {
       'EXISTS (SELECT 1 FROM bookmark_tags bt WHERE bt.bookmark_id = b.id)',
     );
     expect(compiled!.sql).toContain('(b.brokenAt IS NOT NULL)');
+    expect(compiled!.sql).toContain('(b.reminderAt IS NOT NULL)');
     expect(compiled!.sql).toContain('(b.createdAt >= :sq4 AND b.createdAt < :sq5)');
     expect(compiled!.sql).toContain('b.updatedAt < :sq6');
     expect(compiled!.params).toEqual({

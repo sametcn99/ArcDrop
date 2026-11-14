@@ -176,6 +176,7 @@ async function bootApp(): Promise<{ app: INestApplication; baseUrl: string }> {
 }
 
 async function wipeData(dataSource: DataSource): Promise<void> {
+  await dataSource.query('DELETE FROM notification_outbox');
   await dataSource.query('DELETE FROM audit_log_entries');
   await dataSource.query('DELETE FROM personal_access_tokens');
   await dataSource.query('DELETE FROM change_events');
@@ -286,7 +287,7 @@ async function waitFor(
   throw new Error('expected change notification did not arrive within the deadline');
 }
 
-/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations. */
+/** The catalog per the tickets — M8 portability, M10 highlights, M12 library health, M13 bulk operations, M14 notifications. */
 const EXPECTED_TOOLS = [
   'listBookmarks',
   'getBookmark',
@@ -317,6 +318,8 @@ const EXPECTED_TOOLS = [
   'mergeCollections',
   'sortCollectionsAlphabetical',
   'deleteEmptyCollections',
+  'listNotifications',
+  'markNotificationsRead',
   'getSyncState',
   'listSyncChanges',
   'createSyncTicket',
@@ -756,7 +759,7 @@ describe('MCP server (e2e)', () => {
         }
       ).tools;
       const mutationTools = toolList.filter((t) => t.annotations.readOnlyHint === false);
-      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 12); // 12 read tools
+      expect(mutationTools.length).toBe(EXPECTED_TOOLS.length - 13); // 13 read tools
 
       let checked = 0;
       for (const tool of mutationTools) {
@@ -773,13 +776,13 @@ describe('MCP server (e2e)', () => {
         expect(text).toContain(tool.name);
         checked += 1;
       }
-      expect(checked).toBe(25);
+      expect(checked).toBe(26);
 
       // read tools DO run for the same token
       const read = await mcpPost(
         baseUrl,
         aliceReadOnlyPat.token,
-        rpcRequest(80, 'tools/call', { name: 'getSyncState', arguments: {} }),
+        rpcRequest(90, 'tools/call', { name: 'getSyncState', arguments: {} }),
         readOnlySession,
       );
       expect(read.message?.error).toBeUndefined();
