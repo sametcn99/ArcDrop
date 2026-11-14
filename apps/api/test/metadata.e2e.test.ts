@@ -669,8 +669,11 @@ describe('Metadata & icons (e2e)', () => {
       const purge = await app.get(TrashPurgeService).purgeExpired();
       expect(purge.purged).toBeGreaterThanOrEqual(1);
 
-      const eviction = await app.get(IconEvictionService).evictOrphaned();
-      expect(eviction.evicted).toBeGreaterThanOrEqual(3); // doomed cover+icon + the fake orphan
+      // The purge ALSO fires the icon-eviction ride-along (fire-and-forget),
+      // so this explicit sweep may split the work with it — never assert on
+      // the COUNT. The file state below is what is deterministic: whichever
+      // sweep runs last leaves the same world.
+      await app.get(IconEvictionService).evictOrphaned();
 
       expect(existsSync(iconPathOf(doomed.iconRef!))).toBeFalse();
       expect(existsSync(iconPathOf(doomed.coverRef!))).toBeFalse();
