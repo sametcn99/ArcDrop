@@ -408,10 +408,7 @@ export function SearchBar({ narrow = false }: { narrow?: boolean }) {
           data-testid="search-dialog"
         >
           <DialogTitle id="search-dialog-title">
-            <Stack
-              direction="row"
-              sx={{ alignItems: 'center', justifyContent: 'space-between' }}
-            >
+            <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
               {SHARED_SEARCH_STRINGS.dialogTitle}
               <IconButton
                 size="small"

@@ -160,9 +160,7 @@ describe('SearchBar', () => {
     await user.type(input, ' extra');
     await user.keyboard('{Enter}');
     await waitFor(() => {
-      expect(screen.getByTestId('location-mirror')).toHaveTextContent(
-        '/?search=existing+extra',
-      );
+      expect(screen.getByTestId('location-mirror')).toHaveTextContent('/?search=existing+extra');
     });
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
