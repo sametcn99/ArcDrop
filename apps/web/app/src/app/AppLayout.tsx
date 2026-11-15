@@ -488,7 +488,7 @@ export function AppLayout() {
   const isLibraryUnassigned = location.pathname === '/' && currentScope === 'unassigned';
   const isLibraryReminders = location.pathname === '/' && currentScope === 'reminders';
 
-  const renderDrawerContent = (enableDnd: boolean) => (
+  const renderDrawerContent = (enableDnd: boolean, compact = false) => (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <Toolbar sx={{ justifyContent: 'space-between' }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
@@ -579,7 +579,11 @@ export function AppLayout() {
       <Divider />
 
       <Box sx={{ px: 2, py: 1.5, flexGrow: 1, overflowY: 'auto' }}>
-        <CollectionTreeSidebar enableDnd={enableDnd} onNavigate={handleCloseMobileDrawer} />
+        <CollectionTreeSidebar
+          enableDnd={enableDnd}
+          compact={compact}
+          onNavigate={handleCloseMobileDrawer}
+        />
       </Box>
 
       <Divider />
@@ -804,7 +808,10 @@ export function AppLayout() {
                   </IconButton>
                 </Tooltip>
 
-                <SyncStatusIndicator />
+                {/* Live chip stays for tablet+; the xs toolbar is too tight for it. */}
+                <Box sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>
+                  <SyncStatusIndicator />
+                </Box>
                 <ThemeSwitcher label={APP_STRINGS.themeSwitcherLabel} />
 
                 {user ? (
@@ -862,6 +869,8 @@ export function AppLayout() {
                   </>
                 ) : null}
 
+                {/* The account menu covers sign-out on small screens; the
+                    dedicated icon only fits on wide toolbars. */}
                 <Tooltip title={APP_STRINGS.signOutLabel}>
                   <IconButton
                     color="inherit"
@@ -869,6 +878,7 @@ export function AppLayout() {
                     aria-label={APP_STRINGS.signOutLabel}
                     onClick={() => void handleSignOut()}
                     disabled={signingOut}
+                    sx={{ display: { xs: 'none', md: 'inline-flex' } }}
                   >
                     <LogoutOutlinedIcon fontSize="small" />
                   </IconButton>
@@ -907,7 +917,9 @@ export function AppLayout() {
                 },
               }}
             >
-              {renderDrawerContent(true)}
+              {/* A narrowed desktop sidebar can't fit the header buttons —
+                  they collapse into the tools menu (see CollectionTreeSidebar). */}
+              {renderDrawerContent(true, desktopOpen && sidebarWidth < 250)}
               <Box
                 role="separator"
                 aria-orientation="vertical"

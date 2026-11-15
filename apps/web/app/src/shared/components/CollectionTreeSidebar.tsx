@@ -66,6 +66,8 @@ import { CollectionShareDialog } from './CollectionShareDialog';
 
 export interface CollectionTreeSidebarProps {
   enableDnd?: boolean;
+  /** Narrow width (e.g. user-resized sidebar) — header buttons collapse into the tools menu. */
+  compact?: boolean;
   onNavigate?: () => void;
 }
 
@@ -455,6 +457,7 @@ function CollectionTreeBranch({
 
 export function CollectionTreeSidebar({
   enableDnd = true,
+  compact = false,
   onNavigate,
 }: CollectionTreeSidebarProps) {
   const location = useLocation();
@@ -596,28 +599,30 @@ export function CollectionTreeSidebar({
         </Stack>
 
         <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
-          <Tooltip
-            title={
-              editOrderMode
-                ? SHARED_COLLECTION_STRINGS.editOrderToggleActiveTooltip
-                : SHARED_COLLECTION_STRINGS.editOrderToggleTooltip
-            }
-          >
-            <IconButton
-              size="small"
-              aria-label={
+          {!compact ? (
+            <Tooltip
+              title={
                 editOrderMode
-                  ? SHARED_COLLECTION_STRINGS.editOrderToggleActiveAriaLabel
-                  : SHARED_COLLECTION_STRINGS.editOrderToggleAriaLabel
+                  ? SHARED_COLLECTION_STRINGS.editOrderToggleActiveTooltip
+                  : SHARED_COLLECTION_STRINGS.editOrderToggleTooltip
               }
-              aria-pressed={editOrderMode}
-              data-testid="collection-edit-order-toggle"
-              color={editOrderMode ? 'primary' : 'default'}
-              onClick={() => setEditOrderMode((prev) => !prev)}
             >
-              <EditOutlinedIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+              <IconButton
+                size="small"
+                aria-label={
+                  editOrderMode
+                    ? SHARED_COLLECTION_STRINGS.editOrderToggleActiveAriaLabel
+                    : SHARED_COLLECTION_STRINGS.editOrderToggleAriaLabel
+                }
+                aria-pressed={editOrderMode}
+                data-testid="collection-edit-order-toggle"
+                color={editOrderMode ? 'primary' : 'default'}
+                onClick={() => setEditOrderMode((prev) => !prev)}
+              >
+                <EditOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          ) : null}
           <Tooltip title={SHARED_COLLECTION_STRINGS.collectionToolsTooltip}>
             <IconButton
               size="small"
@@ -628,18 +633,20 @@ export function CollectionTreeSidebar({
               <MoreVertIcon fontSize="small" />
             </IconButton>
           </Tooltip>
-          <Tooltip title={SHARED_COLLECTION_STRINGS.mergeCollectionsTooltip}>
-            <Box component="span" sx={{ display: 'inline-flex' }}>
-              <IconButton
-                size="small"
-                aria-label={SHARED_COLLECTION_STRINGS.mergeCollectionsAriaLabel}
-                disabled={sortedCollections.length < 2}
-                onClick={() => setMergeDialogState({ open: true, initialSourceId: null })}
-              >
-                <CallMergeOutlinedIcon fontSize="small" />
-              </IconButton>
-            </Box>
-          </Tooltip>
+          {!compact ? (
+            <Tooltip title={SHARED_COLLECTION_STRINGS.mergeCollectionsTooltip}>
+              <Box component="span" sx={{ display: 'inline-flex' }}>
+                <IconButton
+                  size="small"
+                  aria-label={SHARED_COLLECTION_STRINGS.mergeCollectionsAriaLabel}
+                  disabled={sortedCollections.length < 2}
+                  onClick={() => setMergeDialogState({ open: true, initialSourceId: null })}
+                >
+                  <CallMergeOutlinedIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            </Tooltip>
+          ) : null}
           <Tooltip title={SHARED_COLLECTION_STRINGS.newCollectionTooltip}>
             <IconButton
               size="small"
@@ -771,6 +778,26 @@ export function CollectionTreeSidebar({
         anchorEl={toolsMenuAnchor}
         onClose={() => setToolsMenuAnchor(null)}
       >
+        {compact ? (
+          <MenuItem
+            data-testid="collection-tools-edit-order"
+            onClick={() => {
+              setToolsMenuAnchor(null);
+              setEditOrderMode((prev) => !prev);
+            }}
+          >
+            <ListItemIcon>
+              <EditOutlinedIcon fontSize="small" color={editOrderMode ? 'primary' : 'inherit'} />
+            </ListItemIcon>
+            <ListItemText
+              primary={
+                editOrderMode
+                  ? SHARED_COLLECTION_STRINGS.menuEditOrderFinishLabel
+                  : SHARED_COLLECTION_STRINGS.menuEditOrderLabel
+              }
+            />
+          </MenuItem>
+        ) : null}
         <MenuItem
           data-testid="collection-tools-sort"
           disabled={sortedCollections.length < 2}
@@ -797,6 +824,21 @@ export function CollectionTreeSidebar({
           </ListItemIcon>
           <ListItemText primary={SHARED_COLLECTION_STRINGS.deleteEmptyLabel} />
         </MenuItem>
+        {compact ? (
+          <MenuItem
+            data-testid="collection-tools-merge"
+            disabled={sortedCollections.length < 2}
+            onClick={() => {
+              setToolsMenuAnchor(null);
+              setMergeDialogState({ open: true, initialSourceId: null });
+            }}
+          >
+            <ListItemIcon>
+              <CallMergeOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={SHARED_COLLECTION_STRINGS.mergeCollectionsTooltip} />
+          </MenuItem>
+        ) : null}
       </Menu>
 
       <Menu

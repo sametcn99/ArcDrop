@@ -560,4 +560,42 @@ describe('CollectionTreeSidebar', () => {
       collectionIds: ['col-4'],
     });
   }, 120_000);
+
+  it('collapses header buttons into the tools menu when compact (narrow sidebar)', async () => {
+    const user = userEvent.setup({ delay: null });
+    window.localStorage.setItem('arcdrop.sidebarWidth', '200');
+
+    server.use(
+      http.get('*/api/v1/collections', () =>
+        HttpResponse.json({
+          items: [
+            makeMockCollection({ id: 'col-1', parentId: null, title: 'Alpha' }),
+            makeMockCollection({ id: 'col-2', parentId: null, title: 'Beta' }),
+          ],
+        }),
+      ),
+      http.get('*/api/v1/collections/tree', () =>
+        HttpResponse.json([
+          makeMockCollection({ id: 'col-1', parentId: null, title: 'Alpha', children: [] }),
+          makeMockCollection({ id: 'col-2', parentId: null, title: 'Beta', children: [] }),
+        ]),
+      ),
+    );
+
+    renderShellAt('/');
+    await waitForLibraryReady();
+
+    // Narrow sidebar: pencil and merge header buttons are collapsed away
+    expect(screen.queryByTestId('collection-edit-order-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Merge collections' })).not.toBeInTheDocument();
+
+    // ...and they live in the tools menu instead
+    await user.click(screen.getByTestId('collection-tools-button'));
+    expect(screen.getByTestId('collection-tools-edit-order')).toBeInTheDocument();
+    expect(screen.getByTestId('collection-tools-merge')).toBeInTheDocument();
+
+    // Enabling edit order from the menu brings up the drag handles
+    await user.click(screen.getByTestId('collection-tools-edit-order'));
+    expect(screen.getByTestId('col-drag-handle-col-1')).toBeInTheDocument();
+  }, 60_000);
 });

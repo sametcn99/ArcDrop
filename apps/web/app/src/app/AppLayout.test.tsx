@@ -7,6 +7,7 @@ import { useSyncStore } from '../stores/syncStore';
 import { makeMockSession } from '../test/msw/handlers';
 import { waitForBootstrapReady, waitForLibraryReady } from '../test/waiters';
 import { ThemeController } from '../theme/ThemeController';
+import { APP_STRINGS } from './strings';
 import { appRoutes } from './routes';
 
 function renderAtRoute(path: string) {
@@ -130,6 +131,25 @@ describe('AppLayout and router shell', () => {
     });
     expect(getComputedStyle(root).getPropertyValue('--arcdrop-sidebar-width')).toBe('480px');
     expect(window.localStorage.getItem('arcdrop.sidebarWidth')).toBe('480');
+  }, 60_000);
+
+  it('keeps sign-out reachable through the account menu on small screens', async () => {
+    const user = userEvent.setup({ delay: null });
+    useAuthStore.getState().setSession(
+      makeMockSession({
+        user: { email: 'mobile@arcdrop.test' },
+      }),
+    );
+    renderAtRoute('/');
+    await waitForBootstrapReady();
+
+    // The dedicated Sign out icon is wide-only; the compact toolbar exposes
+    // the account menu instead (Settings + Sign out).
+    await user.click(await screen.findByRole('button', { name: 'Account menu' }));
+    expect(await screen.findByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('menuitem', { name: APP_STRINGS.accountSettingsItem }),
+    ).toBeInTheDocument();
   }, 60_000);
 
   it('toggles theme from the AppBar ThemeSwitcher', async () => {
