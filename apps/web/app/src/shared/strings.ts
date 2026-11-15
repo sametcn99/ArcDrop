@@ -298,6 +298,8 @@ export const SHARED_QUICK_ADD_STRINGS = {
 export const SHARED_SEARCH_STRINGS = {
   placeholder: 'Search bookmarks, #tags, type:video, -exclude...',
   ariaLabel: 'Search bookmarks',
+  dialogTitle: 'Search bookmarks',
+  closeDialogLabel: 'Close search',
   clearLabel: 'Clear search',
   helpButtonLabel: 'Search syntax help',
   cheatsheetTitle: 'Search operator cheatsheet',

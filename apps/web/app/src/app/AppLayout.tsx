@@ -86,6 +86,7 @@ import { TagManagerDialog } from '../shared/components/TagManagerDialog';
 import { ThemeSwitcher } from '../shared/components/ThemeSwitcher';
 import { UploadFileDialog } from '../shared/components/UploadFileDialog';
 import { AppDndContext, type DragItemData, type DropTargetData } from '../shared/hooks/useAppDnd';
+import { useElementWidth } from '../shared/hooks/useElementWidth';
 import { getSiblingCollections } from '../shared/utils/collectionTree';
 import { useAuthStore } from '../stores/authStore';
 import { useLibraryStore } from '../stores/libraryStore';
@@ -221,6 +222,12 @@ export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { collectionId: routeCollectionId } = useParams<{ collectionId: string }>();
+
+  // Measure the real AppBar width: when the toolbar gets too tight (small
+  // viewport or a wide user-resized sidebar) the inline search swaps to an
+  // icon that opens the search dialog.
+  const [appBarRef, appBarWidth] = useElementWidth<HTMLElement>();
+  const appBarNarrow = appBarWidth > 0 && appBarWidth < 560;
 
   // When a bookmark detail is opened from a list, the list location is passed
   // via router state and rendered underneath the detail drawer.
@@ -699,6 +706,7 @@ export function AppLayout() {
           }}
         >
           <AppBar
+            ref={appBarRef}
             position="fixed"
             sx={{
               width: { md: desktopOpen ? 'calc(100% - var(--arcdrop-sidebar-width))' : '100%' },
@@ -742,7 +750,7 @@ export function AppLayout() {
                 </Typography>
               ) : null}
 
-              <SearchBar />
+              <SearchBar narrow={appBarNarrow} />
 
               <Box sx={{ flexGrow: 1, display: { xs: 'none', sm: 'block' } }} />
 

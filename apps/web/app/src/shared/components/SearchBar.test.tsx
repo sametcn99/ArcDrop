@@ -1,5 +1,5 @@
 import Typography from '@mui/material/Typography';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { describe, expect, it } from 'vitest';
@@ -14,14 +14,14 @@ function LocationMirror() {
   );
 }
 
-function renderSearchBarAt(initialPath = '/') {
+function renderSearchBarAt(initialPath = '/', narrow = false) {
   const router = createMemoryRouter(
     [
       {
         path: '*',
         element: (
           <>
-            <SearchBar />
+            <SearchBar narrow={narrow} />
             <LocationMirror />
           </>
         ),
@@ -137,5 +137,43 @@ describe('SearchBar', () => {
 
     await user.type(input, ' ok');
     expect(screen.queryByTestId('search-inline-error')).not.toBeInTheDocument();
+  }, 30_000);
+
+  it('renders as an icon button when narrow and opens the search dialog', async () => {
+    const user = userEvent.setup({ delay: null });
+
+    // Active search is flagged on the icon via the dot badge
+    renderSearchBarAt('/?search=existing', true);
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    const searchButton = screen.getByTestId('appbar-search-button');
+    expect(searchButton).toBeInTheDocument();
+    expect(searchButton.querySelector('.MuiBadge-dot')).not.toBeNull();
+
+    await user.click(searchButton);
+
+    // Dialog carries the same committing field, prefilled from the URL
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Search bookmarks' })).toBeInTheDocument();
+    const input = within(dialog).getByRole('textbox', { name: 'Search bookmarks' });
+    expect(input).toHaveValue('existing');
+
+    await user.type(input, ' extra');
+    await user.keyboard('{Enter}');
+    await waitFor(() => {
+      expect(screen.getByTestId('location-mirror')).toHaveTextContent(
+        '/?search=existing+extra',
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  }, 30_000);
+
+  it('shows no active-search dot badge when no search is applied', async () => {
+    renderSearchBarAt('/', true);
+
+    const searchButton = screen.getByTestId('appbar-search-button');
+    expect(searchButton).toBeInTheDocument();
+    expect(searchButton.querySelector('.MuiBadge-dot')).toBeNull();
   }, 30_000);
 });

@@ -2,9 +2,13 @@ import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined';
 import HelpOutlineOutlinedIcon from '@mui/icons-material/HelpOutlineOutlined';
 import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import Alert from '@mui/material/Alert';
+import Badge from '@mui/material/Badge';
 import Box from '@mui/material/Box';
 import Chip from '@mui/material/Chip';
 import ClickAwayListener from '@mui/material/ClickAwayListener';
+import Dialog from '@mui/material/Dialog';
+import DialogContent from '@mui/material/DialogContent';
+import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
 import IconButton from '@mui/material/IconButton';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -52,7 +56,7 @@ function isSearchableRoute(pathname: string): boolean {
   return pathname === '/' || pathname.startsWith('/collections/');
 }
 
-export function SearchBar() {
+export function SearchBar({ narrow = false }: { narrow?: boolean }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -60,6 +64,7 @@ export function SearchBar() {
 
   const [inputValue, setInputValue] = useState(urlSearch);
   const [popoverOpen, setPopoverOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState<HTMLDivElement | null>(null);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -143,6 +148,7 @@ export function SearchBar() {
     clearSearchError();
     commitSearch(inputValue);
     setPopoverOpen(false);
+    setDialogOpen(false);
   };
 
   const handleClear = () => {
@@ -190,12 +196,15 @@ export function SearchBar() {
 
   const showError = Boolean(searchError);
 
-  return (
+  const field = (
     <ClickAwayListener onClickAway={() => setPopoverOpen(false)}>
       <Box
         ref={setAnchorEl}
         onKeyDown={handleKeyDown}
-        sx={{ position: 'relative', flexGrow: 1, maxWidth: 480 }}
+        sx={{
+          position: 'relative',
+          ...(narrow ? { width: '100%' } : { flexGrow: 1, maxWidth: 480 }),
+        }}
       >
         <Box component="form" onSubmit={handleSubmit}>
           <TextField
@@ -365,4 +374,59 @@ export function SearchBar() {
       </Box>
     </ClickAwayListener>
   );
+
+  // Narrow toolbars (small viewports or a wide user-resized sidebar) swap the
+  // inline field for a search icon that opens this dialog with the exact same
+  // committing/tag-suggestion behavior.
+  if (narrow) {
+    return (
+      <>
+        <Tooltip title={SHARED_SEARCH_STRINGS.ariaLabel}>
+          <IconButton
+            color="inherit"
+            size="small"
+            aria-label={SHARED_SEARCH_STRINGS.ariaLabel}
+            aria-haspopup="dialog"
+            data-testid="appbar-search-button"
+            onClick={() => setDialogOpen(true)}
+          >
+            {urlSearch !== '' ? (
+              <Badge color="primary" variant="dot">
+                <SearchOutlinedIcon fontSize="small" />
+              </Badge>
+            ) : (
+              <SearchOutlinedIcon fontSize="small" />
+            )}
+          </IconButton>
+        </Tooltip>
+        <Dialog
+          open={dialogOpen}
+          onClose={() => setDialogOpen(false)}
+          fullWidth
+          maxWidth="sm"
+          aria-labelledby="search-dialog-title"
+          data-testid="search-dialog"
+        >
+          <DialogTitle id="search-dialog-title">
+            <Stack
+              direction="row"
+              sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+            >
+              {SHARED_SEARCH_STRINGS.dialogTitle}
+              <IconButton
+                size="small"
+                aria-label={SHARED_SEARCH_STRINGS.closeDialogLabel}
+                onClick={() => setDialogOpen(false)}
+              >
+                <CloseOutlinedIcon fontSize="small" />
+              </IconButton>
+            </Stack>
+          </DialogTitle>
+          <DialogContent sx={{ pt: 1 }}>{field}</DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
+  return field;
 }
