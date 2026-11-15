@@ -464,7 +464,7 @@ const ListRow = memo(function ListRow({
                   spacing={1}
                   sx={{ mt: 1.25, alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
                 >
-                  <ContentTypeChip contentType={bookmark.contentType} />
+                  <ContentTypeChip contentType={bookmark.contentType} borderless />
                   <ArchiveTextChipLink bookmark={bookmark} />
                   <ReminderBadge
                     reminderAt={bookmark.reminderAt}
@@ -713,7 +713,7 @@ const GridCard = memo(function GridCard({
               spacing={0.75}
               sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 0.75 }}
             >
-              <ContentTypeChip contentType={bookmark.contentType} />
+              <ContentTypeChip contentType={bookmark.contentType} borderless />
               <ArchiveTextChipLink bookmark={bookmark} />
               <ReminderBadge reminderAt={bookmark.reminderAt} remindedAt={bookmark.remindedAt} />
               <TagChipList tags={bookmark.tags} maxVisible={3} onTagClick={onTagClick} />
@@ -863,7 +863,7 @@ const HeadlineRow = memo(function HeadlineRow({
               <Box sx={{ display: { xs: 'none', md: 'inline-flex' }, gap: 0.75 }}>
                 <ArchiveTextChipLink bookmark={bookmark} />
                 <ReminderBadge reminderAt={bookmark.reminderAt} remindedAt={bookmark.remindedAt} />
-                <ContentTypeChip contentType={bookmark.contentType} />
+                <ContentTypeChip contentType={bookmark.contentType} borderless />
               </Box>
               <BookmarkDragAndOrderControls
                 bookmark={bookmark}

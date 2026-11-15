@@ -4,6 +4,8 @@ import { ContentTypeIcon } from './ContentTypeIcon';
 
 export interface ContentTypeChipProps {
   contentType: BookmarkContentType;
+  /** Renders without the outlined border (bookmark list/grid/headline cards). */
+  borderless?: boolean;
 }
 
 const CONTENT_TYPE_LABELS: Record<BookmarkContentType, string> = {
@@ -16,11 +18,11 @@ const CONTENT_TYPE_LABELS: Record<BookmarkContentType, string> = {
   link: 'Link',
 };
 
-export function ContentTypeChip({ contentType }: ContentTypeChipProps) {
+export function ContentTypeChip({ contentType, borderless = false }: ContentTypeChipProps) {
   return (
     <Chip
       size="small"
-      variant="outlined"
+      variant={borderless ? 'filled' : 'outlined'}
       icon={<ContentTypeIcon contentType={contentType} />}
       label={CONTENT_TYPE_LABELS[contentType]}
     />
