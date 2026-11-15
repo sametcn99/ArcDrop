@@ -9,6 +9,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import type { PublicBookmark } from '../../../api/schemas/publicShare';
 import { ContentTypeIcon } from '../../../shared/components/ContentTypeIcon';
+import { publicShareApi } from '../../../api/endpoints/publicShare';
 import { PUBLIC_SHARE_STRINGS as S } from '../strings';
 
 export interface PublicBookmarkCardProps {
@@ -17,8 +18,19 @@ export interface PublicBookmarkCardProps {
 
 export function PublicBookmarkCard({ bookmark }: PublicBookmarkCardProps) {
   const href = bookmark.url ?? undefined;
+  const cover = bookmark.coverRef ? publicShareApi.assetUrl(bookmark.coverRef) : null;
   const body = (
     <CardContent>
+      {cover ? (
+        <Box
+          component="img"
+          src={cover}
+          alt=""
+          loading="lazy"
+          sx={{ width: '100%', height: 140, objectFit: 'cover', display: 'block', mb: 1.5 }}
+          data-testid="public-bookmark-cover"
+        />
+      ) : null}
       <Stack spacing={0.75}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <ContentTypeIcon contentType={bookmark.contentType} />

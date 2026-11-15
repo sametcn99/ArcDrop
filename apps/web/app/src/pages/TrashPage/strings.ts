@@ -1,6 +1,9 @@
 export const TRASH_PAGE_STRINGS = {
   title: 'Trash',
   subtitle: 'Review trashed bookmarks, restore items to your library, or purge them permanently.',
+  searchLabel: 'Search trash',
+  searchAriaLabel: 'Search trashed bookmarks',
+  searchClearLabel: 'Clear search',
   retentionPolicyPrefix: 'Trashed items are kept for',
   retentionPolicySuffix: 'days before automatic permanent purge.',
   retentionAdminNoteSuffix: 'Configured via server retention settings.',
@@ -16,6 +19,8 @@ export const TRASH_PAGE_STRINGS = {
   trashedAtPrefix: 'Trashed',
   emptyTitle: 'Trash is empty',
   emptyDescription: 'Deleted bookmarks appear here so you can restore or permanently purge them.',
+  emptySearchDescription:
+    'No trashed bookmarks match your search. Operators like #tag or type:video work here too.',
   errorRetryLabel: 'Retry',
   loadMoreLabel: 'Load more',
   loadingMoreLabel: 'Loading more...',

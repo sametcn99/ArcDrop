@@ -18,6 +18,14 @@ export function createPublicShareApi(client: ApiClient = apiClient) {
     rssUrl(shareToken: string): string {
       return client.resolveUrl(`/public/collections/${encodeURIComponent(shareToken)}/rss`);
     },
+
+    /**
+     * Cover/icon image bytes for public cards. `/icons/{id}` is an
+     * unauthenticated, capability-by-ref surface, so plain <img> tags work.
+     */
+    assetUrl(ref: string): string {
+      return client.resolveUrl(`/icons/${encodeURIComponent(ref)}`);
+    },
   };
 }
 

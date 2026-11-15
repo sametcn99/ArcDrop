@@ -64,4 +64,30 @@ export const SETTINGS_PAGE_STRINGS = {
     createdToast: (name: string) => `Token "${name}" created.`,
     revokedToast: 'Token revoked.',
   },
+  dangerZone: {
+    heading: 'Danger zone',
+    description: 'Irreversible self-service actions. Both require your password.',
+    resetTitle: 'Reset library',
+    resetDescription:
+      'Wipes all bookmarks (including uploaded files), collections, tags, highlights, notifications, and change history. Your account, profile, settings, and sessions are kept.',
+    resetButton: 'Reset library…',
+    resetDialogTitle: 'Reset your library?',
+    resetDialogWarning:
+      'Everything in your library is permanently deleted: bookmarks (including uploaded files), collections, tags, highlights, notifications, and change history. Your account, profile, settings, and active sessions are kept.',
+    resetSuccessToast: 'Library reset. Sync restarted from a clean state.',
+    resetConfirmLabel: 'Permanently reset library',
+    deleteTitle: 'Delete account',
+    deleteDescription:
+      'Permanently deletes your account and every piece of data you own, including sessions and API tokens. This cannot be undone.',
+    deleteButton: 'Delete account…',
+    deleteDialogTitle: 'Delete your account?',
+    deleteDialogWarning:
+      'Your account and ALL data you own are permanently deleted: library, uploaded files, collections, tags, highlights, notifications, sessions, and API tokens. This cannot be undone.',
+    deleteSuccessToast: 'Account deleted.',
+    deleteConfirmLabel: 'Permanently delete account',
+    deleteConfirmTextLabel: 'Type DELETE to confirm',
+    deleteConfirmTextHint: 'DELETE',
+    passwordLabel: 'Password',
+    cancelLabel: 'Cancel',
+  },
 } as const;

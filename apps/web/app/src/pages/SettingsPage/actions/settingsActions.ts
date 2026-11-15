@@ -1,3 +1,4 @@
+import { accountApi } from '../../../api/endpoints/account';
 import { authApi } from '../../../api/endpoints/auth';
 import { tokensApi } from '../../../api/endpoints/tokens';
 import { toApiError } from '../../../api/schemas/problem';
@@ -58,5 +59,36 @@ export async function revokeTokenAction(tokenId: string): Promise<boolean> {
       severity: 'error',
     });
     return false;
+  }
+}
+
+/**
+ * Password-confirmed destructive actions return the error detail on failure
+ * (so the caller's dialog can show it inline) and null on success (the
+ * success snackbar is enqueued here, matching the other settings actions).
+ */
+export async function resetLibraryAction(password: string): Promise<string | null> {
+  try {
+    await accountApi.resetLibrary({ password });
+    useUiStore.getState().enqueueSnackbar({
+      message: S.dangerZone.resetSuccessToast,
+      severity: 'success',
+    });
+    return null;
+  } catch (err) {
+    return toApiError(err).detail;
+  }
+}
+
+export async function deleteAccountAction(password: string): Promise<string | null> {
+  try {
+    await accountApi.deleteAccount({ password });
+    useUiStore.getState().enqueueSnackbar({
+      message: S.dangerZone.deleteSuccessToast,
+      severity: 'success',
+    });
+    return null;
+  } catch (err) {
+    return toApiError(err).detail;
   }
 }

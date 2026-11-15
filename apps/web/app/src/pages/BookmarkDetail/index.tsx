@@ -12,6 +12,7 @@ import Tabs from '@mui/material/Tabs';
 import Typography from '@mui/material/Typography';
 import { useEffect } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams, type Location } from 'react-router';
+import { bookmarksApi } from '../../api/endpoints/bookmarks';
 import { BookmarkArchivePanel } from './components/BookmarkArchivePanel';
 import { BookmarkDetailForm } from './components/BookmarkDetailForm';
 import { useBookmarkDetail } from './hooks/useBookmarkDetail';
@@ -225,35 +226,54 @@ export default function BookmarkDetailPage() {
               onReindex={() => void reindex()}
             />
           ) : (
-            <BookmarkDetailForm
-              bookmark={bookmark}
-              form={form}
-              fieldErrors={fieldErrors}
-              saveError={saveError}
-              saving={saving}
-              isDirty={isDirty}
-              onFieldChange={setField}
-              onReset={resetEdits}
-              onSave={save}
-              tagsSaving={tagsSaving}
-              tagsError={tagsError}
-              onSaveTags={saveTags}
-              reminderSaving={reminderSaving}
-              reminderError={reminderError}
-              onSaveReminder={saveReminder}
-              highlights={highlights}
-              highlightsLoading={highlightsLoading}
-              highlightsBusy={highlightsBusy}
-              highlightsError={highlightsError}
-              onCreateHighlight={createHighlight}
-              onUpdateHighlight={updateHighlight}
-              onDeleteHighlight={deleteHighlight}
-              onToggleFavorite={() => void toggleFavorite()}
-              onTrash={() => void handleTrash()}
-              onRestore={() => void restore()}
-              onDownloadFile={() => void downloadFile()}
-              onOpenArchiveText={() => handleTabChange('archive', 'text')}
-            />
+            <>
+              {bookmark.coverRef ? (
+                <Box
+                  component="img"
+                  src={bookmarksApi.coverUrl(bookmark.coverRef)}
+                  alt=""
+                  loading="lazy"
+                  sx={{
+                    width: '100%',
+                    maxHeight: 180,
+                    objectFit: 'cover',
+                    borderRadius: 1,
+                    mb: 2,
+                    display: 'block',
+                  }}
+                  data-testid="bookmark-detail-cover"
+                />
+              ) : null}
+              <BookmarkDetailForm
+                bookmark={bookmark}
+                form={form}
+                fieldErrors={fieldErrors}
+                saveError={saveError}
+                saving={saving}
+                isDirty={isDirty}
+                onFieldChange={setField}
+                onReset={resetEdits}
+                onSave={save}
+                tagsSaving={tagsSaving}
+                tagsError={tagsError}
+                onSaveTags={saveTags}
+                reminderSaving={reminderSaving}
+                reminderError={reminderError}
+                onSaveReminder={saveReminder}
+                highlights={highlights}
+                highlightsLoading={highlightsLoading}
+                highlightsBusy={highlightsBusy}
+                highlightsError={highlightsError}
+                onCreateHighlight={createHighlight}
+                onUpdateHighlight={updateHighlight}
+                onDeleteHighlight={deleteHighlight}
+                onToggleFavorite={() => void toggleFavorite()}
+                onTrash={() => void handleTrash()}
+                onRestore={() => void restore()}
+                onDownloadFile={() => void downloadFile()}
+                onOpenArchiveText={() => handleTabChange('archive', 'text')}
+              />
+            </>
           )}
         </Box>
       </Box>

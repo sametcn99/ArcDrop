@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router';
-import type { BookmarkContentType, BookmarkSort } from '../../api/schemas/bookmarks';
+import type {
+  BookmarkCacheStatus,
+  BookmarkContentType,
+  BookmarkSort,
+} from '../../api/schemas/bookmarks';
 import {
   useLibraryStore,
   type LibraryLayoutMode,
@@ -56,18 +60,26 @@ export function useUrlState(options: UseUrlStateOptions = {}) {
       file: parsed.file,
       createdFrom: parsed.createdFrom,
       createdTo: parsed.createdTo,
+      cacheStatus: parsed.cacheStatus,
+      domain: parsed.domain,
+      updatedFrom: parsed.updatedFrom,
+      updatedTo: parsed.updatedTo,
       matchOr: parsed.matchOr,
     }),
     [
       parsed.broken,
+      parsed.cacheStatus,
       parsed.createdFrom,
       parsed.createdTo,
+      parsed.domain,
       parsed.favorite,
       parsed.file,
       parsed.matchOr,
       parsed.notag,
       parsed.search,
       parsed.type,
+      parsed.updatedFrom,
+      parsed.updatedTo,
       stableTags,
     ],
   );
@@ -277,6 +289,47 @@ export function useUrlState(options: UseUrlStateOptions = {}) {
     [updateParams],
   );
 
+  const setUpdatedRange = useCallback(
+    (from: string, to: string) => {
+      const validFrom = parseDateParam(from);
+      const validTo = parseDateParam(to);
+      updateParams((next) => {
+        if (validFrom) next.set('updatedFrom', validFrom);
+        else next.delete('updatedFrom');
+        if (validTo) next.set('updatedTo', validTo);
+        else next.delete('updatedTo');
+      });
+    },
+    [updateParams],
+  );
+
+  const setCacheStatus = useCallback(
+    (nextStatus: BookmarkCacheStatus | null) => {
+      updateParams((next) => {
+        if (nextStatus === null) {
+          next.delete('cacheStatus');
+        } else {
+          next.set('cacheStatus', nextStatus);
+        }
+      });
+    },
+    [updateParams],
+  );
+
+  const setDomain = useCallback(
+    (nextDomain: string) => {
+      const trimmed = nextDomain.trim().slice(0, 253);
+      updateParams((next) => {
+        if (trimmed === '') {
+          next.delete('domain');
+        } else {
+          next.set('domain', trimmed);
+        }
+      });
+    },
+    [updateParams],
+  );
+
   const setMatchOr = useCallback(
     (enabled: boolean) => {
       updateParams((next) => {
@@ -297,6 +350,10 @@ export function useUrlState(options: UseUrlStateOptions = {}) {
       next.delete('file');
       next.delete('createdFrom');
       next.delete('createdTo');
+      next.delete('updatedFrom');
+      next.delete('updatedTo');
+      next.delete('cacheStatus');
+      next.delete('domain');
       next.delete('match');
     });
   }, [updateParams]);
@@ -312,6 +369,10 @@ export function useUrlState(options: UseUrlStateOptions = {}) {
       next.delete('file');
       next.delete('createdFrom');
       next.delete('createdTo');
+      next.delete('updatedFrom');
+      next.delete('updatedTo');
+      next.delete('cacheStatus');
+      next.delete('domain');
       next.delete('match');
     });
   }, [updateParams]);
@@ -334,6 +395,9 @@ export function useUrlState(options: UseUrlStateOptions = {}) {
     setBroken,
     setFile,
     setCreatedRange,
+    setUpdatedRange,
+    setCacheStatus,
+    setDomain,
     setMatchOr,
     clearFilters,
     clearSearchAndFilters,

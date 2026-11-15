@@ -35,12 +35,13 @@ export function useTrashView() {
   const [error, setError] = useState<string | null>(null);
   const [retentionDays, setRetentionDays] = useState<number>(DEFAULT_TRASH_RETENTION_DAYS);
   const [retentionFromSettings, setRetentionFromSettings] = useState(false);
+  const [searchQuery, setSearchQueryState] = useState('');
 
   const hasFetchedOnceRef = useRef(false);
   const lastSyncedCursorRef = useRef(syncCursor);
 
   const fetchPage = useCallback(
-    async (targetPage: number, append: boolean) => {
+    async (targetPage: number, append: boolean, search?: string) => {
       if (append) {
         setLoadingMore(true);
       } else {
@@ -50,6 +51,7 @@ export function useTrashView() {
       try {
         const res = await bookmarksApi.list({
           trashed: true,
+          search: (search ?? searchQuery) || undefined,
           page: targetPage,
           pageSize: DEFAULT_LIBRARY_PAGE_SIZE,
         });
@@ -73,8 +75,12 @@ export function useTrashView() {
         setLoadingMore(false);
       }
     },
-    [upsertBookmark],
+    [searchQuery, upsertBookmark],
   );
+
+  const setSearchQuery = useCallback((next: string) => {
+    setSearchQueryState((prev) => (prev === next ? prev : next));
+  }, []);
 
   useEffect(() => {
     if (isBootstrapping) return;
@@ -88,6 +94,16 @@ export function useTrashView() {
       void fetchPage(1, false);
     }
   }, [fetchPage, isBootstrapping, syncCursor]);
+
+  // Refetch page 1 whenever the active search query actually changes (the
+  // ref-based guard skips identity-only re-runs of this effect).
+  const searchRef = useRef(searchQuery);
+  useEffect(() => {
+    if (searchRef.current === searchQuery) return;
+    searchRef.current = searchQuery;
+    if (!hasFetchedOnceRef.current) return;
+    void fetchPage(1, false, searchQuery);
+  }, [fetchPage, searchQuery]);
 
   useEffect(() => {
     if (isBootstrapping || userRole !== 'admin') {
@@ -174,6 +190,7 @@ export function useTrashView() {
         while (keepFetching) {
           const res = await bookmarksApi.list({
             trashed: true,
+            search: searchQuery || undefined,
             page: nextPage,
             pageSize: MAX_BULK_BOOKMARK_IDS,
           });
@@ -217,6 +234,8 @@ export function useTrashView() {
     retentionFromSettings,
     selectedBookmarkIds,
     toggleBookmarkSelection,
+    searchQuery,
+    setSearchQuery,
     loadMore,
     retry,
     restoreItem,

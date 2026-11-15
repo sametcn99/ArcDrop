@@ -158,7 +158,9 @@ export function parseViewKey(viewKey: string):
   }
 
   const scope: LibraryScope =
-    rawScope === 'favorites' || rawScope === 'unassigned' ? rawScope : 'all';
+    rawScope === 'favorites' || rawScope === 'unassigned' || rawScope === 'reminders'
+      ? rawScope
+      : 'all';
   return {
     kind: 'library',
     scope,
@@ -252,6 +254,11 @@ function viewMatchesBookmark(viewKey: string, bookmark: Bookmark): boolean {
   }
   if (parsed.scope === 'favorites') {
     return bookmark.favorite;
+  }
+  // Reminder presence is on the DTO (reminderAt set), mirroring the API's
+  // `reminder=true` list filter.
+  if (parsed.scope === 'reminders') {
+    return bookmark.reminderAt !== null;
   }
   // We cannot determine unassigned status solely from BookmarkDto because collection memberships live on collections.
   if (parsed.scope === 'unassigned') {

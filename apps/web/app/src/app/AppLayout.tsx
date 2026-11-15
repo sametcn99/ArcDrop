@@ -1,6 +1,7 @@
 import AccountCircleOutlinedIcon from '@mui/icons-material/AccountCircleOutlined';
 import AddOutlinedIcon from '@mui/icons-material/AddOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
+import AlarmOutlinedIcon from '@mui/icons-material/AlarmOutlined';
 import AllInboxOutlinedIcon from '@mui/icons-material/AllInboxOutlined';
 import BookmarksOutlinedIcon from '@mui/icons-material/BookmarksOutlined';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -485,6 +486,7 @@ export function AppLayout() {
   const isLibraryAll = location.pathname === '/' && !currentScope;
   const isLibraryFavorites = location.pathname === '/' && currentScope === 'favorites';
   const isLibraryUnassigned = location.pathname === '/' && currentScope === 'unassigned';
+  const isLibraryReminders = location.pathname === '/' && currentScope === 'reminders';
 
   const renderDrawerContent = (enableDnd: boolean) => (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -541,6 +543,20 @@ export function AppLayout() {
             </ListItemIcon>
             <ListItemText primary={APP_STRINGS.navUnassigned} />
             <Chip size="small" label={stats.unassigned} variant="outlined" />
+          </ListItemButton>
+        </ListItem>
+
+        <ListItem disablePadding>
+          <ListItemButton
+            component={RouterLink}
+            to="/?view=reminders"
+            selected={isLibraryReminders}
+            onClick={handleCloseMobileDrawer}
+          >
+            <ListItemIcon>
+              <AlarmOutlinedIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText primary={APP_STRINGS.navReminders} />
           </ListItemButton>
         </ListItem>
 

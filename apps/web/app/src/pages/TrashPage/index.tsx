@@ -1,5 +1,7 @@
 import DeleteForeverOutlinedIcon from '@mui/icons-material/DeleteForeverOutlined';
 import RestoreFromTrashOutlinedIcon from '@mui/icons-material/RestoreFromTrashOutlined';
+import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
+import CloseIcon from '@mui/icons-material/Close';
 import { selectAllMatchingBookmarksAction } from '../../shared/actions/bulkActions';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -13,12 +15,15 @@ import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
 import Link from '@mui/material/Link';
 import Paper from '@mui/material/Paper';
 import Skeleton from '@mui/material/Skeleton';
 import Stack from '@mui/material/Stack';
+import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { useBookmarkDetailNavigationState } from '../../shared/hooks/useBookmarkDetailNavigationState';
 import { AuthenticatedFilePreview } from '../../shared/components/AuthenticatedFilePreview';
@@ -46,6 +51,8 @@ export default function TrashPage() {
     retentionFromSettings,
     selectedBookmarkIds,
     toggleBookmarkSelection,
+    searchQuery,
+    setSearchQuery,
     loadMore,
     retry,
     restoreItem,
@@ -55,6 +62,13 @@ export default function TrashPage() {
   } = useTrashView();
 
   const [purgeAllDialogOpen, setPurgeAllDialogOpen] = useState(false);
+  const [searchInput, setSearchInput] = useState(searchQuery);
+
+  // Debounce keystrokes; the hook refetches page 1 when the query settles.
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput, setSearchQuery]);
 
   const visibleBookmarkIds = useMemo(() => items.map((item) => item.id), [items]);
 
@@ -98,6 +112,38 @@ export default function TrashPage() {
         </Button>
       </Stack>
 
+      <TextField
+        size="small"
+        label={TRASH_PAGE_STRINGS.searchLabel}
+        value={searchInput}
+        disabled={loading || purgingAll}
+        onChange={(event) => setSearchInput(event.target.value)}
+        slotProps={{
+          htmlInput: { 'aria-label': TRASH_PAGE_STRINGS.searchAriaLabel },
+          input: {
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchOutlinedIcon fontSize="small" />
+              </InputAdornment>
+            ),
+            endAdornment: searchInput ? (
+              <InputAdornment position="end">
+                <IconButton
+                  size="small"
+                  aria-label={TRASH_PAGE_STRINGS.searchClearLabel}
+                  onClick={() => setSearchInput('')}
+                  edge="end"
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </InputAdornment>
+            ) : null,
+          },
+        }}
+        sx={{ maxWidth: 360 }}
+        data-testid="trash-search-input"
+      />
+
       <Alert severity="info" data-testid="trash-retention-note">
         {`${TRASH_PAGE_STRINGS.retentionPolicyPrefix} ${retentionDays} ${TRASH_PAGE_STRINGS.retentionPolicySuffix} ${
           retentionFromSettings
@@ -138,7 +184,9 @@ export default function TrashPage() {
         <Paper variant="outlined" sx={{ p: 4, textAlign: 'center' }}>
           <Typography variant="h6">{TRASH_PAGE_STRINGS.emptyTitle}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            {TRASH_PAGE_STRINGS.emptyDescription}
+            {searchQuery
+              ? TRASH_PAGE_STRINGS.emptySearchDescription
+              : TRASH_PAGE_STRINGS.emptyDescription}
           </Typography>
         </Paper>
       ) : (

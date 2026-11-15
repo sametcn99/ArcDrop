@@ -1,12 +1,14 @@
 import {
+  cacheStatusSchema,
   contentTypeSchema,
+  type BookmarkCacheStatus,
   type BookmarkContentType,
   type BookmarkListQuery,
   type BookmarkSort,
 } from '../../api/schemas/bookmarks';
 
 export type LibraryLayoutMode = 'list' | 'grid' | 'headlines' | 'moodboard';
-export type LibraryScope = 'all' | 'favorites' | 'unassigned';
+export type LibraryScope = 'all' | 'favorites' | 'unassigned' | 'reminders';
 
 export const DEFAULT_LIBRARY_PAGE_SIZE = 24;
 
@@ -20,6 +22,13 @@ export interface BookmarkFilterState {
   file: boolean;
   createdFrom: string;
   createdTo: string;
+  /** Permanent-copy archive status filter (query param `cacheStatus`). */
+  cacheStatus?: BookmarkCacheStatus | null;
+  /** Exact registrable domain match (query param `domain`). */
+  domain?: string;
+  /** `lastUpdate:` date range, composed into the search operator grammar. */
+  updatedFrom?: string;
+  updatedTo?: string;
   matchOr: boolean;
 }
 
@@ -39,13 +48,17 @@ export const EMPTY_FILTER_STATE: BookmarkFilterState = {
   file: false,
   createdFrom: '',
   createdTo: '',
+  cacheStatus: null,
+  domain: '',
+  updatedFrom: '',
+  updatedTo: '',
   matchOr: false,
 };
 
 const DATE_INPUT_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function parseScopeParam(raw: string | null): LibraryScope {
-  if (raw === 'favorites' || raw === 'unassigned') return raw;
+  if (raw === 'favorites' || raw === 'unassigned' || raw === 'reminders') return raw;
   return 'all';
 }
 
@@ -109,6 +122,11 @@ export function parseFilterState(params: URLSearchParams): BookmarkFilterState {
   const file = parseBooleanParam(params.get('file'));
   const createdFrom = parseDateParam(params.get('createdFrom'));
   const createdTo = parseDateParam(params.get('createdTo'));
+  const updatedFrom = parseDateParam(params.get('updatedFrom'));
+  const updatedTo = parseDateParam(params.get('updatedTo'));
+  const cacheStatusRaw = (params.get('cacheStatus') ?? '').trim();
+  const cacheStatus = cacheStatusSchema.safeParse(cacheStatusRaw);
+  const domain = (params.get('domain') ?? '').trim().slice(0, 253);
   const matchRaw = (params.get('match') ?? '').trim().toUpperCase();
   const matchOr = matchRaw === 'OR';
 
@@ -122,6 +140,10 @@ export function parseFilterState(params: URLSearchParams): BookmarkFilterState {
     file,
     createdFrom,
     createdTo,
+    updatedFrom,
+    updatedTo,
+    cacheStatus: cacheStatus.success ? cacheStatus.data : null,
+    domain,
     matchOr,
   };
 }
@@ -152,6 +174,10 @@ export function serializeFilterParams(
   target.delete('file');
   target.delete('createdFrom');
   target.delete('createdTo');
+  target.delete('updatedFrom');
+  target.delete('updatedTo');
+  target.delete('cacheStatus');
+  target.delete('domain');
   target.delete('match');
 
   const trimmedSearch = filters.search.trim();
@@ -182,6 +208,19 @@ export function serializeFilterParams(
   if (filters.createdTo !== '') {
     target.set('createdTo', filters.createdTo);
   }
+  if (filters.updatedFrom) {
+    target.set('updatedFrom', filters.updatedFrom);
+  }
+  if (filters.updatedTo) {
+    target.set('updatedTo', filters.updatedTo);
+  }
+  if (filters.cacheStatus) {
+    target.set('cacheStatus', filters.cacheStatus);
+  }
+  const domain = filters.domain?.trim();
+  if (domain) {
+    target.set('domain', domain);
+  }
   if (filters.matchOr) {
     target.set('match', 'OR');
   }
@@ -203,6 +242,10 @@ export function hasActiveFilters(filters: BookmarkFilterState): boolean {
     filters.file ||
     filters.createdFrom !== '' ||
     filters.createdTo !== '' ||
+    filters.updatedFrom !== '' ||
+    filters.updatedTo !== '' ||
+    filters.cacheStatus != null ||
+    (filters.domain ?? '') !== '' ||
     filters.matchOr
   );
 }
@@ -250,6 +293,8 @@ export function buildBookmarkApiQuery(options: {
     query.favorite = true;
   } else if (scope === 'unassigned') {
     query.unassignedOnly = true;
+  } else if (scope === 'reminders') {
+    query.reminder = true;
   }
 
   if (filters.type !== null) {
@@ -263,6 +308,13 @@ export function buildBookmarkApiQuery(options: {
   }
   if (filters.file) {
     query.file = true;
+  }
+  if (filters.cacheStatus) {
+    query.cacheStatus = filters.cacheStatus;
+  }
+  const domain = filters.domain?.trim();
+  if (domain) {
+    query.domain = domain;
   }
 
   const normalizedTags = normalizeTagsParam(filters.tags);
@@ -292,6 +344,12 @@ export function buildBookmarkApiQuery(options: {
   }
   if (filters.createdTo !== '') {
     searchTokens.push(`created:<=${filters.createdTo}`);
+  }
+  if (filters.updatedFrom) {
+    searchTokens.push(`lastUpdate:>=${filters.updatedFrom}`);
+  }
+  if (filters.updatedTo) {
+    searchTokens.push(`lastUpdate:<=${filters.updatedTo}`);
   }
 
   if (searchTokens.length > 0) {

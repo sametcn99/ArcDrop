@@ -31,6 +31,7 @@ import { memo } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { Virtuoso } from 'react-virtuoso';
 import type { Bookmark } from '../../api/schemas/bookmarks';
+import { bookmarksApi } from '../../api/endpoints/bookmarks';
 import type { LibraryLayoutMode } from '../../stores/libraryStore';
 import { downloadBookmarkFileAction } from '../actions/bookmarkActions';
 import { buildBookmarkDragId, type DragItemData } from '../hooks/useAppDnd';
@@ -654,6 +655,21 @@ const GridCard = memo(function GridCard({
                 variant="banner"
                 maxHeight={140}
               />
+            ) : bookmark.coverRef ? (
+              <Box
+                component="img"
+                src={bookmarksApi.coverUrl(bookmark.coverRef)}
+                alt=""
+                loading="lazy"
+                sx={{
+                  width: '100%',
+                  height: 140,
+                  objectFit: 'cover',
+                  borderRadius: 1,
+                  display: 'block',
+                }}
+                data-testid={`bookmark-cover-${bookmark.id}`}
+              />
             ) : null}
 
             <Link
@@ -1042,6 +1058,21 @@ const MoodboardCard = memo(function MoodboardCard({
                 alt={title}
                 variant="banner"
                 maxHeight={180}
+              />
+            ) : bookmark.coverRef ? (
+              <Box
+                component="img"
+                src={bookmarksApi.coverUrl(bookmark.coverRef)}
+                alt=""
+                loading="lazy"
+                sx={{
+                  width: '100%',
+                  height: 160,
+                  objectFit: 'cover',
+                  borderRadius: 1,
+                  display: 'block',
+                }}
+                data-testid={`bookmark-cover-${bookmark.id}`}
               />
             ) : null}
 

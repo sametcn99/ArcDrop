@@ -158,4 +158,42 @@ describe('File items across all layouts & archive text links', () => {
     const archiveTextView = await screen.findByTestId('archive-text-view');
     expect(archiveTextView).toHaveTextContent('Action items synced.');
   }, 60_000);
+
+  it('renders metadata cover images in grid and moodboard cards via the public /icons surface', async () => {
+    const user = userEvent.setup({ delay: null });
+
+    const withCover = makeMockBookmark({
+      id: 'bm-cover-1',
+      title: 'Covered Article',
+      coverRef: 'cover-ref-1',
+    });
+    const withoutCover = makeMockBookmark({
+      id: 'bm-cover-2',
+      title: 'Bare Article',
+      coverRef: null,
+    });
+
+    server.use(
+      http.get('*/api/v1/bookmarks', () =>
+        HttpResponse.json({
+          items: [withCover, withoutCover],
+          totalCount: 2,
+          page: 1,
+          pageSize: 24,
+        }),
+      ),
+    );
+
+    renderAt('/?layout=grid');
+    await waitForLibraryReady();
+
+    expect(await screen.findByTestId('library-layout-grid')).toBeInTheDocument();
+    const cover = screen.getByTestId('bookmark-cover-bm-cover-1');
+    expect(cover).toHaveAttribute('src', expect.stringContaining('/api/v1/icons/cover-ref-1'));
+    expect(screen.queryByTestId('bookmark-cover-bm-cover-2')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Moodboard' }));
+    expect(await screen.findByTestId('library-layout-moodboard')).toBeInTheDocument();
+    expect(await screen.findByTestId('bookmark-cover-bm-cover-1')).toBeInTheDocument();
+  }, 60_000);
 });

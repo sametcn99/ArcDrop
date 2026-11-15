@@ -5,6 +5,7 @@ import Tabs from '@mui/material/Tabs';
 import Typography from '@mui/material/Typography';
 import { useState } from 'react';
 import { ApiTokensSection } from './components/ApiTokensSection';
+import { DangerZoneSection } from './components/DangerZoneSection';
 import { NotificationsSection } from './components/NotificationsSection';
 import { ProfileSection } from './components/ProfileSection';
 import { SessionsSection } from './components/SessionsSection';
@@ -40,6 +41,7 @@ export default function SettingsPage() {
         {tab === 'notifications' ? <NotificationsSection /> : null}
         {tab === 'tokens' ? <ApiTokensSection /> : null}
       </Box>
+      <DangerZoneSection />
     </Stack>
   );
 }

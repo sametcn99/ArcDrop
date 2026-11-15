@@ -60,6 +60,9 @@ export default function CollectionPage() {
     setBroken,
     setFile,
     setCreatedRange,
+    setUpdatedRange,
+    setCacheStatus,
+    setDomain,
     setMatchOr,
     clearFilters,
     clearSearchAndFilters,
@@ -178,6 +181,9 @@ export default function CollectionPage() {
         onBrokenChange={setBroken}
         onFileChange={setFile}
         onCreatedRangeChange={setCreatedRange}
+        onUpdatedRangeChange={setUpdatedRange}
+        onCacheStatusChange={setCacheStatus}
+        onDomainChange={setDomain}
         onMatchOrChange={setMatchOr}
         onClearFilters={clearFilters}
       />

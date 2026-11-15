@@ -191,6 +191,11 @@ export function createBookmarksApi(client: ApiClient = apiClient) {
     iconUrl(iconRef: string): string {
       return client.resolveUrl(`/icons/${encodeURIComponent(iconRef)}`);
     },
+
+    /** Cover images are served by the same public `/icons/{id}` surface. */
+    coverUrl(coverRef: string): string {
+      return client.resolveUrl(`/icons/${encodeURIComponent(coverRef)}`);
+    },
   };
 }
 

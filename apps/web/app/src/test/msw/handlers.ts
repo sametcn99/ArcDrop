@@ -114,7 +114,9 @@ export function makeMockBookmarkArchive(overrides: Partial<BookmarkArchive> = {}
   };
 }
 
-export function makeMockCollection(overrides: Partial<Collection> = {}): Collection {
+export function makeMockCollection(
+  overrides: Partial<Collection> & { children?: unknown[] } = {},
+): Collection & { children?: unknown[] } {
   return {
     id: 'col-1',
     parentId: null,
@@ -416,6 +418,14 @@ export const authHandlers = [
   http.post('*/api/v1/auth/tfa/disable', () => {
     return new HttpResponse(null, { status: 204 });
   }),
+
+  http.post('*/api/v1/me/reset-data', () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete('*/api/v1/me', () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];
 
 export const libraryHandlers = [
@@ -546,6 +556,7 @@ export const libraryHandlers = [
     const unassignedOnly = url.searchParams.get('unassignedOnly');
     const trashed = url.searchParams.get('trashed');
     const broken = url.searchParams.get('broken');
+    const reminder = url.searchParams.get('reminder');
 
     let items = makeDefaultBookmarkFixtures();
     if (trashed === 'true') {
@@ -561,6 +572,18 @@ export const libraryHandlers = [
     }
     if (unassignedOnly === 'true') {
       items = items.filter((item) => item.id === 'bm-2');
+    }
+    if (reminder === 'true') {
+      items = items.filter((item) => item.reminderAt !== null);
+    }
+    const cacheStatus = url.searchParams.get('cacheStatus');
+    if (cacheStatus) {
+      items = items.filter((item) => item.cacheStatus === cacheStatus);
+    }
+    const domain = url.searchParams.get('domain');
+    if (domain) {
+      const domainLower = domain.toLowerCase();
+      items = items.filter((item) => item.urlParts?.domain?.toLowerCase() === domainLower);
     }
 
     return HttpResponse.json(

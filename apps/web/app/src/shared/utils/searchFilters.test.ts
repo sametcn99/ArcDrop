@@ -10,6 +10,7 @@ import {
   formatSearchTagToken,
   hasActiveFilters,
   hasActiveSearchOrFilters,
+  parseScopeParam,
   parseUrlState,
   serializeFilterKey,
   serializeFilterParams,
@@ -36,6 +37,10 @@ describe('searchFilters utilities', () => {
       file: true,
       createdFrom: '2026-01-01',
       createdTo: '2026-12-31',
+      updatedFrom: '',
+      updatedTo: '',
+      cacheStatus: null,
+      domain: '',
       matchOr: true,
     });
 
@@ -71,6 +76,10 @@ describe('searchFilters utilities', () => {
       file: true,
       createdFrom: '2026-02-01',
       createdTo: '2026-02-28',
+      updatedFrom: '',
+      updatedTo: '',
+      cacheStatus: null,
+      domain: '',
       matchOr: true,
     };
 
@@ -185,5 +194,85 @@ describe('searchFilters utilities', () => {
       filters,
       hasFilters: true,
     });
+  });
+
+  it('supports the reminders scope in URL params, view keys, and API queries', () => {
+    expect(parseScopeParam('reminders')).toBe('reminders');
+    expect(parseScopeParam('nonsense')).toBe('all');
+
+    const remindersKey = buildLibraryViewKey('reminders', 'updated', EMPTY_FILTER_STATE);
+    expect(parseViewKey(remindersKey)).toEqual({
+      kind: 'library',
+      scope: 'reminders',
+      sort: 'updated',
+      filters: EMPTY_FILTER_STATE,
+      hasFilters: false,
+    });
+
+    const remindersQuery = buildBookmarkApiQuery({
+      scope: 'reminders',
+      sort: 'updated',
+      filters: EMPTY_FILTER_STATE,
+      page: 1,
+    });
+    expect(remindersQuery).toEqual({
+      page: 1,
+      pageSize: 24,
+      sort: 'updated',
+      trashed: false,
+      reminder: true,
+    });
+  });
+
+  it('parses cacheStatus, domain, and updated-range params into the API query', () => {
+    const params = new URLSearchParams(
+      'cacheStatus=ready&domain=github.com&updatedFrom=2026-02-01&updatedTo=2026-03-01',
+    );
+    const parsed = parseUrlState(params);
+    expect(parsed.cacheStatus).toBe('ready');
+    expect(parsed.domain).toBe('github.com');
+    expect(parsed.updatedFrom).toBe('2026-02-01');
+    expect(parsed.updatedTo).toBe('2026-03-01');
+
+    // Unknown cache statuses are dropped, and domains are trimmed.
+    const invalid = parseUrlState(
+      new URLSearchParams('cacheStatus=bogus&domain=%20example.com%20'),
+    );
+    expect(invalid.cacheStatus).toBeNull();
+    expect(invalid.domain).toBe('example.com');
+
+    const query = buildBookmarkApiQuery({
+      scope: 'all',
+      sort: 'updated',
+      filters: {
+        ...EMPTY_FILTER_STATE,
+        cacheStatus: 'failed',
+        domain: 'github.com',
+        updatedFrom: '2026-02-01',
+        updatedTo: '2026-03-01',
+      },
+      page: 1,
+    });
+    expect(query.cacheStatus).toBe('failed');
+    expect(query.domain).toBe('github.com');
+    expect(query.search).toBe('lastUpdate:>=2026-02-01 lastUpdate:<=2026-03-01');
+
+    // Round-trips through the URL serializer.
+    const target = serializeFilterParams({
+      ...EMPTY_FILTER_STATE,
+      cacheStatus: 'failed',
+      domain: 'github.com',
+      updatedFrom: '2026-02-01',
+    });
+    expect(target.get('cacheStatus')).toBe('failed');
+    expect(target.get('domain')).toBe('github.com');
+    expect(target.get('updatedFrom')).toBe('2026-02-01');
+    expect(hasActiveFilters(EMPTY_FILTER_STATE)).toBe(false);
+    expect(
+      hasActiveFilters({ ...EMPTY_FILTER_STATE, cacheStatus: null, domain: '', updatedFrom: '' }),
+    ).toBe(false);
+    expect(hasActiveFilters({ ...EMPTY_FILTER_STATE, cacheStatus: 'ready' })).toBe(true);
+    expect(hasActiveFilters({ ...EMPTY_FILTER_STATE, domain: 'a.dev' })).toBe(true);
+    expect(hasActiveFilters({ ...EMPTY_FILTER_STATE, updatedTo: '2026-01-01' })).toBe(true);
   });
 });

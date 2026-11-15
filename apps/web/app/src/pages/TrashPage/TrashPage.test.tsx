@@ -166,4 +166,60 @@ describe('TrashPage', () => {
     });
     expect(await screen.findByText('Trash is empty')).toBeInTheDocument();
   }, 60_000);
+
+  it('searches inside the trash and narrows the list to matching items', async () => {
+    const user = userEvent.setup({ delay: null });
+    const searches: Array<string | null> = [];
+
+    server.use(
+      http.get('*/api/v1/bookmarks', ({ request }) => {
+        const url = new URL(request.url);
+        if (url.searchParams.get('trashed') !== 'true') {
+          return HttpResponse.json({ items: [], totalCount: 0, page: 1, pageSize: 24 });
+        }
+        const search = url.searchParams.get('search');
+        searches.push(search);
+        const alpha = makeMockBookmark({
+          id: 'bm-ts-a',
+          title: 'Trashed Alpha',
+          deletedAt: '2026-11-12T00:00:00.000Z',
+        });
+        const beta = makeMockBookmark({
+          id: 'bm-ts-b',
+          title: 'Trashed Beta',
+          deletedAt: '2026-11-13T00:00:00.000Z',
+        });
+        if (search === 'Alpha') {
+          return HttpResponse.json({
+            items: [alpha],
+            totalCount: 1,
+            page: 1,
+            pageSize: 24,
+          });
+        }
+        return HttpResponse.json({
+          items: [alpha, beta],
+          totalCount: 2,
+          page: 1,
+          pageSize: 24,
+        });
+      }),
+    );
+
+    renderTrash('user');
+    await waitForTrashReady();
+
+    expect(await screen.findByText('Trashed Beta')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Search trash'), 'Alpha');
+
+    await waitFor(
+      () => {
+        expect(screen.queryByText('Trashed Beta')).not.toBeInTheDocument();
+      },
+      { timeout: 5_000 },
+    );
+    expect(screen.getByText('Trashed Alpha')).toBeInTheDocument();
+    expect(searches.at(-1)).toBe('Alpha');
+  }, 60_000);
 });

@@ -5,6 +5,7 @@ export const LIBRARY_PAGE_STRINGS = {
   scopeAll: 'All bookmarks',
   scopeFavorites: 'Favorites',
   scopeUnassigned: 'Unassigned',
+  scopeReminders: 'Reminders',
   sortLabel: 'Sort by',
   sortUpdated: 'Recently updated',
   sortCreated: 'Recently created',

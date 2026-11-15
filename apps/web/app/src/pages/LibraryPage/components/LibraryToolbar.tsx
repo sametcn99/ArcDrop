@@ -118,6 +118,7 @@ export function LibraryToolbar({
         <Tab value="all" label={LIBRARY_PAGE_STRINGS.scopeAll} />
         <Tab value="favorites" label={LIBRARY_PAGE_STRINGS.scopeFavorites} />
         <Tab value="unassigned" label={LIBRARY_PAGE_STRINGS.scopeUnassigned} />
+        <Tab value="reminders" label={LIBRARY_PAGE_STRINGS.scopeReminders} />
       </Tabs>
     </Stack>
   );

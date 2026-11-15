@@ -11,6 +11,7 @@ export const APP_STRINGS = {
   navAllBookmarks: 'All bookmarks',
   navFavorites: 'Favorites',
   navUnassigned: 'Unassigned',
+  navReminders: 'Reminders',
   navTrash: 'Trash',
   navManageTags: 'Manage tags',
   navHealth: 'Library health',
