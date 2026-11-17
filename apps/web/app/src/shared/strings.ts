@@ -1,3 +1,8 @@
+export const SHARED_THEME_STRINGS = {
+  appearanceSectionLabel: 'Appearance',
+  paletteSectionLabel: 'Palette',
+} as const;
+
 export const SHARED_CACHE_STATUS_STRINGS = {
   ready: 'Archive: Ready',
   pending: 'Archive: Pending',

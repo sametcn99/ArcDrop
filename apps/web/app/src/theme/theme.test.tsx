@@ -8,7 +8,12 @@ import { Profiler } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ThemeSwitcher } from '../shared/components/ThemeSwitcher';
 import { createAppTheme, registerTheme } from './theme';
-import { THEME_STORAGE_KEY, ThemeController, useThemeController } from './ThemeController';
+import {
+  THEME_PALETTE_STORAGE_KEY,
+  THEME_STORAGE_KEY,
+  ThemeController,
+  useThemeController,
+} from './ThemeController';
 
 function mockMatchMedia(prefersDark: boolean) {
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
@@ -33,18 +38,21 @@ function mockMatchMedia(prefersDark: boolean) {
 }
 
 function ThemeProbe() {
-  const { themeId, setTheme, themes } = useThemeController();
+  const { themeId, setTheme, themes, paletteId, setPalette, palettes } = useThemeController();
   const muiTheme = useTheme();
 
   return (
     <Box>
       <Typography data-testid="active-theme">{themeId}</Typography>
+      <Typography data-testid="palette-id">{paletteId}</Typography>
+      <Typography data-testid="palette-ids">{palettes.map((p) => p.id).join(',')}</Typography>
       <Typography data-testid="palette-mode">{muiTheme.palette.mode}</Typography>
       <Typography data-testid="primary-color">{muiTheme.palette.primary.main}</Typography>
       <Typography data-testid="css-var-primary">{muiTheme.vars.palette.primary.main}</Typography>
       <Typography data-testid="theme-ids">{themes.map((t) => t.id).join(',')}</Typography>
       <Button onClick={() => setTheme('dark')}>Set dark</Button>
       <Button onClick={() => setTheme('light')}>Set light</Button>
+      <Button onClick={() => setPalette('ocean')}>Set ocean palette</Button>
     </Box>
   );
 }
@@ -97,6 +105,76 @@ describe('Theme system', () => {
     expect(screen.getByTestId('palette-mode')).toHaveTextContent('dark');
   });
 
+  it('switches the color palette, applies its colors, and persists the choice', async () => {
+    mockMatchMedia(false);
+    const user = userEvent.setup();
+
+    // Default Material You palette is Violet in light mode.
+    const firstRender = render(
+      <ThemeController>
+        <ThemeProbe />
+      </ThemeController>,
+    );
+
+    expect(screen.getByTestId('palette-id')).toHaveTextContent('violet');
+    expect(screen.getByTestId('primary-color')).toHaveTextContent('#6750A4');
+    expect(screen.getByTestId('palette-ids')).toHaveTextContent(
+      'violet,ocean,indigo,teal,forest,sunset,amber,rose,crimson,graphite,amoled',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Set ocean palette' }));
+
+    expect(screen.getByTestId('palette-id')).toHaveTextContent('ocean');
+    expect(screen.getByTestId('primary-color')).toHaveTextContent('#0B57D0');
+    expect(window.localStorage.getItem(THEME_PALETTE_STORAGE_KEY)).toBe('ocean');
+    expect(document.documentElement.dataset.palette).toBe('ocean');
+
+    firstRender.unmount();
+
+    // Simulate reload: the saved palette choice wins and recolors the theme.
+    render(
+      <ThemeController>
+        <ThemeProbe />
+      </ThemeController>,
+    );
+
+    expect(screen.getByTestId('palette-id')).toHaveTextContent('ocean');
+    expect(screen.getByTestId('primary-color')).toHaveTextContent('#0B57D0');
+  });
+
+  it('keeps the selected palette when switching between light and dark modes', async () => {
+    mockMatchMedia(false);
+    const user = userEvent.setup();
+
+    render(
+      <ThemeController>
+        <ThemeProbe />
+      </ThemeController>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Set ocean palette' }));
+    await user.click(screen.getByRole('button', { name: 'Set dark' }));
+
+    expect(screen.getByTestId('active-theme')).toHaveTextContent('dark');
+    expect(screen.getByTestId('palette-id')).toHaveTextContent('ocean');
+    // Ocean dark-mode primary from the Material You scheme.
+    expect(screen.getByTestId('primary-color')).toHaveTextContent('#A8C7FA');
+  });
+
+  it('falls back to the default palette when the stored palette id is unknown', () => {
+    mockMatchMedia(false);
+    window.localStorage.setItem(THEME_PALETTE_STORAGE_KEY, 'neon');
+
+    render(
+      <ThemeController>
+        <ThemeProbe />
+      </ThemeController>,
+    );
+
+    expect(screen.getByTestId('palette-id')).toHaveTextContent('violet');
+    expect(screen.getByTestId('primary-color')).toHaveTextContent('#6750A4');
+  });
+
   it('does not re-render unrelated subtree children when switching themes', async () => {
     mockMatchMedia(false);
     const user = userEvent.setup();
@@ -131,7 +209,6 @@ describe('Theme system', () => {
   it('supports dynamically registering a third theme without modifying ThemeController or ThemeSwitcher', async () => {
     mockMatchMedia(false);
     const user = userEvent.setup();
-
     const oceanPalette: PaletteOptions = {
       mode: 'dark',
       primary: {
@@ -143,8 +220,8 @@ describe('Theme system', () => {
       },
     };
 
-    const unregister = registerTheme('ocean', {
-      label: 'Ocean',
+    const unregister = registerTheme('midnight', {
+      label: 'Midnight',
       create: () => createAppTheme(oceanPalette),
     });
 
@@ -156,19 +233,36 @@ describe('Theme system', () => {
     );
 
     try {
-      expect(screen.getByTestId('theme-ids')).toHaveTextContent('light,dark,ocean');
+      expect(screen.getByTestId('theme-ids')).toHaveTextContent('light,dark,midnight');
 
       await user.click(screen.getByRole('button', { name: 'Switch theme' }));
-      const oceanMenuItem = await screen.findByRole('menuitem', { name: 'Ocean' });
-      await user.click(oceanMenuItem);
+      const midnightMenuItem = await screen.findByRole('menuitem', { name: 'Midnight' });
+      await user.click(midnightMenuItem);
 
-      expect(screen.getByTestId('active-theme')).toHaveTextContent('ocean');
+      expect(screen.getByTestId('active-theme')).toHaveTextContent('midnight');
       expect(screen.getByTestId('primary-color')).toHaveTextContent('#0EA5E9');
-      expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('ocean');
-      expect(document.documentElement.dataset.theme).toBe('ocean');
+      expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('midnight');
+      expect(document.documentElement.dataset.theme).toBe('midnight');
     } finally {
       rendered.unmount();
       unregister();
     }
+  });
+
+  it('switches palettes from the ThemeSwitcher palette section', async () => {
+    mockMatchMedia(false);
+    const user = userEvent.setup();
+
+    render(
+      <ThemeController>
+        <ThemeSwitcher />
+      </ThemeController>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Switch theme' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Forest' }));
+
+    expect(window.localStorage.getItem(THEME_PALETTE_STORAGE_KEY)).toBe('forest');
+    expect(document.documentElement.dataset.palette).toBe('forest');
   });
 });

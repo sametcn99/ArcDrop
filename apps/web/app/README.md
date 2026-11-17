@@ -78,12 +78,12 @@ apps/web/app/src/
 │  ├─ routes.tsx          # Lazy-loaded route table (including /quick-add query-param route)
 │  └─ strings.ts          # Central shell UI strings (WD3)
 ├─ theme/
-│  ├─ theme.ts            # Single ThemeId -> ThemeDefinition registry
-│  ├─ palettes/           # light.ts & dark.ts PaletteOptions
-│  ├─ typography.ts       # Shared typography tokens
-│  ├─ shape.ts            # Shared border radius / shape tokens
-│  ├─ components.ts       # Shared MUI component defaultProps & styleOverrides
-│  └─ ThemeController.tsx # MUI ThemeProvider (cssVariables: true) + LocalizationProvider (AdapterDayjs) + hook
+│  ├─ theme.ts            # Single ThemeId -> ThemeDefinition registry (built-ins compose the selected color palette)
+│  ├─ palettes/           # Material You color palettes: `materialYou.ts` (M3 seed schemes + semantic tones) & `index.ts` (palette registry + buildPaletteOptions)
+│  ├─ typography.ts       # Shared typography tokens (Onest)
+│  ├─ shape.ts            # Shared border radius / shape tokens (M3 base)
+│  ├─ components.ts       # Shared MUI component defaultProps & styleOverrides (M3 shapes + `tonal` Button variant)
+│  └─ ThemeController.tsx # MUI ThemeProvider (cssVariables: true) + theme/palette preference persistence + hook
 ├─ shared/
 │  ├─ strings.ts          # Central shared bookmark, bulk, cacheStatus, upload, collection, tag, notification, quick-add, search & filter UI copy (WD3)
 │  ├─ components/         # Cross-page MUI components: AuthPageShell, PlaceholderPage, SnackbarHost, ThemeSwitcher, SyncStatusIndicator, SearchBar, FilterChipsBar, SearchEmptyState, BookmarkIconBadge, AuthenticatedFilePreview, CacheStatusChip, BookmarkLayouts, BulkActionToolbar, ContentTypeChip, ContentTypeIcon, FavoriteToggleButton, TagChipList, TagAutocompleteInput, TagManagerDialog, MarkdownPreview, NotificationsDrawer, QuickAddDialog, UploadFileDialog, ReminderBadge, CollectionTreeSidebar, CollectionFormDialog, CollectionDeleteDialog, CollectionShareDialog, CollectionMergeDialog
@@ -143,6 +143,8 @@ apps/web/app/src/
 
 ## Theming & UI Rules (`src/theme/`, ESLint)
 
-- **CSS-variables theming**: Always use semantic MUI palette tokens (`text.secondary`, `background.paper`, `action.hover`, `alpha(theme.palette.<semantic>.main, ...)`, etc.) — never hardcode hex/RGB colors.
+- **Material You (M3) theming**: The visual language is Material You — Onest typeface, pill buttons, 20px cards, 28px dialogs, tonal selections (`components.ts`), and M3 tonal palettes mapped onto MUI roles (`palettes/materialYou.ts`).
+- **Selectable color palettes**: Users pick a color palette (Violet, Ocean, Indigo, Teal, Forest, Sunset, Amber, Rose, Crimson, Graphite mono, AMOLED true-black mono) from the `ThemeSwitcher` palette section; it recolors light & dark themes without touching shape/typography. Mode persists under `arcdrop.theme` (`light`/`dark`), palette under `arcdrop.palette` (default `violet`). `<html data-theme data-palette>` exposes both for CSS.
+- **CSS-variables theming**: Always use semantic MUI palette tokens (`text.secondary`, `background.paper`, `action.hover`, `alpha(theme.palette.<semantic>.main, ...)`, etc.) - never hardcode hex/RGB colors.
 - **Strings discipline (WD3)**: Keep all user-facing copy in `src/app/strings.ts`, `src/shared/strings.ts`, and `src/pages/<PageName>/strings.ts`.
 - **No-Raw-HTML Rule (`react/forbid-elements`)**: Raw HTML/SVG host elements (`<div>`, `<span>`, `<a>`, `<button>`, `<img>`, `<svg>`, etc.) are forbidden in `src/`. Always use MUI components (`<Link component={RouterLink}>`, `<Box component="iframe">`, etc.).

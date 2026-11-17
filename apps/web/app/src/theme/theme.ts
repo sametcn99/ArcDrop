@@ -1,7 +1,6 @@
 import { createTheme, type PaletteOptions, type Theme } from '@mui/material/styles';
 import { components } from './components';
-import { darkPalette } from './palettes/dark';
-import { lightPalette } from './palettes/light';
+import { buildPaletteOptions, DEFAULT_COLOR_PALETTE_ID, hasColorPalette } from './palettes';
 import { shape } from './shape';
 import { typography } from './typography';
 
@@ -36,19 +35,26 @@ export function createAppTheme(palette: PaletteOptions): Theme {
   });
 }
 
+function isBuiltInModeTheme(id: string): id is BuiltInThemeId {
+  return id === 'light' || id === 'dark';
+}
+
 /**
  * Central theme registry (`ThemeId -> theme creator`).
- * Adding a new theme requires only a palette file in `src/theme/palettes/`
- * and one entry in this map.
+ *
+ * The built-in `light` / `dark` entries are Material You themes whose colors
+ * come from the user's selected color palette (see `palettes/index.ts`);
+ * `getTheme(id, paletteId)` composes them on demand. Dynamically registered
+ * themes always use their own creator and ignore the palette selection.
  */
 export const THEMES: Record<string, ThemeDefinition> = {
   light: {
     label: 'Light',
-    create: () => createAppTheme(lightPalette),
+    create: () => createAppTheme(buildPaletteOptions('light', DEFAULT_COLOR_PALETTE_ID)),
   },
   dark: {
     label: 'Dark',
-    create: () => createAppTheme(darkPalette),
+    create: () => createAppTheme(buildPaletteOptions('dark', DEFAULT_COLOR_PALETTE_ID)),
   },
 };
 
@@ -74,9 +80,16 @@ export function hasTheme(id: string): boolean {
   return Object.prototype.hasOwnProperty.call(THEMES, id);
 }
 
-export function getTheme(id: ThemeId): Theme {
+export function getTheme(id: ThemeId, paletteId: string = DEFAULT_COLOR_PALETTE_ID): Theme {
   const resolvedId = hasTheme(id) ? id : 'light';
-  const cached = themeCache.get(resolvedId);
+  const resolvedPaletteId = hasColorPalette(paletteId) ? paletteId : DEFAULT_COLOR_PALETTE_ID;
+  // Only the built-in light/dark themes are palette-driven; dynamic themes are
+  // cached under their bare id.
+  const cacheKey = isBuiltInModeTheme(resolvedId)
+    ? `${resolvedId}::${resolvedPaletteId}`
+    : resolvedId;
+
+  const cached = themeCache.get(cacheKey);
   if (cached) {
     return cached;
   }
@@ -84,8 +97,10 @@ export function getTheme(id: ThemeId): Theme {
   if (!definition) {
     throw new Error('Default light theme is missing from the theme registry.');
   }
-  const created = definition.create();
-  themeCache.set(resolvedId, created);
+  const created = isBuiltInModeTheme(resolvedId)
+    ? createAppTheme(buildPaletteOptions(resolvedId, resolvedPaletteId))
+    : definition.create();
+  themeCache.set(cacheKey, created);
   return created;
 }
 
@@ -100,6 +115,15 @@ export function subscribeThemeRegistry(listener: () => void): () => void {
   };
 }
 
+function purgeThemeCache(id: string): void {
+  themeCache.delete(id);
+  for (const key of themeCache.keys()) {
+    if (key.startsWith(`${id}::`)) {
+      themeCache.delete(key);
+    }
+  }
+}
+
 /**
  * Dynamically register a theme at runtime (primarily for plugins or tests).
  * Returns an unregister callback that restores the previous registry state.
@@ -107,11 +131,11 @@ export function subscribeThemeRegistry(listener: () => void): () => void {
 export function registerTheme(id: string, definition: ThemeDefinition): () => void {
   const previous = Object.prototype.hasOwnProperty.call(THEMES, id) ? THEMES[id] : undefined;
   THEMES[id] = definition;
-  themeCache.delete(id);
+  purgeThemeCache(id);
   notifyRegistryListeners();
 
   return () => {
-    themeCache.delete(id);
+    purgeThemeCache(id);
     if (previous) {
       THEMES[id] = previous;
     } else {

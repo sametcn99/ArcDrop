@@ -11,6 +11,12 @@ import {
   type ReactNode,
 } from 'react';
 import {
+  DEFAULT_COLOR_PALETTE_ID,
+  hasColorPalette,
+  listColorPalettes,
+  type ColorPaletteOption,
+} from './palettes';
+import {
   getTheme,
   hasTheme,
   listThemes,
@@ -20,11 +26,15 @@ import {
 } from './theme';
 
 export const THEME_STORAGE_KEY = 'arcdrop.theme';
+export const THEME_PALETTE_STORAGE_KEY = 'arcdrop.palette';
 
 export interface ThemeControllerValue {
   themeId: ThemeId;
   setTheme: (id: ThemeId) => void;
   themes: readonly ThemeOption[];
+  paletteId: string;
+  setPalette: (id: string) => void;
+  palettes: readonly ColorPaletteOption[];
 }
 
 const ThemeControllerContext = createContext<ThemeControllerValue | null>(null);
@@ -55,6 +65,32 @@ function writeStoredThemeId(id: ThemeId): void {
   }
 }
 
+function readStoredPaletteId(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    const stored = window.localStorage.getItem(THEME_PALETTE_STORAGE_KEY);
+    if (stored && hasColorPalette(stored)) {
+      return stored;
+    }
+  } catch {
+    // Ignore storage access errors (e.g. private browsing restrictions).
+  }
+  return null;
+}
+
+function writeStoredPaletteId(id: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(THEME_PALETTE_STORAGE_KEY, id);
+  } catch {
+    // Ignore storage access errors.
+  }
+}
+
 function getSystemPreferredThemeId(): ThemeId {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return 'light';
@@ -66,17 +102,27 @@ function resolveInitialThemeId(): ThemeId {
   return readStoredThemeId() ?? getSystemPreferredThemeId();
 }
 
+function resolveInitialPaletteId(): string {
+  return readStoredPaletteId() ?? DEFAULT_COLOR_PALETTE_ID;
+}
+
 export interface ThemeControllerProps {
   children: ReactNode;
 }
 
 export function ThemeController({ children }: ThemeControllerProps) {
   const [themeId, setThemeIdState] = useState<ThemeId>(resolveInitialThemeId);
+  const [paletteId, setPaletteIdState] = useState<string>(resolveInitialPaletteId);
   const themes = useSyncExternalStore(subscribeThemeRegistry, listThemes, listThemes);
+  const palettes = useMemo(() => listColorPalettes(), []);
 
   // If the currently active theme is unregistered dynamically, fall back gracefully.
   const effectiveThemeId = hasTheme(themeId) ? themeId : getSystemPreferredThemeId();
-  const activeTheme = useMemo(() => getTheme(effectiveThemeId), [effectiveThemeId]);
+  const effectivePaletteId = hasColorPalette(paletteId) ? paletteId : DEFAULT_COLOR_PALETTE_ID;
+  const activeTheme = useMemo(
+    () => getTheme(effectiveThemeId, effectivePaletteId),
+    [effectiveThemeId, effectivePaletteId],
+  );
 
   const setTheme = useCallback((nextId: ThemeId) => {
     if (!hasTheme(nextId)) {
@@ -84,6 +130,14 @@ export function ThemeController({ children }: ThemeControllerProps) {
     }
     writeStoredThemeId(nextId);
     setThemeIdState(nextId);
+  }, []);
+
+  const setPalette = useCallback((nextId: string) => {
+    if (!hasColorPalette(nextId)) {
+      return;
+    }
+    writeStoredPaletteId(nextId);
+    setPaletteIdState(nextId);
   }, []);
 
   // Follow OS color-scheme changes while the user has not saved an explicit choice.
@@ -109,16 +163,20 @@ export function ThemeController({ children }: ThemeControllerProps) {
       return;
     }
     document.documentElement.dataset.theme = effectiveThemeId;
+    document.documentElement.dataset.palette = effectivePaletteId;
     document.documentElement.style.colorScheme = activeTheme.palette.mode;
-  }, [effectiveThemeId, activeTheme.palette.mode]);
+  }, [effectiveThemeId, effectivePaletteId, activeTheme.palette.mode]);
 
   const contextValue = useMemo<ThemeControllerValue>(
     () => ({
       themeId: effectiveThemeId,
       setTheme,
       themes,
+      paletteId: effectivePaletteId,
+      setPalette,
+      palettes,
     }),
-    [effectiveThemeId, setTheme, themes],
+    [effectiveThemeId, setTheme, themes, effectivePaletteId, setPalette, palettes],
   );
 
   return (

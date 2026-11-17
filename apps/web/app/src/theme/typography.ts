@@ -2,7 +2,7 @@ import type { ThemeOptions } from '@mui/material/styles';
 
 export const typography: ThemeOptions['typography'] = {
   fontFamily:
-    '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+    '"Onest", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
   h1: {
     fontSize: '2rem',
     fontWeight: 700,
@@ -47,5 +47,6 @@ export const typography: ThemeOptions['typography'] = {
   button: {
     textTransform: 'none',
     fontWeight: 600,
+    letterSpacing: 0,
   },
 };
