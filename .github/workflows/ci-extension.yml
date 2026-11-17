@@ -1,0 +1,44 @@
+name: CI (Extension)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  extension:
+    name: Extension (lint, typecheck & build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install root dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build web app (embedded by the extension from E3 on)
+        run: bun --cwd=apps/web/app run build
+
+      - name: Install extension dependencies
+        run: bun --cwd=extension install --frozen-lockfile
+
+      - name: Lint
+        run: bun --cwd=extension run lint
+
+      - name: Typecheck
+        run: bun --cwd=extension run typecheck
+
+      - name: Build (chromium + firefox)
+        run: bun --cwd=extension run build
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-dist
+          path: |
+            extension/dist/chromium
+            extension/dist/firefox
+          if-no-files-found: error

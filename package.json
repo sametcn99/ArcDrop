@@ -28,7 +28,11 @@
     "web:lint": "bun --cwd=apps/web/app run lint",
     "web:typecheck": "bun --cwd=apps/web/app run typecheck",
     "web:test": "bun --cwd=apps/web/app run test",
-    "web:generate:api": "bun --cwd=apps/web/app run generate:api"
+    "web:generate:api": "bun --cwd=apps/web/app run generate:api",
+    "extension:dev": "bun --cwd=extension run dev",
+    "extension:build": "bun --cwd=extension run build",
+    "extension:lint": "bun --cwd=extension run lint",
+    "extension:typecheck": "bun --cwd=extension run typecheck"
   },
   "workspaces": [
     "apps/*",

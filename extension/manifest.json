@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "ArcDrop",
+  "version": "0.1.0",
+  "description": "Self-hosted bookmarking — save, organize and revisit your ArcDrop library from any page.",
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "ArcDrop"
+  },
+  "options_ui": {
+    "page": "options/index.html",
+    "open_in_tab": true
+  },
+  "background": {
+    "service_worker": "background/index.ts"
+  },
+  "permissions": ["storage", "activeTab", "contextMenus", "scripting"],
+  "optional_host_permissions": ["*://*/*"],
+  "commands": {
+    "quick-save": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S"
+      },
+      "description": "Quick-save the current page with your default collection"
+    }
+  }
+}
