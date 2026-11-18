@@ -47,12 +47,36 @@ own `bun.lock`, so the root install never touches extension dependencies.
 ```
 extension/
 ├─ manifest.json      # MV3 manifest; TS/TSX entry paths (Extension.js compiles them)
-├─ popup/             # popup entry: connection/auth state machine (E1) + save editor (E2)
+├─ popup/             # popup entry: save editor (E2) + connection/auth state machine (E1)
 ├─ options/           # options page entry (placeholder until E5)
-├─ background/        # MV3 service worker: auth broker (E1); menus/quick-save in E2/E4
-├─ shared/            # vault, auth API core, broker protocol, strings, theme
-└─ dist/              # build output (gitignored): chromium/ + firefox/
+├─ background/        # MV3 service worker: auth broker (E1), library broker (E2)
+├─ embed-src/         # storage-bridge bootstrap for the embedded app page (E3, committed source)
+├─ embed/             # assembled embedded app (gitignored; web dist + bridge, made by prebuild)
+├─ scripts/           # generate-api + embed build/postbuild steps
+├─ ../dev-scripts/    # live smoke scripts (outside the project so builds never bundle them)
+└─ dist/              # build output (gitignored): chromium/ + firefox/ (+ embedded pages/app)
 ```
+
+## Embedded app page (E3)
+
+`bun run build` embeds the REAL ArcDrop web app at `pages/app/` inside the
+extension:
+
+- **Build**: prebuild runs the web app build with `ARCDROP_EMBED=extension`
+  (relative asset base) + `VITE_ROUTER_MODE=hash` (extension pages cannot
+  serve history-mode paths), assembles `embed/`, then the postbuild step
+  copies it verbatim into every `dist/<browser>/pages/app/`. The regular web
+  build/CI is unaffected — both switches are env-conditional.
+- **Storage bridge** (`embed-src/bootstrap.js`, served at `pages/app/bootstrap.js`):
+  runs before the app bundle, hydrates `localStorage` (`arcdrop.baseUrl`,
+  `arcdrop.refreshToken`) from the vault, mirrors vault changes into it,
+  forwards app-side writes back into the vault (onboarding address, app-side
+  login → `auth/ingest-session`), and patches `fetch` so API calls carry a
+  broker-issued access token while the client's own `POST /auth/refresh` is
+  answered from broker state. **The background broker remains the only
+  rotation owner** — one session across popup, app page and worker.
+- **Open in ArcDrop** (popup) opens `pages/app/index.html`; unsaved pages
+  arrive via the `#/quick-add?url=…` deep link.
 
 ## Connection & auth (E1)
 

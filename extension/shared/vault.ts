@@ -9,6 +9,11 @@
 export interface VaultUser {
   id: string;
   email: string;
+  role: string;
+  status: string;
+  hasPassword: boolean;
+  totpEnabled: boolean;
+  createdAt: string;
 }
 
 export interface VaultSettings {
@@ -79,7 +84,18 @@ function asVaultState(raw: unknown): VaultState {
         ? (() => {
             const user = record['user'] as Record<string, unknown>;
             if (typeof user['id'] !== 'string' || typeof user['email'] !== 'string') return null;
-            return { id: user['id'], email: user['email'] };
+            return {
+              id: user['id'],
+              email: user['email'],
+              role: typeof user['role'] === 'string' ? user['role'] : 'user',
+              status: typeof user['status'] === 'string' ? user['status'] : 'active',
+              hasPassword: user['hasPassword'] !== false,
+              totpEnabled: user['totpEnabled'] === true,
+              createdAt:
+                typeof user['createdAt'] === 'string'
+                  ? user['createdAt']
+                  : new Date(0).toISOString(),
+            };
           })()
         : null,
     settings,
