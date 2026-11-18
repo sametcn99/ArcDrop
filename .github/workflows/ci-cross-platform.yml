@@ -191,7 +191,7 @@ jobs:
       - name: Set up Rust toolchain with iOS targets
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+          target: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
 
       - name: Rust cache (ios)
         uses: Swatinem/rust-cache@v2
