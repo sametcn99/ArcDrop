@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { isWebApiOrigin, resolveDefaultBaseUrl } from './baseUrl';
+import { platform } from '../platform';
 import { authSessionSchema, type AuthSession } from './schemas/auth';
 import { ApiError, problemDetailsSchema, toApiError } from './schemas/problem';
 
@@ -90,11 +92,6 @@ export function parseContentDispositionFilename(header: string | null): string |
 // localStorage key holding the rotating refresh token (see createApiClient).
 const REFRESH_TOKEN_STORAGE_KEY = 'arcdrop.refreshToken';
 
-function resolveDefaultBaseUrl(): string {
-  const envUrl = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? '';
-  return envUrl.trim().replace(/\/+$/, '');
-}
-
 function buildApiUrl(
   baseUrl: string,
   path: string,
@@ -108,11 +105,15 @@ function buildApiUrl(
       : `/api/v1${normalizedPath}`;
 
   let fullPath = `${baseUrl}${versionedPath}`;
+  // Same-origin fallback applies only on plain web origins. Inside a Tauri
+  // webview (tauri://localhost or http(s)://tauri.localhost) no API lives at
+  // the app origin — the runtime address from onboarding (arcdrop.baseUrl) or
+  // build-time env must provide the base URL there.
   if (
     baseUrl === '' &&
     typeof window !== 'undefined' &&
     typeof window.location?.origin === 'string' &&
-    /^https?:\/\//.test(window.location.origin)
+    isWebApiOrigin(window.location.origin)
   ) {
     fullPath = `${window.location.origin}${versionedPath}`;
   }
@@ -171,7 +172,9 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
 
 export function createApiClient(config: ApiClientConfig = {}) {
   let baseUrl = (config.baseUrl ?? resolveDefaultBaseUrl()).replace(/\/+$/, '');
-  const fetchImpl = config.fetchFn ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
+  // Platform adapter fetch (plan T0): identical to the global fetch in the
+  // browser, and the CORS-free plugin-http fetch inside Tauri from T2 on.
+  const fetchImpl = config.fetchFn ?? platform.getFetch();
 
   // The access token lives strictly in memory (never persisted). The refresh
   // token is persisted to localStorage so a page reload can restore the

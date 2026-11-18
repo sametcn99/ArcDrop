@@ -16,6 +16,7 @@ const PortabilityPage = lazy(() => import('../pages/PortabilityPage'));
 const SettingsPage = lazy(() => import('../pages/SettingsPage'));
 const AdminPage = lazy(() => import('../pages/AdminPage'));
 const PublicSharePage = lazy(() => import('../pages/PublicSharePage'));
+const ServerAddressPage = lazy(() => import('../pages/ServerAddressPage'));
 
 function withSuspense(node: ReactNode): ReactNode {
   return <Suspense fallback={<RouteLoader />}>{node}</Suspense>;
@@ -76,6 +77,12 @@ export const appChildRoutes: RouteObject[] = [
 ];
 
 export const appRoutes: RouteObject[] = [
+  {
+    // Server-address onboarding (plan T0): reachable in every auth state so
+    // Settings → "Change server" can also land here.
+    path: '/server',
+    element: withSuspense(<ServerAddressPage />),
+  },
   {
     element: <PublicOnly />,
     children: [

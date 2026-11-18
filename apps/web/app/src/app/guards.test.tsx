@@ -2,8 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { createMemoryRouter, RouterProvider } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '../api/client';
+import { hasResolvedBaseUrl } from '../api/baseUrl';
 import { SnackbarHost } from '../shared/components/SnackbarHost';
 import { useAuthStore } from '../stores/authStore';
 import { makeMockSession, problemJsonResponse } from '../test/msw/handlers';
@@ -11,6 +12,14 @@ import { server } from '../test/msw/server';
 import { waitForBootstrapReady, waitForLibraryReady } from '../test/waiters';
 import { ThemeController } from '../theme/ThemeController';
 import { appRoutes } from './routes';
+
+// The same-origin fallback always resolves on the jsdom http origin; mock the
+// resolution so the no-server onboarding redirect can be exercised here.
+vi.mock('../api/baseUrl', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/baseUrl')>();
+  return { ...actual, hasResolvedBaseUrl: vi.fn() };
+});
+const hasResolvedBaseUrlMock = vi.mocked(hasResolvedBaseUrl);
 
 function renderAtPath(path: string) {
   const router = createMemoryRouter(appRoutes, {
@@ -25,6 +34,10 @@ function renderAtPath(path: string) {
 }
 
 describe('Route guards & logout flow', () => {
+  beforeEach(() => {
+    hasResolvedBaseUrlMock.mockReturnValue(true);
+  });
+
   it('redirects unauthenticated requests on protected routes to /login and returns after sign-in', async () => {
     const user = userEvent.setup({ delay: null });
     renderAtPath('/settings');
@@ -115,6 +128,27 @@ describe('Route guards & logout flow', () => {
     expect(apiClient.getAccessToken()).toBeNull();
     expect(apiClient.getRefreshToken()).toBeNull();
     expect(useAuthStore.getState().status).toBe('unauthenticated');
+  }, 60_000);
+
+  it('routes unauthenticated users to the server onboarding screen when no API base URL is resolved', async () => {
+    hasResolvedBaseUrlMock.mockReturnValue(false);
+
+    renderAtPath('/login');
+
+    expect(
+      await screen.findByRole('heading', { name: 'Connect to your server' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument();
+  }, 60_000);
+
+  it('sends protected-route traffic to onboarding before sign-in when the server is not configured', async () => {
+    hasResolvedBaseUrlMock.mockReturnValue(false);
+
+    renderAtPath('/settings');
+
+    expect(
+      await screen.findByRole('heading', { name: 'Connect to your server' }),
+    ).toBeInTheDocument();
   }, 60_000);
 
   it('restores the persisted session on boot without redirecting to /login', async () => {

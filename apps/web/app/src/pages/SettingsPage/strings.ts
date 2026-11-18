@@ -6,6 +6,15 @@ export const SETTINGS_PAGE_STRINGS = {
     notifications: 'Notifications',
     tokens: 'API tokens',
   },
+  server: {
+    heading: 'Server',
+    description: 'The ArcDrop server this app stores bookmarks on.',
+    currentLabel: 'Connected server',
+    noneLabel: 'Not connected',
+    changeButton: 'Change server',
+    changeWarning:
+      'Changing the server signs you out on this device and returns to first-time setup.',
+  },
   profile: {
     heading: 'Profile',
     emailLabel: 'Email',

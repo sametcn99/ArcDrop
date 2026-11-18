@@ -8,6 +8,7 @@ import { ApiTokensSection } from './components/ApiTokensSection';
 import { DangerZoneSection } from './components/DangerZoneSection';
 import { NotificationsSection } from './components/NotificationsSection';
 import { ProfileSection } from './components/ProfileSection';
+import { ServerSection } from './components/ServerSection';
 import { SessionsSection } from './components/SessionsSection';
 import { TwoFactorSection } from './components/TwoFactorSection';
 import { SETTINGS_PAGE_STRINGS as S } from './strings';
@@ -31,7 +32,12 @@ export default function SettingsPage() {
         <Tab value="tokens" label={S.tabs.tokens} />
       </Tabs>
       <Box>
-        {tab === 'profile' ? <ProfileSection /> : null}
+        {tab === 'profile' ? (
+          <Stack spacing={3}>
+            <ProfileSection />
+            <ServerSection />
+          </Stack>
+        ) : null}
         {tab === 'security' ? (
           <Stack spacing={3}>
             <TwoFactorSection />
