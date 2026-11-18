@@ -154,6 +154,7 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/dist/**',
       '**/coverage/**',
+      '**/embed/**',
       // Rust build output contains generated JS assets (tauri codegen) —
       // never a lint target, same category as dist/ and node_modules/.
       'cross-platform/src-tauri/target/**',

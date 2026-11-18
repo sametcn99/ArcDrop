@@ -47,7 +47,15 @@ const SESSION_PATCH = {
   accessToken: 'a-token',
   accessTokenExpiresAt: 123,
   refreshToken: 'r-token',
-  user: { id: 'u1', email: 'me@example.com' },
+  user: {
+    id: 'u1',
+    email: 'me@example.com',
+    role: 'user',
+    status: 'active',
+    hasPassword: true,
+    totpEnabled: false,
+    createdAt: '2026-01-01T00:00:00Z',
+  },
 } satisfies Partial<VaultState>;
 
 describe('vault', () => {

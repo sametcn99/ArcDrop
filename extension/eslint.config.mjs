@@ -143,7 +143,7 @@ const FORBIDDEN_HOST_ELEMENTS = [
 
 export default tseslint.config(
   {
-    ignores: ['node_modules/**', 'dist/**'],
+    ignores: ['node_modules/**', 'dist/**', 'embed/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

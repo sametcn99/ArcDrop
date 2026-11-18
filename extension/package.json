@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "extension dev",
-    "build": "extension build --browser=chromium,firefox",
+    "prebuild": "bun run scripts/build-embed.ts",
+    "build": "extension build --browser=chromium,firefox && bun run scripts/postbuild-embed.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
@@ -15,7 +16,8 @@
     "generate:api": "bun run scripts/generate-api.ts",
     "smoke:auth": "bun run ../dev-scripts/smoke-auth.ts",
     "smoke:bookmarks": "bun run ../dev-scripts/smoke-bookmarks.ts",
-    "smoke:totp": "bun run ../dev-scripts/smoke-totp.ts"
+    "smoke:totp": "bun run ../dev-scripts/smoke-totp.ts",
+    "smoke:bridge": "bun run ../dev-scripts/smoke-bridge.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",

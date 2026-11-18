@@ -3,6 +3,7 @@
 // vault; it asks the broker. Responses are plain serializable objects.
 
 import type { BrokerFailure } from './brokerTypes';
+import type { VaultUser } from './vault';
 
 export type AuthBrokerRequest =
   | { type: 'auth/state' }
@@ -10,7 +11,9 @@ export type AuthBrokerRequest =
   | { type: 'auth/login'; email: string; password: string }
   | { type: 'auth/login-tfa'; challenge: string; code?: string; recoveryCode?: string }
   | { type: 'auth/disconnect' }
-  | { type: 'auth/access-token' };
+  | { type: 'auth/access-token' }
+  /** E3 embedded-app bridge: adopt a session the app page created itself. */
+  | { type: 'auth/ingest-session'; refreshToken: string };
 
 export type AuthBrokerResponse =
   | {
@@ -24,7 +27,16 @@ export type AuthBrokerResponse =
   | { ok: true; kind: 'authenticated'; email: string }
   | { ok: true; kind: 'totp-required'; challenge: string; expiresAt: string }
   | { ok: true; kind: 'disconnected' }
-  | { ok: true; kind: 'access-token'; accessToken: string }
+  | {
+      ok: true;
+      kind: 'access-token';
+      accessToken: string;
+      /** Full current session for the embedded-app bridge (E3). */
+      refreshToken: string | null;
+      user: VaultUser | null;
+      baseUrl: string | null;
+    }
+  | { ok: true; kind: 'session-ingested'; email: string }
   | BrokerFailure;
 
 export interface AuthStateView {

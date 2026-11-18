@@ -9,7 +9,7 @@ export const strings = {
     stateLabel: 'Server',
     accountLabel: 'Account',
     openApp: 'Open ArcDrop',
-    openAppCaption: 'The embedded library opens in a new tab (coming in E3).',
+    openAppCaption: 'Opens your full ArcDrop library in a new tab.',
     disconnect: 'Disconnect',
     // Setup step
     setupTitle: 'Connect your server',

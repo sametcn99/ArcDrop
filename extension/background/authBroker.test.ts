@@ -168,7 +168,7 @@ describe('authBroker', () => {
 
     const vault = await readVault(area);
     expect(vault.refreshToken).toBe('r1');
-    expect(vault.user).toEqual({ id: 'u1', email: 'me@example.com' });
+    expect(vault.user).toEqual(sessionFixture(now / 1000 + 900, 'r1').user);
     expect(vault.accessTokenExpiresAt).toBe(now + 900_000);
 
     const tokenResult = await instance.handleMessage({ type: 'auth/access-token' });
@@ -177,7 +177,14 @@ describe('authBroker', () => {
     if (cachedToken === null) {
       throw new Error('expected a cached token after login');
     }
-    expect(tokenResult).toEqual({ ok: true, kind: 'access-token', accessToken: cachedToken });
+    expect(tokenResult).toEqual({
+      ok: true,
+      kind: 'access-token',
+      accessToken: cachedToken,
+      refreshToken: 'r1',
+      user: sessionFixture(now / 1000 + 900, 'r1').user,
+      baseUrl: 'http://localhost:3000',
+    });
     // No refresh call was needed for the fresh token.
     expect(instance.calls.some((url) => url.endsWith('/auth/refresh'))).toBe(false);
   });
@@ -349,5 +356,34 @@ describe('authBroker', () => {
   it('answers unknown messages with a failure', async () => {
     const result = await broker(AUTH_ROUTES).handleMessage({ type: 'auth/nope' });
     expect(result).toMatchObject({ ok: false, code: 'INVALID_MESSAGE' });
+  });
+
+  it('ingests an app-side session (validated by one broker refresh)', async () => {
+    const instance = broker(AUTH_ROUTES);
+    await instance.handleMessage({
+      type: 'auth/validate-server',
+      serverUrl: 'http://localhost:3000',
+    });
+    const result = await instance.handleMessage({
+      type: 'auth/ingest-session',
+      refreshToken: 'app-side-token',
+    });
+    expect(result).toEqual({ ok: true, kind: 'session-ingested', email: 'me@example.com' });
+    expect(instance.calls.some((url) => url.endsWith('/auth/refresh'))).toBe(true);
+    const vault = await readVault(area);
+    // The presented token is rotated server-side — the vault stores the
+    // rotated one (app facade gets it back through the mirror).
+    expect(vault.refreshToken).toBe('r2');
+    expect(vault.user?.email).toBe('me@example.com');
+  });
+
+  it('rejects ingest without a token', async () => {
+    const instance = broker(AUTH_ROUTES);
+    await instance.handleMessage({
+      type: 'auth/validate-server',
+      serverUrl: 'http://localhost:3000',
+    });
+    const result = await instance.handleMessage({ type: 'auth/ingest-session', refreshToken: '' });
+    expect(result).toMatchObject({ ok: false, code: 'VALIDATION' });
   });
 });

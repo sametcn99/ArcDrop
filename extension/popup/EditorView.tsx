@@ -286,6 +286,19 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
       .catch(() => onDisconnected());
   };
 
+  /**
+   * Opens the embedded full app in a new tab; unsaved pages arrive via the
+   * quick-add deep link so the dialog is prefilled (E3).
+   */
+  const openApp = (): void => {
+    const page = chrome.runtime.getURL('pages/app/index.html');
+    const target =
+      existingId === null && tab !== null
+        ? `${page}#/quick-add?url=${encodeURIComponent(tab.url)}`
+        : page;
+    void chrome.tabs.create({ url: target });
+  };
+
   const tagOptions = useMemo(() => (tagUsage ?? []).map((usage) => usage.name), [tagUsage]);
 
   if (phase === 'loading') {
@@ -471,7 +484,7 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
 
       <Divider />
       <Stack spacing={0.5}>
-        <Button variant="outlined" disabled>
+        <Button variant="outlined" onClick={openApp}>
           {strings.popup.openApp}
         </Button>
         <Typography variant="caption" color="text.secondary">

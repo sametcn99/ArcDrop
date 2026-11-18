@@ -63,7 +63,7 @@ export function createAuthBroker(deps: AuthBrokerDeps) {
       accessToken: session.accessToken,
       accessTokenExpiresAt: readJwtExpiry(session.accessToken),
       refreshToken: session.refreshToken,
-      user: { id: session.user.id, email: session.user.email },
+      user: session.user,
     });
   }
 
@@ -238,10 +238,35 @@ export function createAuthBroker(deps: AuthBrokerDeps) {
       case 'auth/access-token': {
         try {
           const accessToken = await getValidAccessToken();
-          return { ok: true, kind: 'access-token', accessToken };
+          const freshVault = await readVault(area);
+          return {
+            ok: true,
+            kind: 'access-token',
+            accessToken,
+            refreshToken: freshVault.refreshToken,
+            user: freshVault.user,
+            baseUrl: freshVault.baseUrl,
+          };
         } catch (error) {
           return failureFromApiError(error);
         }
+      }
+      case 'auth/ingest-session': {
+        // E3 embedded-app bridge: the app page signed in (or restored) with
+        // its own client and wrote its refresh token into localStorage —
+        // adopt it as the vault session so popup/background/app share ONE
+        // session. Validation = a single broker-owned refresh round-trip.
+        const refreshToken = (message as { refreshToken?: unknown })['refreshToken'];
+        if (typeof refreshToken !== 'string' || refreshToken.length === 0) {
+          return failure('VALIDATION', 'Missing refresh token.');
+        }
+        const currentVault = await readVault(area);
+        if (!currentVault.baseUrl) {
+          return failure('SESSION_EXPIRED', 'No server configured yet.');
+        }
+        const session = await authApi.refresh(currentVault.baseUrl, refreshToken, apiOptions);
+        await writeSession(session);
+        return { ok: true, kind: 'session-ingested', email: session.user.email };
       }
       default:
         return failure('INVALID_MESSAGE', 'Unknown request type.');
