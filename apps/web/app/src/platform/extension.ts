@@ -1,3 +1,4 @@
+import { triggerBlobDownload } from '../shared/utils/blobDownload';
 import type { PlatformAdapter } from './types';
 
 /**
@@ -68,5 +69,29 @@ export function createExtensionPlatform(): PlatformAdapter {
 
     // Share-target/deep-link payloads only exist with a native bridge (T3).
     onShareTarget: () => () => {},
+
+    // Same browser-notification posture as the plain web adapter (plan T4):
+    // only when already granted — extension pages must not pop permission
+    // prompts either.
+    notify: async (input) => {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+        return false;
+      }
+      try {
+        new Notification(input.title, { body: input.body });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    saveBlob: async (blob, filename) => {
+      triggerBlobDownload(blob, filename);
+      return true;
+    },
+
+    pickFile: async () => null,
+
+    readLocalFile: async () => null,
   };
 }

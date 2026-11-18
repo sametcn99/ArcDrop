@@ -17,7 +17,7 @@ import {
   SHARED_TAG_STRINGS,
   SHARED_UPLOAD_STRINGS,
 } from '../strings';
-import { triggerBlobDownload } from '../utils/blobDownload';
+import { platform } from '../../platform';
 
 export interface CreateBookmarkActionInput {
   body: CreateBookmarkRequest;
@@ -120,7 +120,9 @@ export async function downloadBookmarkFileAction(bookmark: Bookmark): Promise<st
     const response = await bookmarksApi.getFileBlob(bookmark.id, { download: true });
     const resolvedFilename = response.filename ?? bookmark.fileName ?? 'download';
 
-    triggerBlobDownload(response.blob, resolvedFilename);
+    // Plan T4: the platform adapter saves via the OS save dialog inside
+    // Tauri and keeps the browser's synthetic-anchor download elsewhere.
+    await platform.saveBlob(response.blob, resolvedFilename);
 
     useUiStore.getState().enqueueSnackbar({
       message: `${SHARED_BOOKMARK_STRINGS.toastFileDownloaded} (${resolvedFilename})`,

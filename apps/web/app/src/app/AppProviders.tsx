@@ -6,6 +6,9 @@ import { installExternalLinkInterceptor } from '../platform/linkInterceptor';
 import { platform } from '../platform';
 import { SnackbarHost } from '../shared/components/SnackbarHost';
 import { useAuthStore } from '../stores/authStore';
+import { useShareFileStore } from '../stores/shareFileStore';
+import { useUiStore } from '../stores/uiStore';
+import { APP_STRINGS } from './strings';
 import { ThemeController } from '../theme/ThemeController';
 import { appRoutes } from './routes';
 
@@ -43,13 +46,40 @@ export function AppProviders() {
     void restoreSession();
   }, [restoreSession]);
 
-  // Share-target & deep-link stream (plan T3): Android ACTION_SEND shares and
-  // desktop arcdrop://add links both land on the existing quick-add route;
-  // when signed out, the standard redirect machinery preserves the target
-  // through the auth flow (PublicOnly/RequireAuth state.from).
+  // Share-target & deep-link stream (plans T3/T4): Android ACTION_SEND
+  // shares and desktop arcdrop://add links both land on the existing
+  // quick-add route — when signed out, the standard redirect machinery
+  // preserves the target through the auth flow. Shared FILES (T4) are read
+  // from the app cache via plugin-fs and handed to the upload dialog through
+  // the share-file store.
   useEffect(() => {
-    return platform.onShareTarget((url) => {
-      router.navigate(`/quick-add?url=${encodeURIComponent(url)}`);
+    return platform.onShareTarget((payload) => {
+      if (payload.kind === 'url') {
+        router.navigate(`/quick-add?url=${encodeURIComponent(payload.url)}`);
+        return;
+      }
+      if (payload.kind === 'file') {
+        void (async () => {
+          const file = await platform.readLocalFile(payload.path, payload.fileName, payload.mime);
+          if (!file) {
+            useUiStore.getState().enqueueSnackbar({
+              message: APP_STRINGS.shareFileReadError,
+              severity: 'error',
+            });
+            return;
+          }
+          useShareFileStore.getState().setPendingFile(file);
+          router.navigate('/');
+        })();
+        return;
+      }
+      useUiStore.getState().enqueueSnackbar({
+        message:
+          payload.kind === 'file-too-large'
+            ? APP_STRINGS.shareFileTooLarge
+            : APP_STRINGS.shareFileReadError,
+        severity: 'warning',
+      });
     });
   }, []);
 

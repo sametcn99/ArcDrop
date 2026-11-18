@@ -1,13 +1,19 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for the main window. T2 adds http (CORS-free API calls against the user's own server), opener (external links to the OS browser) and os (device label for sessions). No URL restriction on http: the server address is entered at runtime — least privilege is enforced by shipping only these three plugin permission sets.",
+  "description": "Default capability for the main window. T2: http (CORS-free API calls against the user's own server, no URL restriction — the address is entered at runtime), opener (external links) and os (device label). T4: notification (reminders as local notifications), dialog+fs (downloads to a user-chosen path, native file picker, share-file reads from the app cache dir). All cross-platform plugins — no platform scoping needed.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "http:default",
     "opener:default",
     "os:default",
-    "arcdrop-share-target:default"
+    "arcdrop-share-target:default",
+    "notification:default",
+    "dialog:default",
+    "fs:default",
+    "fs:allow-appcache-read-recursive",
+    "fs:allow-read-file",
+    "fs:allow-write-file"
   ]
 }

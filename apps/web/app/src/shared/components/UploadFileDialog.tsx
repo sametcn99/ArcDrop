@@ -20,6 +20,7 @@ import Typography from '@mui/material/Typography';
 import { useId, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import type { Bookmark } from '../../api/schemas/bookmarks';
 import { ApiError, toApiError } from '../../api/schemas/problem';
+import { platform } from '../../platform';
 import { selectSortedCollections, useLibraryStore } from '../../stores/libraryStore';
 import { uploadBookmarkFileAction } from '../actions/bookmarkActions';
 import { SHARED_UPLOAD_STRINGS } from '../strings';
@@ -30,14 +31,18 @@ export interface UploadFileDialogProps {
   open: boolean;
   onClose: () => void;
   initialCollectionId?: string;
+  /** Preselected file (plan T4: Android ACTION_SEND share-file flow). */
+  initialFile?: File;
   onUploaded?: (bookmark: Bookmark) => void;
 }
 
 function UploadFileDialogBody({
+  open: _open,
   onClose,
   initialCollectionId,
+  initialFile,
   onUploaded,
-}: Omit<UploadFileDialogProps, 'open'>) {
+}: UploadFileDialogProps) {
   const inputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -48,7 +53,9 @@ function UploadFileDialogBody({
     [collectionsById],
   );
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // `initialFile` (plan T4: Android ACTION_SEND share-file flow) applies via
+  // initial state — the wrapper mounts this body fresh on every open.
+  const [selectedFile, setSelectedFile] = useState<File | null>(initialFile ?? null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [title, setTitle] = useState('');
   const [collectionOverride, setCollectionOverride] = useState<string | null>(null);
@@ -65,6 +72,21 @@ function UploadFileDialogBody({
     setSelectedFile(file);
     setValidationError(null);
     setUploadError(null);
+  };
+
+  // Plan T4: inside Tauri the native picker (plugin-dialog) is more reliable
+  // than the WebView file input for large files; browsers keep the input.
+  const handleChooseFile = () => {
+    if (!platform.isTauri) {
+      fileInputRef.current?.click();
+      return;
+    }
+    void (async () => {
+      const picked = await platform.pickFile();
+      if (picked) {
+        acceptFile(picked);
+      }
+    })();
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -215,7 +237,7 @@ function UploadFileDialogBody({
                     size="small"
                     variant="outlined"
                     disabled={uploading}
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={handleChooseFile}
                   >
                     {SHARED_UPLOAD_STRINGS.changeFileLabel}
                   </Button>
@@ -252,7 +274,7 @@ function UploadFileDialogBody({
                   size="small"
                   variant="outlined"
                   disabled={uploading}
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={handleChooseFile}
                 >
                   {SHARED_UPLOAD_STRINGS.chooseFileLabel}
                 </Button>
@@ -329,6 +351,7 @@ export function UploadFileDialog({
   open,
   onClose,
   initialCollectionId,
+  initialFile,
   onUploaded,
 }: UploadFileDialogProps) {
   return (
@@ -336,8 +359,10 @@ export function UploadFileDialog({
       <DialogTitle>{SHARED_UPLOAD_STRINGS.dialogTitle}</DialogTitle>
       {open ? (
         <UploadFileDialogBody
+          open={open}
           onClose={onClose}
           initialCollectionId={initialCollectionId}
+          initialFile={initialFile}
           onUploaded={onUploaded}
         />
       ) : null}

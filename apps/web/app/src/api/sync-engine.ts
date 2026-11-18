@@ -6,6 +6,7 @@ import type { BookmarkListQuery } from './schemas/bookmarks';
 import { ApiError, toApiError } from './schemas/problem';
 import { syncWsFrameSchema } from './schemas/sync';
 import { buildBookmarkApiQuery } from '../shared/utils/searchFilters';
+import { notifyReminderFrame } from '../platform/reminderNotify';
 import {
   buildCollectionViewKey,
   buildLibraryViewKey,
@@ -404,6 +405,10 @@ export function createSyncEngine(deps: SyncEngineDeps = {}) {
 
       const frame = parsed.data;
       if ('type' in frame && frame.type === 'reminder') {
+        // Plan T4: foreground reminders also surface as a local notification
+        // (one per reminder, reconnect-replay safe); the existing snackbar
+        // and notification-center flows stay untouched.
+        void notifyReminderFrame(frame);
         useUiStore.getState().enqueueSnackbar({
           message: frame.title ? `Reminder: ${frame.title}` : 'Bookmark reminder due',
           severity: 'info',

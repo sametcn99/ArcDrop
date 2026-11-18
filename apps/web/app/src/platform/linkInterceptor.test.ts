@@ -11,6 +11,10 @@ function fakeAdapter(isTauri: boolean): PlatformAdapter {
     share: async () => false,
     resolveDeviceLabel: async () => null,
     onShareTarget: () => () => {},
+    notify: async () => false,
+    saveBlob: async () => true,
+    pickFile: async () => null,
+    readLocalFile: async () => null,
   };
 }
 

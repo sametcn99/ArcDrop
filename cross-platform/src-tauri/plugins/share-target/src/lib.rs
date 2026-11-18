@@ -4,11 +4,12 @@ use tauri::{
     Runtime,
 };
 
-/// Payload emitted to the web client: `{ url }` (see the onShareTarget
-/// adapter method).
+/// Payload returned by `fetch_pending_share` on desktop: the queue always
+/// resolves empty (`kind: "none"`); the Android plugin returns richer
+/// payloads (`text` / `file` / `file-too-large` / `file-error`).
 #[derive(Serialize)]
-pub struct ShareTargetPayload {
-    pub url: String,
+pub struct PendingSharePayload {
+    pub kind: String,
 }
 
 /// Extracts the FIRST http(s) URL from a shared text payload (plan T3).
@@ -30,17 +31,17 @@ pub fn extract_first_url(text: &str) -> Option<String> {
     }
 }
 
-/// Cold-start contract (plan T3): the Android plugin (Kotlin) queues the
-/// shared URL in its own state; the web client fetches it once registered.
-/// This command resolves `{ url: string | null }` and clears the queue.
-/// On desktop the queue is always empty — the command exists so the JS call
-/// surface stays identical across platforms.
+/// Cold-start contract (plans T3/T4): the Android plugin (Kotlin) queues the
+/// shared payload in its own state; the web client fetches it once
+/// registered. On desktop the queue is always empty (`kind: "none"`) — the
+/// command exists so the JS call surface stays identical across platforms.
 #[tauri::command]
 async fn fetch_pending_share<R: Runtime>(
-    app: tauri::AppHandle<R>,
-) -> Result<ShareTargetPayload, serde_json::Value> {
-    let _ = app;
-    Ok(ShareTargetPayload { url: String::new() })
+    _app: tauri::AppHandle<R>,
+) -> Result<PendingSharePayload, serde_json::Value> {
+    Ok(PendingSharePayload {
+        kind: "none".to_string(),
+    })
 }
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {

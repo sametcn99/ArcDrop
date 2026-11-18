@@ -178,21 +178,53 @@ describe('onShareTarget (plan T3)', () => {
     const unsubscribe = createTauriPlatform(deps).onShareTarget(callback);
     await flush();
 
-    holder.cb?.({ text: 'Look at https://example.com/article now' });
-    expect(callback).toHaveBeenCalledWith('https://example.com/article');
+    holder.cb?.({ kind: 'text', text: 'Look at https://example.com/article now' });
+    expect(callback).toHaveBeenCalledWith({ kind: 'url', url: 'https://example.com/article' });
     unsubscribe();
   });
 
   it('fetches the cold-start queue once registered', async () => {
     const deps = shareDeps({
-      invoke: vi.fn().mockResolvedValue({ text: 'https://queued.example.com/x' }),
+      invoke: vi.fn().mockResolvedValue({ kind: 'text', text: 'https://queued.example.com/x' }),
     });
     const callback = vi.fn();
     createTauriPlatform(deps).onShareTarget(callback);
     await flush();
 
     expect(deps.invoke).toHaveBeenCalledWith('plugin:arcdrop-share-target|fetch_pending_share');
-    expect(callback).toHaveBeenCalledWith('https://queued.example.com/x');
+    expect(callback).toHaveBeenCalledWith({ kind: 'url', url: 'https://queued.example.com/x' });
+  });
+
+  it('delivers cached shared files from the cold-start queue (plan T4)', async () => {
+    const deps = shareDeps({
+      invoke: vi.fn().mockResolvedValue({
+        kind: 'file',
+        path: '/cache/shared.pdf',
+        fileName: 'shared.pdf',
+        mime: 'application/pdf',
+      }),
+    });
+    const callback = vi.fn();
+    createTauriPlatform(deps).onShareTarget(callback);
+    await flush();
+
+    expect(callback).toHaveBeenCalledWith({
+      kind: 'file',
+      path: '/cache/shared.pdf',
+      fileName: 'shared.pdf',
+      mime: 'application/pdf',
+    });
+  });
+
+  it('surfaces oversized shared files as refusals (plan T4)', async () => {
+    const deps = shareDeps({
+      invoke: vi.fn().mockResolvedValue({ kind: 'file-too-large', fileName: 'big.zip' }),
+    });
+    const callback = vi.fn();
+    createTauriPlatform(deps).onShareTarget(callback);
+    await flush();
+
+    expect(callback).toHaveBeenCalledWith({ kind: 'file-too-large', fileName: 'big.zip' });
   });
 
   it('parses desktop arcdrop:// deep links onto the same stream', async () => {
@@ -208,13 +240,13 @@ describe('onShareTarget (plan T3)', () => {
     await flush();
 
     holder.cb?.(['arcdrop://add?url=https%3A%2F%2Fexample.dev%2Fpost']);
-    expect(callback).toHaveBeenCalledWith('https://example.dev/post');
+    expect(callback).toHaveBeenCalledWith({ kind: 'url', url: 'https://example.dev/post' });
     unsubscribe();
   });
 
   it('ignores payloads without an http(s) url', async () => {
     const deps = shareDeps({
-      invoke: vi.fn().mockResolvedValue({ text: 'no link here' }),
+      invoke: vi.fn().mockResolvedValue({ kind: 'text', text: 'no link here' }),
     });
     const callback = vi.fn();
     createTauriPlatform(deps).onShareTarget(callback);

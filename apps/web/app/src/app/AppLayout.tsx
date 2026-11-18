@@ -91,6 +91,7 @@ import { getSiblingCollections } from '../shared/utils/collectionTree';
 import { useAuthStore } from '../stores/authStore';
 import { useLibraryStore } from '../stores/libraryStore';
 import { useNotificationsStore } from '../stores/notificationsStore';
+import { useShareFileStore } from '../stores/shareFileStore';
 import { useUiStore } from '../stores/uiStore';
 import { platform } from '../platform';
 import { APP_STRINGS } from './strings';
@@ -175,7 +176,16 @@ export function AppLayout() {
   const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null);
   const [tagManagerOpen, setTagManagerOpen] = useState(false);
   const [quickAddDialogOpen, setQuickAddDialogOpen] = useState(false);
-  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploadDialogOpenManual, setUploadDialogOpen] = useState(false);
+  // A file shared into ArcDrop (Android ACTION_SEND, plan T4) opens the
+  // upload dialog with it preselected — derived from the store, no effect.
+  const pendingShareFile = useShareFileStore((s) => s.pendingFile);
+  const clearPendingShareFile = useShareFileStore((s) => s.clearPendingFile);
+  const uploadDialogOpen = uploadDialogOpenManual || pendingShareFile !== null;
+  const closeUploadDialog = () => {
+    setUploadDialogOpen(false);
+    clearPendingShareFile();
+  };
   const [activeDrag, setActiveDrag] = useState<DragItemData | null>(null);
   const [manualSortContext, setManualSortContext] = useState<{
     collectionId: string;
@@ -999,7 +1009,8 @@ export function AppLayout() {
         />
         <UploadFileDialog
           open={uploadDialogOpen}
-          onClose={() => setUploadDialogOpen(false)}
+          onClose={closeUploadDialog}
+          initialFile={pendingShareFile ?? undefined}
           initialCollectionId={routeCollectionId}
         />
 

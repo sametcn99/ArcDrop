@@ -81,6 +81,11 @@ describe('browser platform adapter', () => {
     expect(shareMock).toHaveBeenCalledWith({ text: 'Look at this', url: 'https://example.com' });
   });
 
+  it('resolveDeviceLabel resolves null without a native OS bridge (plan T2)', async () => {
+    const platform = createBrowserPlatform();
+    await expect(platform.resolveDeviceLabel()).resolves.toBeNull();
+  });
+
   it('share resolves false when the user dismisses the share sheet', async () => {
     const shareMock = vi.fn().mockRejectedValue(new DOMException('aborted', 'AbortError'));
     Object.defineProperty(window.navigator, 'share', { value: shareMock, configurable: true });
@@ -93,6 +98,72 @@ describe('browser platform adapter', () => {
   it('resolveDeviceLabel resolves null without a native OS bridge (plan T2)', async () => {
     const platform = createBrowserPlatform();
     await expect(platform.resolveDeviceLabel()).resolves.toBeNull();
+  });
+
+  it('notify shows a Notification only when permission is already granted (plan T4)', async () => {
+    const platform = createBrowserPlatform();
+    const notificationInstances: Array<{ title: string; body?: string }> = [];
+    class NotificationStub {
+      constructor(
+        public title: string,
+        public options?: { body?: string },
+      ) {
+        notificationInstances.push({ title, body: options?.body });
+      }
+      static permission: NotificationPermission = 'granted';
+    }
+    Object.defineProperty(window, 'Notification', {
+      value: NotificationStub,
+      configurable: true,
+      writable: true,
+    });
+
+    expect(await platform.notify({ title: 'Reminder: Guide', body: 'body text' })).toBe(true);
+    expect(notificationInstances).toEqual([{ title: 'Reminder: Guide', body: 'body text' }]);
+  });
+
+  it('notify stays a no-op when permission is not granted (no prompt — plan T4)', async () => {
+    const platform = createBrowserPlatform();
+    class NotificationStub {
+      static permission: NotificationPermission = 'default';
+      constructor() {
+        throw new Error('should never be constructed');
+      }
+    }
+    Object.defineProperty(window, 'Notification', {
+      value: NotificationStub,
+      configurable: true,
+      writable: true,
+    });
+
+    expect(await platform.notify({ title: 'Reminder' })).toBe(false);
+  });
+
+  it('notify stays a no-op without the Notification API', async () => {
+    const platform = createBrowserPlatform();
+    Reflect.deleteProperty(window, 'Notification');
+    expect(await platform.notify({ title: 'Reminder' })).toBe(false);
+  });
+
+  it('saveBlob keeps the classic browser download path (plan T4)', async () => {
+    const createObjectURL = vi.fn(() => 'blob:http://localhost/abc');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(window.URL, 'createObjectURL', { value: createObjectURL });
+    Object.defineProperty(window.URL, 'revokeObjectURL', { value: revokeObjectURL });
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+
+    const platform = createBrowserPlatform();
+    const result = await platform.saveBlob(new Blob(['data']), 'file.txt');
+
+    expect(result).toBe(true);
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalled();
+    clickSpy.mockRestore();
+    Reflect.deleteProperty(window.URL, 'createObjectURL');
+    Reflect.deleteProperty(window.URL, 'revokeObjectURL');
   });
 });
 

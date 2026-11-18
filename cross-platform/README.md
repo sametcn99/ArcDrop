@@ -106,6 +106,17 @@ cross-platform/
   registration; single-instance plugin forwards links to the running app).
   Both share-target and deep-link funnels route through
   `platform.onShareTarget` → `/quick-add?url=…`.
+- **Notifications** (plan T4): reminders delivered while the app is
+  foreground (sync WS reminder frames) also surface as local notifications
+  (`plugin-notification`, incl. the Android 13+ POST_NOTIFICATIONS flow) —
+  one per reminder, reconnect-replay safe. Browsers only show them when the
+  site already holds Notification permission (no prompt, no web UX change).
+- **Files** (plan T4): downloads go through a save dialog + plugin-fs inside
+  Tauri (browsers keep the synthetic-anchor download); the upload dialog's
+  "choose file" uses the native picker inside Tauri. Shared FILES (image/*,
+  application/*, …) are copied into the app cache by the share-target plugin
+  (100 MB cap) and open the upload dialog preselected — read from the cache
+  via the `fs:allow-appcache-read-recursive` scope.
 - CI: `.github/workflows/ci-cross-platform.yml` — rust-checks, Android debug
   APK, desktop matrix (windows/ubuntu/macos, `--no-bundle`), and an iOS
   simulator build (continuous since T2, unsigned). Full bundles/signing come

@@ -1,3 +1,4 @@
+import { triggerBlobDownload } from '../shared/utils/blobDownload';
 import type { PlatformAdapter } from './types';
 
 /** True inside a Tauri v2 webview; the global window may be absent in tests. */
@@ -50,5 +51,30 @@ export function createBrowserPlatform(): PlatformAdapter {
 
     // Share-target/deep-link payloads only exist with a native bridge (T3).
     onShareTarget: () => () => {},
+
+    // Notifications only when the site already has permission — asking would
+    // change the web UX (plan T4 acceptance: no behavior change in browsers).
+    notify: async (input) => {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+        return false;
+      }
+      try {
+        new Notification(input.title, { body: input.body });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    // Classic browser download path (synthetic anchor, plan T4).
+    saveBlob: async (blob, filename) => {
+      triggerBlobDownload(blob, filename);
+      return true;
+    },
+
+    // Browsers keep their existing <input type="file"> element (plan T4).
+    pickFile: async () => null,
+
+    readLocalFile: async () => null,
   };
 }

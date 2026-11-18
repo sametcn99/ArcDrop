@@ -33,4 +33,6 @@ export const APP_STRINGS = {
   notFoundTitle: 'Page not found',
   notFoundDescription: 'The requested route does not exist in this workspace.',
   notFoundAction: 'Go to library',
+  shareFileTooLarge: 'The shared file exceeds the 100 MB limit and was not added.',
+  shareFileReadError: 'The shared file could not be read.',
 } as const;

@@ -10,8 +10,8 @@ import type {
 } from '../../../api/schemas/portability';
 import { toApiError } from '../../../api/schemas/problem';
 import { syncEngine } from '../../../api/sync-engine';
+import { platform } from '../../../platform';
 import { refreshCollectionsTreeAction } from '../../../shared/actions/collectionActions';
-import { triggerBlobDownload } from '../../../shared/utils/blobDownload';
 import { useLibraryStore } from '../../../stores/libraryStore';
 import { useSyncStore } from '../../../stores/syncStore';
 import { useUiStore } from '../../../stores/uiStore';
@@ -98,7 +98,7 @@ export function usePortability() {
       const res = await portabilityApi.exportData(input);
       const ext = input.includeFiles ? 'zip' : input.format;
       const filename = res.filename ?? `arcdrop-export.${ext}`;
-      triggerBlobDownload(res.blob, filename);
+      await platform.saveBlob(res.blob, filename);
       useUiStore.getState().enqueueSnackbar({
         message: `${PORTABILITY_PAGE_STRINGS.exportSuccessToastPrefix} ${filename}`,
         severity: 'success',
@@ -122,7 +122,7 @@ export function usePortability() {
     try {
       const res = await portabilityApi.exportBookmarkHighlights(bookmarkId, format);
       const filename = res.filename ?? `highlights-${bookmarkId}.${format}`;
-      triggerBlobDownload(res.blob, filename);
+      await platform.saveBlob(res.blob, filename);
       useUiStore.getState().enqueueSnackbar({
         message: `${PORTABILITY_PAGE_STRINGS.highlightsToastPrefix} ${filename}`,
         severity: 'success',
