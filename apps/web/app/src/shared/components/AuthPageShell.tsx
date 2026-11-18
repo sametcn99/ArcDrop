@@ -8,6 +8,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import type { ReactNode } from 'react';
+import { platform } from '../../platform';
 import { AUTH_SHELL_STRINGS } from '../strings';
 import { ThemeSwitcher } from './ThemeSwitcher';
 
@@ -103,6 +104,9 @@ export function AuthPageShell({
             gap: 1.5,
             px: { xs: 2, sm: 3 },
             py: 2,
+            // Android edge-to-edge (plan T2): keep the header controls clear
+            // of the transparent status bar; env() is 0 elsewhere.
+            paddingTop: platform.isTauri ? 'calc(env(safe-area-inset-top) + 16px)' : undefined,
           }}
         >
           <Stack

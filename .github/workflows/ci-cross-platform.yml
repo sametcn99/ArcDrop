@@ -166,13 +166,13 @@ jobs:
         run: bun run build:no-bundle
         working-directory: cross-platform
 
-  # Manual until T2 (minute cost): validates the iOS build chain on demand.
-  # gen/apple is not committed in T1, so the job generates the Xcode project
-  # itself before building the unsigned simulator target.
+  # Continuous since T2: gen/apple is generated in CI — `tauri ios init` is a
+  # macOS-only CLI subcommand, so the Windows dev machine cannot commit it.
+  # The identifier comes from tauri.conf.json at generation time; nothing
+  # machine-specific is embedded (the tree is ephemeral per run).
   ios:
-    name: iOS simulator build (manual)
+    name: iOS simulator build
     runs-on: macos-latest
-    if: github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v5
 

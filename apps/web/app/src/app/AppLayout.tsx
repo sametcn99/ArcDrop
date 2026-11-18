@@ -92,6 +92,7 @@ import { useAuthStore } from '../stores/authStore';
 import { useLibraryStore } from '../stores/libraryStore';
 import { useNotificationsStore } from '../stores/notificationsStore';
 import { useUiStore } from '../stores/uiStore';
+import { platform } from '../platform';
 import { APP_STRINGS } from './strings';
 import { appChildRoutes } from './routes';
 
@@ -711,6 +712,9 @@ export function AppLayout() {
             sx={{
               width: { md: desktopOpen ? 'calc(100% - var(--arcdrop-sidebar-width))' : '100%' },
               ml: { md: desktopOpen ? 'var(--arcdrop-sidebar-width)' : 0 },
+              // Android edge-to-edge (plan T2): the themed AppBar extends
+              // behind the transparent status bar; env() is 0 elsewhere.
+              paddingTop: platform.isTauri ? 'env(safe-area-inset-top)' : undefined,
             }}
           >
             <Toolbar sx={{ gap: 1.5 }}>
@@ -969,7 +973,12 @@ export function AppLayout() {
               width: { md: desktopOpen ? 'calc(100% - var(--arcdrop-sidebar-width))' : '100%' },
             }}
           >
-            <Toolbar />
+            {/* Spacer matching the fixed AppBar height; grows by the same
+                safe-area inset so content never slides under the AppBar on
+                Android (plan T2). */}
+            <Toolbar
+              sx={{ paddingTop: platform.isTauri ? 'env(safe-area-inset-top)' : undefined }}
+            />
             {backgroundLocation ? (
               <>
                 <BackgroundLocationRoutes location={backgroundLocation} />

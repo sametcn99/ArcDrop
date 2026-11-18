@@ -89,6 +89,11 @@ describe('browser platform adapter', () => {
     await expect(platform.share('Look at this')).resolves.toBe(false);
     expect(shareMock).toHaveBeenCalledWith({ text: 'Look at this' });
   });
+
+  it('resolveDeviceLabel resolves null without a native OS bridge (plan T2)', async () => {
+    const platform = createBrowserPlatform();
+    await expect(platform.resolveDeviceLabel()).resolves.toBeNull();
+  });
 });
 
 describe('logNativeAppVersion (T1 shell bridge check)', () => {

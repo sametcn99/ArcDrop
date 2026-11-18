@@ -28,6 +28,14 @@ export interface PlatformAdapter {
    * true when shared, false when unsupported or dismissed.
    */
   share(text: string, url?: string): Promise<boolean>;
+
+  /**
+   * Human-readable device label for the server-side session list ("Android ·
+   * Pixel 8", "Desktop · Windows 11"), derived from the native OS API where
+   * available. Resolves null when no native OS info exists (plain browser /
+   * extension page) — callers keep their current behavior then.
+   */
+  resolveDeviceLabel(): Promise<string | null>;
 }
 
 declare global {

@@ -1,4 +1,4 @@
-package com.arcdrop.app
+package com.arcdrop.client
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

@@ -1,16 +1,30 @@
-import { createBrowserPlatform } from './browser';
+import { createBrowserPlatform, detectTauri } from './browser';
 import { createExtensionPlatform, detectExtension } from './extension';
+import { createTauriPlatform } from './tauri';
 import type { PlatformAdapter } from './types';
 
 export type { PlatformAdapter } from './types';
 
 /**
- * Single platform adapter instance used by the API client and UI. Selection
- * order: extension context (MV3, `chrome.runtime.id` present) → extension
- * adapter (E1); otherwise the browser implementation. In T2 the Tauri-native
- * adapter joins this selection when `platform.isTauri` is true (plugin-http
- * fetch, opener, back button, share).
+ * Adapter selection (exported separately for tests): a Tauri webview
+ * (`__TAURI_INTERNALS__` present) uses the Tauri-native adapter (T2:
+ * plugin-http fetch, opener, OS device label); an extension context (MV3,
+ * `chrome.runtime.id` present) uses the extension adapter (E1); everything
+ * else runs on the plain browser implementation.
  */
-export const platform: PlatformAdapter = detectExtension()
-  ? createExtensionPlatform()
-  : createBrowserPlatform();
+export function selectPlatform(): PlatformAdapter {
+  if (detectTauri()) {
+    return createTauriPlatform();
+  }
+  if (detectExtension()) {
+    return createExtensionPlatform();
+  }
+  return createBrowserPlatform();
+}
+
+/**
+ * Single platform adapter instance used by the API client and UI. Detection
+ * happens at module init — inside a Tauri webview `__TAURI_INTERNALS__` is
+ * injected before any app script runs, so the selection is reliable there.
+ */
+export const platform: PlatformAdapter = selectPlatform();

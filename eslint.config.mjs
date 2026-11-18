@@ -150,7 +150,14 @@ const FORBIDDEN_HOST_ELEMENTS = [
 
 export default tseslint.config(
   {
-    ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**'],
+    ignores: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/coverage/**',
+      // Rust build output contains generated JS assets (tauri codegen) —
+      // never a lint target, same category as dist/ and node_modules/.
+      'cross-platform/src-tauri/target/**',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

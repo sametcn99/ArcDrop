@@ -61,5 +61,9 @@ export function createExtensionPlatform(): PlatformAdapter {
         return false;
       }
     },
+
+    // Extension pages expose no native OS bridge; the session list keeps the
+    // API-derived label (browser parity, plan T2).
+    resolveDeviceLabel: async () => null,
   };
 }
