@@ -8,7 +8,6 @@
     "http:default",
     "opener:default",
     "os:default",
-    "deep-link:default",
     "arcdrop-share-target:default"
   ]
 }
