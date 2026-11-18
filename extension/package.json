@@ -23,7 +23,8 @@
     "smoke:bookmarks": "bun run ../dev-scripts/smoke-bookmarks.ts",
     "smoke:totp": "bun run ../dev-scripts/smoke-totp.ts",
     "smoke:bridge": "bun run ../dev-scripts/smoke-bridge.ts",
-    "smoke:e4": "bun run ../dev-scripts/smoke-e4.ts"
+    "smoke:e4": "bun run ../dev-scripts/smoke-e4.ts",
+    "smoke:e8": "bun run ../dev-scripts/smoke-e8.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
