@@ -45,6 +45,7 @@ const EXPECTED_TOOLS = [
   'replaceBookmarkTags',
   'replaceBookmarkCollections',
   'reindexBookmark',
+  'setBookmarkCover',
   'getBookmarkStats',
   'listBookmarkTags',
   'findDuplicates',

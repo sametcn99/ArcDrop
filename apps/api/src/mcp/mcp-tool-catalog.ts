@@ -11,6 +11,7 @@ import {
   ListBookmarksQueryDto,
   RenameTagDto,
   ReplaceBookmarkTagsDto,
+  SetBookmarkCoverDto,
   TagNameParamDto,
   UpdateBookmarkDto,
   UpdateHighlightDto,
@@ -265,6 +266,20 @@ export function buildToolCatalog(deps: {
       'Re-run the metadata, icon, content-type, and permanent-copy archive extraction pipeline for one URL bookmark (202-style immediate "scheduled" answer; completion lands as a change event). Cover/icon/contentType and archived copy are re-evaluated, text only fills while still null. Refuses file-backed bookmarks (400).',
       [BookmarkIdParamDto],
       (user, [p]) => metadata.reindex(user.id, (p as BookmarkIdParamDto).id),
+    ),
+    define(
+      'setBookmarkCover',
+      'POST',
+      'Assign a bookmark cover by image URL (plan E7): the server downloads the image through the SSRF-hardened pipeline (private-range and redirect-to-private refusals included, non-image content types refused), stores it in the icon cache and sets it as the bookmark cover (coverRef), recording a change event. Refuses file-backed bookmarks (400). Returns the bookmark with the new coverRef.',
+      [BookmarkIdParamDto, SetBookmarkCoverDto],
+      (user, [p, dto]) =>
+        metadata
+          .assignCoverFromUrl(
+            user.id,
+            (p as BookmarkIdParamDto).id,
+            (dto as SetBookmarkCoverDto).imageUrl,
+          )
+          .then(() => bookmarks.get(user, (p as BookmarkIdParamDto).id)),
     ),
     define(
       'getBookmarkStats',

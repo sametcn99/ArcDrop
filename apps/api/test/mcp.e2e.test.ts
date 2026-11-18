@@ -307,6 +307,7 @@ const EXPECTED_TOOLS = [
   'replaceBookmarkTags',
   'replaceBookmarkCollections',
   'reindexBookmark',
+  'setBookmarkCover',
   'getBookmarkStats',
   'listBookmarkTags',
   'renameTag',
@@ -784,7 +785,7 @@ describe('MCP server (e2e)', () => {
         expect(text).toContain(tool.name);
         checked += 1;
       }
-      expect(checked).toBe(28);
+      expect(checked).toBe(29);
 
       // read tools DO run for the same token
       const read = await mcpPost(
