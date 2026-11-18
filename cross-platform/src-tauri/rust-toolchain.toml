@@ -1,3 +1,6 @@
 # Pinned stable toolchain (plan T1): keeps local builds and CI reproducible.
+# rustfmt/clippy are declared here so `cargo fmt`/`cargo clippy` work identically
+# on dev machines and CI runners (CI's toolchain setup reads this file).
 [toolchain]
 channel = "1.99.0"
+components = ["rustfmt", "clippy"]

@@ -23,7 +23,7 @@ abstract class BuildTask : DefaultTask() {
 
     @TaskAction
     fun assemble() {
-        val executable = """C:\Users\samet\.bun\bin\bun""";
+        val executable = resolveTauriCliExecutable();
         try {
             runTauriCli(executable)
         } catch (e: Exception) {
@@ -49,6 +49,29 @@ abstract class BuildTask : DefaultTask() {
                 throw e;
             }
         }
+    }
+
+    /**
+     * `tauri android init` captures the absolute path of the CLI runner that
+     * was used on the dev machine (a Windows bun path here). That absolute
+     * path breaks on any other machine (CI runners are Linux). Resolution
+     * order: explicit override -> bun/bunx found on PATH -> the path captured
+     * at init time (last resort, keeps the original dev-machine behavior).
+     */
+    fun resolveTauriCliExecutable(): String {
+        System.getenv("TAURI_CLI_EXECUTABLE")?.takeIf { it.isNotBlank() }?.let { return it }
+
+        val pathDirs = (System.getenv("PATH") ?: "").split(File.pathSeparator)
+        for (name in listOf("bun", "bun.exe", "bunx", "bunx.exe")) {
+            for (dir in pathDirs) {
+                val candidate = File(dir, name)
+                if (candidate.isFile && candidate.canExecute()) {
+                    return candidate.absolutePath
+                }
+            }
+        }
+
+        return """C:\Users\samet\.bun\bin\bun""";
     }
 
     fun runTauriCli(executable: String) {
