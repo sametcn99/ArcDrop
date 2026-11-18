@@ -31,6 +31,9 @@ jobs:
       - name: Typecheck
         run: bun --cwd=extension run typecheck
 
+      - name: Unit tests
+        run: bun --cwd=extension run test
+
       - name: Build (chromium + firefox)
         run: bun --cwd=extension run build
 

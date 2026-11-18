@@ -47,12 +47,39 @@ own `bun.lock`, so the root install never touches extension dependencies.
 ```
 extension/
 ├─ manifest.json      # MV3 manifest; TS/TSX entry paths (Extension.js compiles them)
-├─ popup/             # popup entry (React + MUI placeholder until E2)
+├─ popup/             # popup entry: connection/auth state machine (E1) + save editor (E2)
 ├─ options/           # options page entry (placeholder until E5)
-├─ background/        # MV3 service worker (context menus/quick-save land in E2/E4)
-├─ shared/            # strings + shared helpers (storage, API core from E1)
+├─ background/        # MV3 service worker: auth broker (E1); menus/quick-save in E2/E4
+├─ shared/            # vault, auth API core, broker protocol, strings, theme
 └─ dist/              # build output (gitignored): chromium/ + firefox/
 ```
+
+## Connection & auth (E1)
+
+- **Vaultwarden-style setup**: popup → server address (https default) →
+  runtime host permission for **that origin only** → ArcDrop identity check
+  (`/openapi.json`) → email/password sign-in (+TOTP challenge when 2FA is on)
+  → connected.
+- **Vault**: `chrome.storage.local` (schema v1) holds `baseUrl`, tokens and
+  the user id/email. The **background auth broker** is the single writer; the
+  popup talks to it via `chrome.runtime.sendMessage` (`shared/messages.ts`).
+- **Token refresh is single-flight in the background**: a cached access JWT
+  is used until 30 s before its `exp` claim, then `POST /auth/refresh` runs
+  once (rotating the refresh token); a rejected refresh clears the session
+  and the popup returns to sign-in.
+- Disconnect revokes the refresh token server-side, clears tokens/user and
+  keeps the server address for fast reconnection.
+
+## Developer utilities
+
+```bash
+bun run test          # unit tests (bun test) — vault, broker, fetch layer, URLs
+bun run generate:api  # regenerate shared/api-types.gen.ts from a RUNNING API
+bun run smoke:auth    # live auth smoke against a running API (env-documented in the script)
+```
+
+`generate:api`/`smoke:auth` need a live ArcDrop API (`docker compose up -d`
+at the repo root works); they are never run by CI.
 
 ## Notes
 

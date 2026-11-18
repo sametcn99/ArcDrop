@@ -16,7 +16,7 @@
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["chrome"]
+    "types": ["chrome", "bun"]
   },
   "include": ["popup", "options", "background", "shared"]
 }
