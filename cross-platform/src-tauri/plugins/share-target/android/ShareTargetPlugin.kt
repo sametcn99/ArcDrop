@@ -20,9 +20,12 @@ private const val MAX_SHARE_FILE_BYTES: Long = 100L * 1024L * 1024L
  *
  * - text/plain + text/uri-list (T3): the raw text is queued; URL extraction
  *   happens in Rust (`extract_first_url`).
- * - image/*, video/*, audio/*, application/* (T4): the stream is copied into
- *   the app cache dir (plugin-fs reads it from there); shares above 100 MB
- *   are refused.
+ * - image, video, audio and application top-level MIME types (T4): the
+ *   stream is copied into the app cache dir (plugin-fs reads it from there);
+ *   shares above 100 MB are refused.
+ *   NOTE: do not write MIME wildcards as "image" slash star inside block
+ *   comments — Kotlin nests block comments and the star-slashless openers
+ *   break compilation at EOF (CI: "Unclosed comment").
  *
  * Cold start: when Android launches ArcDrop *because* of a share, the intent
  * arrives before the web client registers any listener — the payload is kept
