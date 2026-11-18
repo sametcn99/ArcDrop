@@ -14,6 +14,7 @@ import {
   reindexBookmarkAction,
   replaceBookmarkTagsAction,
   restoreBookmarkAction,
+  setBookmarkCoverAction,
   toggleBookmarkFavoriteAction,
   trashBookmarkAction,
   updateBookmarkDetailsAction,
@@ -265,6 +266,22 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
     await downloadBookmarkFileAction(bookmark).catch(() => undefined);
   };
 
+  const [coverApplying, setCoverApplying] = useState(false);
+
+  /** Assigns a cover by URL (plan E8) — the server fetches and stores it. */
+  const applyCover = async (imageUrl: string): Promise<boolean> => {
+    if (!bookmark || !bookmarkId || coverApplying) return false;
+    setCoverApplying(true);
+    try {
+      await setBookmarkCoverAction(bookmark.id, imageUrl);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setCoverApplying(false);
+    }
+  };
+
   const setField = (field: keyof BookmarkFormValues, value: string) => {
     if (!bookmarkId) return;
     setSaveErrorState(null);
@@ -491,5 +508,7 @@ export function useBookmarkDetail(bookmarkId: string | undefined) {
     refreshArchiveStatus,
     reindex,
     downloadFile,
+    coverApplying,
+    applyCover,
   };
 }

@@ -14,6 +14,7 @@ import { useEffect } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams, type Location } from 'react-router';
 import { bookmarksApi } from '../../api/endpoints/bookmarks';
 import { BookmarkArchivePanel } from './components/BookmarkArchivePanel';
+import { BookmarkCoverPicker } from './components/BookmarkCoverPicker';
 import { BookmarkDetailForm } from './components/BookmarkDetailForm';
 import { useBookmarkDetail } from './hooks/useBookmarkDetail';
 import { BOOKMARK_DETAIL_STRINGS } from './strings';
@@ -67,6 +68,8 @@ export default function BookmarkDetailPage() {
     refreshArchiveStatus,
     reindex,
     downloadFile,
+    coverApplying,
+    applyCover,
   } = useBookmarkDetail(bookmarkId);
 
   useEffect(() => {
@@ -244,6 +247,11 @@ export default function BookmarkDetailPage() {
                   data-testid="bookmark-detail-cover"
                 />
               ) : null}
+              <BookmarkCoverPicker
+                fileBacked={bookmark.storageKind === 'file'}
+                applying={coverApplying}
+                onApply={applyCover}
+              />
               <BookmarkDetailForm
                 bookmark={bookmark}
                 form={form}

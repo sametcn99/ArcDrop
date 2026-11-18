@@ -131,6 +131,15 @@ export function createBookmarksApi(client: ApiClient = apiClient) {
       });
     },
 
+    /** Assigns a cover by URL — the server fetches and stores it (plan E7/E8). */
+    async setCover(id: string, imageUrl: string): Promise<Bookmark> {
+      return client.post(
+        `/bookmarks/${encodeURIComponent(id)}/cover`,
+        { imageUrl },
+        { schema: bookmarkSchema },
+      );
+    },
+
     async update(id: string, input: UpdateBookmarkRequest): Promise<Bookmark> {
       return client.put(`/bookmarks/${encodeURIComponent(id)}`, input, {
         schema: bookmarkSchema,

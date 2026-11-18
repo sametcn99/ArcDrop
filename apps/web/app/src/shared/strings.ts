@@ -36,6 +36,7 @@ export const SHARED_BOOKMARK_STRINGS = {
   reminderDueBadgeLabel: 'Reminder due',
   toastFileDownloaded: 'File downloaded.',
   toastReindexScheduled: 'Archive refresh scheduled.',
+  toastCoverAssigned: 'Cover updated.',
 } as const;
 
 export const SHARED_UPLOAD_STRINGS = {

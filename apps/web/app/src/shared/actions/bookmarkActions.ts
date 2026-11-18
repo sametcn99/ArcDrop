@@ -190,6 +190,29 @@ export async function replaceBookmarkTagsAction(
   }
 }
 
+/** Assigns a cover by URL — the server downloads and stores it (plan E8). */
+export async function setBookmarkCoverAction(
+  bookmarkId: string,
+  imageUrl: string,
+): Promise<Bookmark> {
+  try {
+    const updated = await bookmarksApi.setCover(bookmarkId, imageUrl);
+    useLibraryStore.getState().upsertBookmark(updated);
+    useUiStore.getState().enqueueSnackbar({
+      message: SHARED_BOOKMARK_STRINGS.toastCoverAssigned,
+      severity: 'success',
+    });
+    return updated;
+  } catch (err) {
+    const apiErr = toApiError(err);
+    useUiStore.getState().enqueueSnackbar({
+      message: apiErr.detail || 'Could not assign the cover.',
+      severity: 'error',
+    });
+    throw apiErr;
+  }
+}
+
 export async function toggleBookmarkFavoriteAction(bookmark: Bookmark): Promise<Bookmark> {
   const nextFavorite = !bookmark.favorite;
   const libraryStore = useLibraryStore.getState();
