@@ -30,7 +30,12 @@ pub fn run() {
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
-            ));
+            ))
+            // Plan T6: desktop auto-update against GitHub Releases (signature
+            // key in tauri.conf.json; artifacts+latest.json from the release
+            // workflow).
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
     }
 
     builder
@@ -93,7 +98,12 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // Plan T5: closing the window hides it to the tray; the app only
-            // exits through the tray Quit entry (desktop builds only).
+            // exits through the tray Quit entry (desktop builds only). On
+            // mobile the desktop block compiles out — consume the params so
+            // unused_variable lints don't fail the mobile deny-warnings build.
+            #[cfg(mobile)]
+            let _ = (&window, &event);
+
             #[cfg(desktop)]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
