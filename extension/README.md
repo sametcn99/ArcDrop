@@ -73,13 +73,17 @@ extension/
 ## Developer utilities
 
 ```bash
-bun run test          # unit tests (bun test) — vault, broker, fetch layer, URLs
-bun run generate:api  # regenerate shared/api-types.gen.ts from a RUNNING API
-bun run smoke:auth    # live auth smoke against a running API (env-documented in the script)
+bun run test             # unit tests (bun test) — vault, brokers, fetch layer, URLs
+bun run generate:api     # regenerate shared/api-types.gen.ts from a RUNNING API
+bun run smoke:auth       # live auth smoke against a running API (env-documented in the script)
+bun run smoke:bookmarks  # live E2 bookmark flow smoke (create/find/update/tags/trash)
+bun run smoke:totp       # live 2FA login flow smoke (creates a disposable user; needs an admin)
 ```
 
-`generate:api`/`smoke:auth` need a live ArcDrop API (`docker compose up -d`
-at the repo root works); they are never run by CI.
+`generate:api` lives in `extension/scripts/`; the live smoke scripts live in
+`<repo>/dev-scripts/` (outside the extension project so the build never
+bundles them). All of them need a live ArcDrop API (`docker compose up -d`
+at the repo root works); none are run by CI.
 
 ## Notes
 

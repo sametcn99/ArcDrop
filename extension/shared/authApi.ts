@@ -189,6 +189,49 @@ export async function fetchMe(
   return result.data;
 }
 
+/** Consumes a single-use invite/reset token and sets the password (D15). */
+export async function claim(
+  baseUrl: string,
+  input: { token: string; password: string; deviceLabel?: string },
+  options: AuthApiOptions = {},
+): Promise<AuthSession> {
+  const result = await apiFetch<AuthSession>(apiUrl(baseUrl, '/auth/claim'), {
+    method: 'POST',
+    body: input,
+    ...options,
+  });
+  return result.data;
+}
+
+/** Generates a pending TOTP secret (not enabled until confirmed). */
+export async function setupTfa(
+  baseUrl: string,
+  accessToken: string,
+  options: AuthApiOptions = {},
+): Promise<{ secret: string; otpauthUri: string }> {
+  const result = await apiFetch<{ secret: string; otpauthUri: string }>(
+    apiUrl(baseUrl, '/auth/tfa/setup'),
+    { method: 'POST', accessToken, ...options },
+  );
+  return result.data;
+}
+
+/** Confirms a TOTP code and enables 2FA (revokes all other sessions). */
+export async function enableTfa(
+  baseUrl: string,
+  accessToken: string,
+  input: { code: string },
+  options: AuthApiOptions = {},
+): Promise<{ recoveryCodes: string[] }> {
+  const result = await apiFetch<{ recoveryCodes: string[] }>(apiUrl(baseUrl, '/auth/tfa/enable'), {
+    method: 'POST',
+    body: input,
+    accessToken,
+    ...options,
+  });
+  return result.data;
+}
+
 // Compile-time structural alignment against the generated OpenAPI schemas
 // (same pattern as apps/web/app/src/api/schemas/auth.ts): when the API
 // surface changes and `generate:api` reruns, mismatches break typecheck here.

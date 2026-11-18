@@ -59,9 +59,12 @@ describe('vault', () => {
 
   it('merges partial settings with defaults', async () => {
     const area = fakeStorage();
-    await area.set({ vault: { version: 1, settings: {} } });
+    await area.set({ vault: { version: 1, settings: { quickSaveTarget: 'unsorted' } } });
     const vault = await readVault(area);
-    expect(vault.settings).toEqual(DEFAULT_VAULT.settings);
+    expect(vault.settings).toEqual({
+      quickSaveTarget: 'unsorted',
+      lastUsedCollectionId: null,
+    });
     expect(vault.baseUrl).toBeNull();
   });
 
