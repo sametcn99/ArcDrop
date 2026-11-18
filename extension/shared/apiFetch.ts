@@ -76,7 +76,10 @@ export async function apiFetch<T = unknown>(
   }
 
   let bodyInit: BodyInit | undefined;
-  if (options.body !== undefined) {
+  if (options.body instanceof FormData) {
+    // Let fetch / the browser assign the multipart boundary Content-Type.
+    bodyInit = options.body;
+  } else if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     bodyInit = JSON.stringify(options.body);
   }

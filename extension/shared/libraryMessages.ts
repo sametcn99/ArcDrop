@@ -7,6 +7,19 @@ import type { Collection, CollectionNode } from './api/collections';
 import type { BrokerFailure } from './brokerTypes';
 import type { PageMetaCandidates } from './pageImages';
 import type { QuickSaveResult } from './quicksave';
+import type { SaveAllSummary, TabItem } from './menuActions';
+
+/**
+ * An image save blocked on a one-time origin permission — stashed in
+ * chrome.storage.session so the popup can re-drive it with a real user
+ * gesture (background menu clicks may not carry one).
+ */
+export interface PendingImageSave {
+  origin: string;
+  srcUrl: string;
+  pageTitle?: string;
+  savedAt: number;
+}
 
 /** What the editor submits for one save. `collectionId: null` = unsorted. */
 export interface SaveDraft {
@@ -31,7 +44,15 @@ export type LibraryBrokerRequest =
   | { type: 'library/create-collection'; title: string; parentId: string | null }
   | { type: 'library/tags' }
   | { type: 'library/page-meta'; tabId: number }
-  | { type: 'library/quick-save' };
+  | { type: 'library/quick-save' }
+  // E4 context-menu + bulk flows (background-driven; badge feedback included)
+  | { type: 'library/save-link'; linkUrl: string; title?: string }
+  | { type: 'library/save-selection'; selectionText: string; pageUrl?: string; pageTitle?: string }
+  | { type: 'library/save-image'; srcUrl: string; pageUrl?: string; pageTitle?: string }
+  | { type: 'library/list-savable-tabs' }
+  | { type: 'library/save-all-tabs'; collectionId: string | null }
+  | { type: 'library/pending-permission' }
+  | { type: 'library/complete-pending-image' };
 
 export type LibraryBrokerResponse =
   | { ok: true; kind: 'found'; bookmark: Bookmark | null }
@@ -42,6 +63,10 @@ export type LibraryBrokerResponse =
   | { ok: true; kind: 'tags'; usage: TagUsage[] }
   | { ok: true; kind: 'page-meta'; meta: PageMetaCandidates | null }
   | { ok: true; kind: 'quick-saved'; result: QuickSaveResult }
+  | { ok: true; kind: 'done' }
+  | { ok: true; kind: 'savable-tabs'; tabs: TabItem[]; duplicatesRemoved: number }
+  | { ok: true; kind: 'save-all-summary'; summary: SaveAllSummary }
+  | { ok: true; kind: 'pending-permission'; pending: PendingImageSave | null }
   | BrokerFailure;
 
 export type LibraryResponse = Extract<LibraryBrokerResponse, { ok: true }> | BrokerFailure;

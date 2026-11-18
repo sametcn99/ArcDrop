@@ -62,6 +62,40 @@ export const strings = {
     deleteButton: 'Delete',
     saveButton: 'Save',
     closeButton: 'Close',
+    // Context menus (E4) — labels shown in the browser context menu
+    menus: {
+      page: 'Save to ArcDrop',
+      link: 'Save link to ArcDrop',
+      image: 'Save image to ArcDrop',
+      selection: 'Save selection to ArcDrop',
+    },
+    menuSavedPage: 'Page saved.',
+    menuAlreadySaved: 'Already in your library.',
+    menuSavedLink: 'Link saved.',
+    menuSavedSelectionNew: 'Page saved with your selection.',
+    menuSavedSelectionAppend: 'Selection added to the saved page.',
+    menuSavedImage: 'Image saved.',
+    menuFailedGeneric: 'Could not save — try again from the ArcDrop popup.',
+    // Save all tabs (E4)
+    saveAllTabs: 'Save all tabs',
+    saveAllTabsTitle: 'Save all tabs',
+    saveAllTabsCount: (count: number): string => `${count} savable tab(s) found.`,
+    saveAllTabsDuplicates: (count: number): string => `${count} duplicate tab(s) will be skipped.`,
+    saveAllTabsWarning: 'More than 50 tabs — this can take a while.',
+    saveAllTabsConfirm: 'I understand, save them all',
+    saveAllTabsCollection: 'Target collection',
+    saveAllTabsRun: 'Save all tabs',
+    saveAllTabsRunning: 'Saving tabs…',
+    saveAllTabsDone: (saved: number, skipped: number, failed: number): string =>
+      `Done — ${saved} saved, ${skipped} already in library, ${failed} failed.`,
+    saveAllTabsDuplicatesNote: (count: number): string =>
+      count > 0 ? ` (${count} duplicate tab(s) skipped)` : '',
+    // Image permission flow (E4)
+    permissionBannerTitle: 'Image access needed',
+    permissionBannerBody: (origin: string): string =>
+      `Grant access to ${origin} to finish saving that image.`,
+    permissionGrantButton: 'Grant access',
+    permissionGrantedSavedImage: 'Access granted — image saved.',
     coverCaption: 'Covers are picked automatically by your server from the page metadata.',
     errors: {
       NETWORK_ERROR: 'The server could not be reached. Check the address and your connection.',
