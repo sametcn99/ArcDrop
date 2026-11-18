@@ -21,7 +21,7 @@ jobs:
       run:
         working-directory: cross-platform/src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # System dependencies the Tauri crate needs to compile on Linux
       # (Tauri v2 prerequisites — webkit2gtk-4.1 and friends).
@@ -39,9 +39,14 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      # Reads the pinned version from cross-platform/src-tauri/rust-toolchain.toml
+      # Reads the pinned version from cross-platform/src-tauri/rust-toolchain.toml.
+      # rustfmt/clippy are not part of the default profile for a pinned
+      # toolchain — they must be requested explicitly (first CI run failed
+      # with "'cargo-fmt' is not installed for the toolchain").
       - name: Set up Rust toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
@@ -61,7 +66,7 @@ jobs:
     name: Android debug APK
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
 
@@ -75,18 +80,21 @@ jobs:
         working-directory: cross-platform
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      # ubuntu-latest runners ship the Android SDK (ANDROID_HOME); the NDK is
-      # installed explicitly at a pinned version, mirroring the Tauri docs
-      # guidance of exporting NDK_HOME from the SDK's ndk/ directory.
+      # ubuntu-latest runners ship the Android SDK (ANDROID_HOME) but the
+      # cmdline-tools binaries (sdkmanager) are NOT on PATH — use the full
+      # path (first CI run failed with "sdkmanager: command not found").
+      # The NDK is installed explicitly at a pinned version, mirroring the
+      # Tauri docs guidance of exporting NDK_HOME from the SDK's ndk/ dir.
       - name: Install Android NDK
         run: |
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "ndk;27.2.12479018" > /dev/null
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "ndk;27.2.12479018" > /dev/null
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       # Targets required by the Tauri Android template (aarch64/armv7/i686/x86_64).
@@ -120,7 +128,7 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
 
@@ -165,7 +173,7 @@ jobs:
     runs-on: macos-latest
     if: github.event_name == 'workflow_dispatch'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: oven-sh/setup-bun@v2
 
