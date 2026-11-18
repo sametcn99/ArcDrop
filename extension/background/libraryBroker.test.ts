@@ -599,6 +599,28 @@ describe('libraryBroker', () => {
     expect(vault.settings.lastUsedCollectionId).toBe('c7');
   });
 
+  it('assigns a cover through the server endpoint (E7)', async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const instance = broker({
+      '/bookmarks/b1/cover': (init, url) => {
+        calls.push({ url: url ?? '', body: JSON.parse(String(init?.body)) });
+        return jsonResponse(200, BOOKMARK);
+      },
+    });
+    await writeVault(instance.area, { baseUrl: 'http://localhost:3000' });
+
+    const result = await instance.handleMessage({
+      type: 'library/set-cover',
+      bookmarkId: 'b1',
+      imageUrl: 'https://images.example/pick.png',
+    });
+    expect(result).toMatchObject({ ok: true, kind: 'cover-assigned', bookmark: { id: 'b1' } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('http://localhost:3000/api/v1/bookmarks/b1/cover');
+    expect(calls[0]?.body).toEqual({ imageUrl: 'https://images.example/pick.png' });
+    expect(instance.badgeCalls).toContain('saved');
+  });
+
   it('honors the badgeEnabled=false setting (no badge calls)', async () => {
     const badgeCalls: string[] = [];
     const instance = broker(

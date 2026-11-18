@@ -424,6 +424,26 @@ export type paths = {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/bookmarks/{id}/cover': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Assign a cover image by URL (plan E7)
+     * @description Downloads `imageUrl` through the same SSRF-hardened image pipeline used for enrichment (private-range and redirect-to-private refusals included; non-image content types refused), stores it in the icon cache and assigns the stored ref as the bookmark cover (`coverRef`). Records a `bookmark:update` change event so devices refetch. Refuses unknown/trashed (404) and file-backed (400) bookmarks; a fetch failure returns 400 with the reason. Per-user rate limit: reindex budget (30/min, configurable).
+     */
+    post: operations['setBookmarkCover'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/bookmarks/{id}/highlights': {
     parameters: {
       query?: never;
@@ -2075,6 +2095,13 @@ export type components = {
       lastUsedAt: string | null;
       /** Format: date-time */
       revokedAt: string | null;
+    };
+    SetBookmarkCoverDto: {
+      /**
+       * @description Absolute http(s) URL of the image to download and store as the cover
+       * @example https://example.com/lead-image.png
+       */
+      imageUrl: string;
     };
     SettingsDto: {
       /** @description Maximum response size in bytes for per-item page/PDF archiving (M17, default 70 MiB) */
@@ -6165,6 +6192,180 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['BookmarkCollectionsDto'];
+        };
+      };
+      /** @description Malformed request or DTO validation failure (`application/problem+json`) */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "type": "https://arcdrop.dev/problems/validation-failed",
+           *       "title": "Bad Request",
+           *       "status": 400,
+           *       "code": "VALIDATION_FAILED",
+           *       "detail": "Validation failed",
+           *       "instance": "/api/v1/bookmarks",
+           *       "requestId": "8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b",
+           *       "errors": [
+           *         {
+           *           "field": "url",
+           *           "messages": [
+           *             "url must be a URL address"
+           *           ]
+           *         }
+           *       ]
+           *     }
+           */
+          'application/problem+json': components['schemas']['ProblemDetailsDto'];
+        };
+      };
+      /** @description Missing, expired, or invalid credentials (`application/problem+json`) */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "type": "https://arcdrop.dev/problems/unauthorized",
+           *       "title": "Unauthorized",
+           *       "status": 401,
+           *       "code": "UNAUTHORIZED",
+           *       "detail": "Missing or invalid bearer token",
+           *       "instance": "/api/v1/bookmarks",
+           *       "requestId": "8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b"
+           *     }
+           */
+          'application/problem+json': components['schemas']['ProblemDetailsDto'];
+        };
+      };
+      /** @description Insufficient role or personal access token scope (`application/problem+json`) */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "type": "https://arcdrop.dev/problems/forbidden",
+           *       "title": "Forbidden",
+           *       "status": 403,
+           *       "code": "FORBIDDEN",
+           *       "detail": "Read-only personal access tokens cannot perform mutations",
+           *       "instance": "/api/v1/bookmarks",
+           *       "requestId": "8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b"
+           *     }
+           */
+          'application/problem+json': components['schemas']['ProblemDetailsDto'];
+        };
+      };
+      /** @description Requested resource was not found (`application/problem+json`) */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "type": "https://arcdrop.dev/problems/not-found",
+           *       "title": "Not Found",
+           *       "status": 404,
+           *       "code": "NOT_FOUND",
+           *       "detail": "Resource not found",
+           *       "instance": "/api/v1/bookmarks/00000000-0000-4000-8000-000000000000",
+           *       "requestId": "8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b"
+           *     }
+           */
+          'application/problem+json': components['schemas']['ProblemDetailsDto'];
+        };
+      };
+      /** @description Request payload exceeds configured size limit or monthly upload quota (`application/problem+json`) */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "type": "https://arcdrop.dev/problems/payload-too-large",
+           *       "title": "Payload Too Large",
+           *       "status": 413,
+           *       "code": "PAYLOAD_TOO_LARGE",
+           *       "detail": "JSON request body exceeds the configured size limit",
+           *       "instance": "/api/v1/bookmarks",
+           *       "requestId": "8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b"
+           *     }
+           */
+          'application/problem+json': components['schemas']['ProblemDetailsDto'];
+        };
+      };
+      /** @description Rate limit exceeded (`application/problem+json`) */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "type": "https://arcdrop.dev/problems/too-many-requests",
+           *       "title": "Too Many Requests",
+           *       "status": 429,
+           *       "code": "TOO_MANY_REQUESTS",
+           *       "detail": "Rate limit exceeded — try again shortly",
+           *       "instance": "/api/v1/auth/login",
+           *       "requestId": "8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b"
+           *     }
+           */
+          'application/problem+json': components['schemas']['ProblemDetailsDto'];
+        };
+      };
+      /** @description Unexpected internal server error (`application/problem+json`) */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "type": "https://arcdrop.dev/problems/internal-error",
+           *       "title": "Internal Server Error",
+           *       "status": 500,
+           *       "code": "INTERNAL_ERROR",
+           *       "detail": "An unexpected error occurred.",
+           *       "instance": "/api/v1/bookmarks",
+           *       "requestId": "8c5b6d8d-8e62-4e79-9b34-1c2d3e4f5a6b"
+           *     }
+           */
+          'application/problem+json': components['schemas']['ProblemDetailsDto'];
+        };
+      };
+    };
+  };
+  setBookmarkCover: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SetBookmarkCoverDto'];
+      };
+    };
+    responses: {
+      /** @description The bookmark with the new coverRef */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BookmarkDto'];
         };
       };
       /** @description Malformed request or DTO validation failure (`application/problem+json`) */

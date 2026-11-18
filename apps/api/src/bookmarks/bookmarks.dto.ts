@@ -338,6 +338,23 @@ export class UpdateBookmarkDto {
   reminderAt?: string | null;
 }
 
+/**
+ * `POST /bookmarks/{id}/cover` (plan E7) — the server downloads `imageUrl`
+ * through the SSRF-hardened image pipeline and assigns the stored ref as
+ * the bookmark cover.
+ */
+export class SetBookmarkCoverDto {
+  @ApiProperty({
+    description: 'Absolute http(s) URL of the image to download and store as the cover',
+    maxLength: 2048,
+    example: 'https://example.com/lead-image.png',
+  })
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2048)
+  imageUrl!: string;
+}
+
 export class BulkBookmarksDto {
   @ApiProperty({
     enum: BULK_BOOKMARK_ACTIONS,

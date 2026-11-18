@@ -87,9 +87,8 @@ data in the shots — use the local smoke instance with dummy data.
 - The manifest ships `browser_specific_settings.gecko` with
   `data_collection_permissions: { required: ["none"] }` (required by AMO
   since the data-consent policy).
-- `arcdrop@arcdrop.dev` is the provisional add-on id — change it in
-  `manifest.json` (firefox-prefixed block) before a real AMO listing if a
-  different id is preferred.
+- `arcdrop@arcdrop.dev` is the decided add-on id (kept as-is; update the
+  firefox-prefixed block in `manifest.json` only if the user revisits it).
 - AMO builds are unsigned zips; self-distribution works via "Install
   Add-on From File" on Firefox Developer/Nightly Edition (where
   `xpinstall.signatures.required` can be turned off), or via the store

@@ -158,8 +158,9 @@ the image's origin. Full listing notes live in [`STORE.md`](STORE.md).
 ## Future work
 
 - `chrome.storage.sync` for preferences across devices.
-- Server-side cover assignment + an extension cover picker (needs an API
-  surface decision — see the plan's E7 backlog note).
+- Cover picker parity in the web app (the API surface
+  `POST /bookmarks/{id}/cover` + the extension picker shipped with plan E7;
+  the web BookmarkDetail UI is stream 1's territory).
 - Site-internal highlight overlay (Raindrop's in-page marking).
 - Safari target; signed Firefox build; Chrome Web Store / AMO submission.
 

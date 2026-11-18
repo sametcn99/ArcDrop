@@ -90,6 +90,11 @@ export function EditorView({ baseUrl, onDisconnected, onSessionExpired }: Editor
   const [saveAllOpen, setSaveAllOpen] = useState(false);
   const [permissionOrigin, setPermissionOrigin] = useState<string | null>(null);
   const [permissionBusy, setPermissionBusy] = useState(false);
+  // E7 cover picker: og:image + page images collected at load; a picked URL
+  // is assigned through the server (create → right after the save).
+  const [pageImages, setPageImages] = useState<string[]>([]);
+  const [pickedCoverUrl, setPickedCoverUrl] = useState<string | null>(null);
+  const [coverBusy, setCoverBusy] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -220,11 +225,41 @@ export function EditorView({ baseUrl, onDisconnected, onSessionExpired }: Editor
       } else if (meta !== null && meta.ogDescription !== null) {
         setDraft((current) => ({ ...current, excerpt: meta.ogDescription ?? '' }));
       }
+      if (meta !== null) {
+        const candidates = meta.ogImage ? [meta.ogImage, ...meta.images] : meta.images;
+        setPageImages(candidates.slice(0, 8));
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, [onSessionExpired]);
+
+  /**
+   * E7 cover picker: asks the server to download + store the picked image
+   * as the bookmark cover. On create-mode (no bookmark yet) the pick is
+   * remembered and assigned right after the save lands.
+   */
+  const assignCover = (bookmarkId: string, imageUrl: string): void => {
+    setCoverBusy(true);
+    void sendLibraryMessage({ type: 'library/set-cover', bookmarkId, imageUrl })
+      .then((response) => {
+        if (!response.ok) {
+          setStatus({ kind: 'error', text: errorString(response.code) });
+          return;
+        }
+        if (response.kind === 'cover-assigned') {
+          setCoverRef(response.bookmark.coverRef);
+          setStatus({ kind: 'success', text: strings.popup.coverAssigned });
+        }
+      })
+      .catch(() => {
+        setStatus({ kind: 'error', text: errorString('NETWORK_ERROR') });
+      })
+      .finally(() => {
+        setCoverBusy(false);
+      });
+  };
 
   const save = (): void => {
     if (busy || !tab) {
@@ -254,6 +289,10 @@ export function EditorView({ baseUrl, onDisconnected, onSessionExpired }: Editor
           kind: 'success',
           text: existingId === null ? strings.popup.savedNew : strings.popup.savedUpdate,
         });
+        // A cover picked before the first save is assigned right after it.
+        if (pickedCoverUrl !== null && bookmark.coverRef === null) {
+          assignCover(bookmark.id, pickedCoverUrl);
+        }
       })
       .catch(() => {
         setStatus({ kind: 'error', text: errorString('NETWORK_ERROR') });
@@ -474,6 +513,55 @@ export function EditorView({ baseUrl, onDisconnected, onSessionExpired }: Editor
           alt=""
           sx={{ width: '100%', height: 96, objectFit: 'cover', borderRadius: 2 }}
         />
+      ) : null}
+
+      {pageImages.length > 0 ? (
+        <Stack spacing={0.5}>
+          <Typography variant="caption" color="text.secondary">
+            {strings.popup.coverPickHint}
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ overflowX: 'auto', pb: 0.5 }}>
+            {pageImages.map((imageUrl) => {
+              const isPicked = pickedCoverUrl === imageUrl;
+              return (
+                <Tooltip key={imageUrl} title={strings.popup.coverPickHint}>
+                  <Box
+                    component="img"
+                    src={imageUrl}
+                    alt=""
+                    onClick={
+                      coverBusy || busy
+                        ? undefined
+                        : () => {
+                            if (existingId !== null) {
+                              assignCover(existingId, imageUrl);
+                            } else {
+                              setPickedCoverUrl(imageUrl);
+                            }
+                          }
+                    }
+                    sx={{
+                      width: 64,
+                      height: 48,
+                      objectFit: 'cover',
+                      borderRadius: 1,
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      outline: isPicked ? 2 : 0,
+                      outlineColor: 'primary.main',
+                      opacity: coverBusy || busy ? 0.5 : 1,
+                    }}
+                  />
+                </Tooltip>
+              );
+            })}
+          </Stack>
+          {pickedCoverUrl !== null && existingId === null ? (
+            <Typography variant="caption" color="text.secondary">
+              {strings.popup.coverPendingHint}
+            </Typography>
+          ) : null}
+        </Stack>
       ) : null}
 
       <Box

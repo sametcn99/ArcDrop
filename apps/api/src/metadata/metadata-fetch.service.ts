@@ -144,6 +144,44 @@ export class MetadataFetchService {
   }
 
   /**
+   * `POST /bookmarks/{id}/cover` (plan E7): downloads `imageUrl` through the
+   * same SSRF-hardened image pipeline the enrichment uses (private-range
+   * refusals and non-image content types included), stores it in the icon
+   * cache, and assigns the stored ref as the bookmark cover. Synchronous —
+   * returns the stored coverRef; a `bookmark:update` change event is
+   * recorded so devices refetch. Same refusal rules as reindex:
+   * unknown/trashed → NotFound, file-backed → BadRequest.
+   */
+  async assignCoverFromUrl(userId: string, bookmarkId: string, imageUrl: string): Promise<string> {
+    const row = await this.bookmarks.findOneBy({ id: bookmarkId, userId });
+    if (!row) throw new NotFoundException('Bookmark not found');
+    if (row.deletedAt) {
+      throw new NotFoundException('Bookmark not found among the active bookmarks');
+    }
+    if (row.storageKind === 'file') {
+      throw new BadRequestException('File-backed bookmarks cannot receive a cover from a URL');
+    }
+    if (!this.config.metadataEnabled) {
+      throw new BadRequestException('Metadata fetching is disabled on this instance');
+    }
+
+    let image;
+    try {
+      image = await this.fetcher.fetchImage(imageUrl);
+    } catch (error) {
+      const detail = error instanceof MetadataFetchError ? error.message : 'fetch failed';
+      throw new BadRequestException(`Image could not be fetched: ${detail}`);
+    }
+    const coverRef = await this.icons.store(image.bytes, image.contentType);
+
+    await this.changeLog.transact(async (manager, record) => {
+      await manager.update(Bookmark, { id: bookmarkId, userId }, { coverRef });
+      await record(userId, { entity: 'bookmark', entityId: bookmarkId, action: 'update' });
+    });
+    return coverRef;
+  }
+
+  /**
    * Retries failed archive fetches whose exponential backoff deadline has
    * elapsed (`cache_status = 'failed' AND cache_next_retry_at <= now`).
    * Public so both `ArchiveRetryJob` and deterministic tests can invoke it.
