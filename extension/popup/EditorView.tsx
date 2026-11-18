@@ -22,9 +22,14 @@ import FavoriteIcon from '@mui/icons-material/Favorite';
 import FavoriteBorderIcon from '@mui/icons-material/FavoriteBorder';
 import { useEffect, useMemo, useState } from 'react';
 import { sendAuthMessage } from '../shared/messages';
-import { sendLibraryMessage, type SaveDraft } from '../shared/libraryMessages';
+import {
+  sendLibraryMessage,
+  type LibraryResponse,
+  type SaveDraft,
+} from '../shared/libraryMessages';
 import { errorString, strings } from '../shared/strings';
 import { getActiveTabContext, type TabContext } from '../shared/tabContext';
+import { chromeStorageLocal, readVault } from '../shared/vault';
 import type { Bookmark, TagUsage } from '../shared/api/bookmarks';
 import type { CollectionNode } from '../shared/api/collections';
 import { SaveAllTabsDialog } from './SaveAllTabsDialog';
@@ -32,6 +37,8 @@ import { SaveAllTabsDialog } from './SaveAllTabsDialog';
 export interface EditorViewProps {
   baseUrl: string;
   onDisconnected: () => void;
+  /** Fired when the vault session turns out to be dead (E5 recovery path). */
+  onSessionExpired: () => void;
 }
 
 const NEW_COLLECTION_ID = '__new-collection__';
@@ -58,8 +65,9 @@ function flattenTree(nodes: CollectionNode[], depth = 0): CollectionOption[] {
  * description, tags, collection and favorite — plus quick-save, trash and
  * badge feedback handled by the background library broker.
  */
-export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
+export function EditorView({ baseUrl, onDisconnected, onSessionExpired }: EditorViewProps) {
   const [phase, setPhase] = useState<'loading' | 'unsavable' | 'ready'>('loading');
+  const [offline, setOffline] = useState(false);
   const [tab, setTab] = useState<TabContext | null>(null);
   const [existingId, setExistingId] = useState<string | null>(null);
   const [coverRef, setCoverRef] = useState<string | null>(null);
@@ -145,18 +153,41 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
       setDraft((current) => ({ ...current, url: activeTab.url, title: activeTab.title }));
       setPhase('ready');
 
-      const safe = <T,>(promise: Promise<T>): Promise<T | null> => promise.catch(() => null);
+      // E5 behavior toggle: the automatic "already saved?" lookup can be
+      // turned off in options; collections/tags still load for the editor.
+      const vault = await readVault(chromeStorageLocal()).catch(() => null);
+      if (cancelled) return;
+      const autoQuery = vault?.settings.autoQueryOnOpen ?? true;
+      const offline = !navigator.onLine;
+      setOffline(offline);
 
-      const [found, tree, usage, meta] = await Promise.all([
+      const safe = <T,>(promise: Promise<T>): Promise<T | null> => promise.catch(() => null);
+      const sessionDead = (code: string | undefined): boolean =>
+        code === 'SESSION_EXPIRED' || code === 'UNAUTHORIZED';
+
+      const findResponse = await safe(
+        (async (): Promise<LibraryResponse | null> => {
+          if (!autoQuery || offline) {
+            return null;
+          }
+          return sendLibraryMessage({ type: 'library/find-by-url', url: activeTab.url });
+        })(),
+      );
+      if (cancelled) return;
+      if (findResponse !== null && !findResponse.ok && sessionDead(findResponse.code)) {
+        onSessionExpired();
+        return;
+      }
+
+      const [tree, usage, meta] = await Promise.all([
         safe(
-          sendLibraryMessage({ type: 'library/find-by-url', url: activeTab.url }).then(
-            (response) => (response.ok && response.kind === 'found' ? response.bookmark : null),
-          ),
-        ),
-        safe(
-          sendLibraryMessage({ type: 'library/collections' }).then((response) =>
-            response.ok && response.kind === 'collections' ? response.nodes : null,
-          ),
+          sendLibraryMessage({ type: 'library/collections' }).then((response) => {
+            if (response.ok && response.kind === 'collections') return response.nodes;
+            if (!response.ok && sessionDead(response.code)) {
+              onSessionExpired();
+            }
+            return null;
+          }),
         ),
         safe(
           sendLibraryMessage({ type: 'library/tags' }).then((response) =>
@@ -174,6 +205,8 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
       setOptions(tree === null ? [] : flattenTree(tree));
       setTagUsage(usage ?? []);
 
+      const found =
+        findResponse?.ok && findResponse.kind === 'found' ? findResponse.bookmark : null;
       if (found) {
         setExistingId(found.id);
         setCoverRef(found.coverRef);
@@ -191,7 +224,7 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onSessionExpired]);
 
   const save = (): void => {
     if (busy || !tab) {
@@ -400,7 +433,8 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
           </IconButton>
         </Tooltip>
         <IconButton
-          aria-label={strings.appName}
+          aria-label={strings.popup.favoriteToggle}
+          title={strings.popup.favoriteToggle}
           onClick={() => setDraft((current) => ({ ...current, favorite: !current.favorite }))}
           disabled={busy}
           size="small"
@@ -409,6 +443,7 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
         </IconButton>
       </Stack>
 
+      {offline ? <Alert severity="warning">{strings.popup.offlineWarning}</Alert> : null}
       {status !== null ? (
         <Alert severity={status.kind === 'error' ? 'error' : 'success'}>{status.text}</Alert>
       ) : null}

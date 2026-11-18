@@ -48,8 +48,8 @@ own `bun.lock`, so the root install never touches extension dependencies.
 extension/
 ├─ manifest.json      # MV3 manifest; TS/TSX entry paths (Extension.js compiles them)
 ├─ popup/             # popup entry: save editor (E2) + connection/auth state machine (E1)
-├─ options/           # options page entry (placeholder until E5)
-├─ background/        # MV3 service worker: auth broker (E1), library broker (E2)
+├─ options/           # full options page (E5): connection, quick-save, behavior, appearance
+├─ background/        # MV3 service worker: auth broker (E1), library broker (E2/E4)
 ├─ embed-src/         # storage-bridge bootstrap for the embedded app page (E3, committed source)
 ├─ embed/             # assembled embedded app (gitignored; web dist + bridge, made by prebuild)
 ├─ scripts/           # generate-api + embed build/postbuild steps
@@ -99,9 +99,12 @@ extension:
 ```bash
 bun run test             # unit tests (bun test) — vault, brokers, fetch layer, URLs
 bun run generate:api     # regenerate shared/api-types.gen.ts from a RUNNING API
+bun run generate:theme   # regenerate shared/theme-palettes.gen.ts (web palette sync)
 bun run smoke:auth       # live auth smoke against a running API (env-documented in the script)
 bun run smoke:bookmarks  # live E2 bookmark flow smoke (create/find/update/tags/trash)
 bun run smoke:totp       # live 2FA login flow smoke (creates a disposable user; needs an admin)
+bun run smoke:bridge     # live E3 storage-bridge contract smoke
+bun run smoke:e4         # live E4 flow smoke (image upload, selection append, bulk)
 ```
 
 `generate:api` lives in `extension/scripts/`; the live smoke scripts live in

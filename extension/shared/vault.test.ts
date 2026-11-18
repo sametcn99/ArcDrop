@@ -72,6 +72,11 @@ describe('vault', () => {
     expect(vault.settings).toEqual({
       quickSaveTarget: 'unsorted',
       lastUsedCollectionId: null,
+      quickSaveCollectionId: null,
+      autoQueryOnOpen: true,
+      badgeEnabled: true,
+      themeMode: 'system',
+      themePaletteId: null,
     });
     expect(vault.baseUrl).toBeNull();
   });
@@ -106,7 +111,6 @@ describe('vault', () => {
     expect(cleared.refreshToken).toBeNull();
     expect(cleared.user).toBeNull();
   });
-
   it('subscribes to vault-key changes in the local area only', () => {
     const onChanged = fakeOnChanged();
     const seen: VaultState[] = [];

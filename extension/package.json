@@ -14,6 +14,7 @@
     "format:check": "prettier --check .",
     "test": "bun test",
     "generate:api": "bun run scripts/generate-api.ts",
+    "generate:theme": "bun run scripts/generate-theme.ts",
     "smoke:auth": "bun run ../dev-scripts/smoke-auth.ts",
     "smoke:bookmarks": "bun run ../dev-scripts/smoke-bookmarks.ts",
     "smoke:totp": "bun run ../dev-scripts/smoke-totp.ts",

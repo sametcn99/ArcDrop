@@ -100,6 +100,16 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
   const { area } = deps;
   const fetchImpl = deps.fetchImpl ?? fetch;
   const badge: BadgeManager = deps.badge ?? createBadgeManager(chromeBadgeWriter());
+  // E5 toggle: the options "Show badge feedback" switch (vault consult).
+  const showBadgeFor = (
+    vault: { settings: { badgeEnabled: boolean } } | null,
+    state: Parameters<BadgeManager['show']>[0],
+    tabId?: number,
+  ): void => {
+    if (vault?.settings.badgeEnabled !== false) {
+      badge.show(state, tabId);
+    }
+  };
   const tabs: TabsLike = deps.tabs ?? chromeTabs();
   const scripting: ScriptingLike = deps.scripting ?? chromeScripting();
 
@@ -135,7 +145,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
       throw new Error('The current page cannot be saved.');
     }
 
-    badge.show('saving', tab.tabId);
+    showBadgeFor(vault, 'saving', tab.tabId);
     try {
       const accessToken = await deps.getAccessToken();
       const result = await quickSave({
@@ -150,10 +160,10 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
           });
         },
       });
-      badge.show('saved', tab.tabId);
+      showBadgeFor(vault, 'saved', tab.tabId);
       return result;
     } catch (error) {
-      badge.show('failed', tab.tabId);
+      showBadgeFor(vault, 'failed', tab.tabId);
       throw error;
     }
   }
@@ -173,7 +183,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
       throw new Error('Not connected to a server yet.');
     }
     const { unique, duplicatesRemoved } = await listSavableTabs();
-    badge.show('saving');
+    showBadgeFor(vault, 'saving');
 
     const accessToken = await deps.getAccessToken();
     const auth = { accessToken, fetchImpl };
@@ -281,7 +291,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
               savedAt: Date.now(),
             } satisfies PendingImageSave,
           });
-          badge.show('failed');
+          showBadgeFor(vault, 'failed');
           return failure(
             'HOST_PERMISSION_REQUIRED',
             `Grant access to ${origin} from the ArcDrop popup to save this image.`,
@@ -291,7 +301,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
       }
     }
 
-    badge.show('saving');
+    showBadgeFor(vault, 'saving');
     try {
       const accessToken = await deps.getAccessToken();
       const response = await fetchImpl(srcUrl);
@@ -302,7 +312,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
         (response.headers.get('content-type') ?? 'image/png').split(';')[0]?.trim() ?? 'image/png';
       if (mime === 'image/svg+xml') {
         // The API refuses scripted formats (file-types.ts).
-        badge.show('failed');
+        showBadgeFor(vault, 'failed');
         return failure('UNSUPPORTED_IMAGE', 'SVG images cannot be saved as files.');
       }
       const blob = await response.blob();
@@ -313,10 +323,10 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
         { title: pageTitle?.slice(0, MAX_TITLE) },
         { accessToken, fetchImpl },
       );
-      badge.show('saved');
+      showBadgeFor(vault, 'saved');
       return { ok: true, kind: 'saved', bookmark };
     } catch (error) {
-      badge.show('failed');
+      showBadgeFor(vault, 'failed');
       throw error;
     }
   }
@@ -336,7 +346,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
     }
     const accessToken = await deps.getAccessToken();
     const auth = { accessToken, fetchImpl };
-    badge.show('saving');
+    showBadgeFor(vault, 'saving');
 
     const existing = await bookmarksApi.findBookmarkByUrl(vault.baseUrl, pageUrlValue, auth);
     if (existing) {
@@ -345,7 +355,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
       if (changed) {
         await bookmarksApi.updateBookmark(vault.baseUrl, existing.id, { excerpt }, auth);
       }
-      badge.show('saved');
+      showBadgeFor(vault, 'saved');
       return { ok: true, kind: 'done' };
     }
 
@@ -359,7 +369,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
       },
       auth,
     );
-    badge.show('saved');
+    showBadgeFor(vault, 'saved');
     return { ok: true, kind: 'done' };
   }
 
@@ -373,11 +383,11 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
     }
     const accessToken = await deps.getAccessToken();
     const auth = { accessToken, fetchImpl };
-    badge.show('saving');
+    showBadgeFor(vault, 'saving');
 
     const existing = await bookmarksApi.findBookmarkByUrl(vault.baseUrl, linkUrl, auth);
     if (existing) {
-      badge.show('saved');
+      showBadgeFor(vault, 'saved');
       return { ok: true, kind: 'done' };
     }
     await bookmarksApi.createBookmark(
@@ -385,7 +395,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
       { url: linkUrl, title: deriveLinkTitle(linkUrl, title).slice(0, MAX_TITLE), favorite: false },
       auth,
     );
-    badge.show('saved');
+    showBadgeFor(vault, 'saved');
     return { ok: true, kind: 'done' };
   }
 
@@ -437,7 +447,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
         const draft = normalizeDraft(body['draft'] as SaveDraft);
         const existingId = typeof body['existingId'] === 'string' ? body['existingId'] : null;
         const collectionTouched = body['collectionTouched'] === true;
-        badge.show('saving');
+        showBadgeFor(vault, 'saving');
 
         let bookmark;
         if (existingId) {
@@ -484,7 +494,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
             },
           });
         }
-        badge.show('saved');
+        showBadgeFor(vault, 'saved');
         return { ok: true, kind: 'saved', bookmark };
       }
       case 'library/trash': {
@@ -493,7 +503,7 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
           return failure('VALIDATION', 'Missing bookmark id.');
         }
         await bookmarksApi.trashBookmark(vault.baseUrl, id, auth);
-        badge.show('saved');
+        showBadgeFor(vault, 'saved');
         return { ok: true, kind: 'trashed' };
       }
       case 'library/collections': {
@@ -598,8 +608,9 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
     // ApiErrors become failure responses carrying the problem details (same
     // shape as the auth broker); anything else surfaces as BROKER_CRASH.
     handleMessage: (message: unknown): Promise<LibraryBrokerResponse> =>
-      handleMessageInner(message).catch((error: unknown) => {
-        badge.show('failed');
+      handleMessageInner(message).catch(async (error: unknown) => {
+        const vault = await readVault(area).catch(() => null);
+        showBadgeFor(vault, 'failed');
         if (isApiError(error)) {
           return {
             ok: false,
