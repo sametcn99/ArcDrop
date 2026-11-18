@@ -249,7 +249,7 @@ export class McpService implements OnModuleDestroy {
       // callers cannot bypass import, reindex, or bulk caps.
       if (name === 'importData') {
         this.rateLimiter.assertWithinLimit('import', principal.id);
-      } else if (name === 'reindexBookmark') {
+      } else if (name === 'reindexBookmark' || name === 'setBookmarkCover') {
         this.rateLimiter.assertWithinLimit('reindex', principal.id);
       } else if (
         name === 'bulkBookmarks' ||
