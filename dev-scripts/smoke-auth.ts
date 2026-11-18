@@ -4,8 +4,8 @@
 //   bun --cwd=extension run smoke:auth
 // Requires an existing, non-2FA account on the target instance.
 
-import * as authApi from '../shared/authApi';
-import { deviceLabel } from '../shared/deviceLabel';
+import * as authApi from '../extension/shared/authApi';
+import { deviceLabel } from '../extension/shared/deviceLabel';
 
 const baseUrl = (process.env['ARCDROP__API_URL'] ?? 'http://localhost:3000').replace(/\/+$/, '');
 const email = process.env['ARCDROP__SMOKE_EMAIL'];

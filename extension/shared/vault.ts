@@ -14,6 +14,8 @@ export interface VaultUser {
 export interface VaultSettings {
   /** E2 quick-save destination; options UI arrives in E5. */
   quickSaveTarget: 'last-used' | 'unsorted';
+  /** Last collection the user explicitly saved into (quick-save "last used"). */
+  lastUsedCollectionId: string | null;
 }
 
 /** Schema v1 — additive evolution only; bump `version` when reshaping. */
@@ -32,6 +34,7 @@ export interface VaultState {
 
 export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
   quickSaveTarget: 'last-used',
+  lastUsedCollectionId: null,
 };
 
 export const DEFAULT_VAULT: VaultState = {
@@ -89,10 +92,11 @@ export async function readVault(area: StorageLike): Promise<VaultState> {
 }
 
 /** Read-modify-write patch. The background broker is the designated writer. */
-export async function writeVault(
-  area: StorageLike,
-  patch: Partial<VaultState>,
-): Promise<VaultState> {
+export type VaultPatch = Partial<Omit<VaultState, 'settings'>> & {
+  settings?: Partial<VaultSettings>;
+};
+
+export async function writeVault(area: StorageLike, patch: VaultPatch): Promise<VaultState> {
   const current = await readVault(area);
   const next: VaultState = {
     ...current,

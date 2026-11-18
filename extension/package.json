@@ -13,11 +13,14 @@
     "format:check": "prettier --check .",
     "test": "bun test",
     "generate:api": "bun run scripts/generate-api.ts",
-    "smoke:auth": "bun run scripts/smoke-auth.ts"
+    "smoke:auth": "bun run ../dev-scripts/smoke-auth.ts",
+    "smoke:bookmarks": "bun run ../dev-scripts/smoke-bookmarks.ts",
+    "smoke:totp": "bun run ../dev-scripts/smoke-totp.ts"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^9.5.0",
     "@mui/material": "^9.5.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
