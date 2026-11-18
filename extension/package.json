@@ -1,20 +1,24 @@
 {
   "name": "arcdrop-extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "ArcDrop browser extension — popup, options and background for the self-hosted ArcDrop bookmark platform.",
   "type": "module",
   "scripts": {
     "dev": "extension dev",
-    "prebuild": "bun run scripts/build-embed.ts",
+    "prebuild": "bun run scripts/generate-icons.ts && bun run scripts/build-embed.ts",
     "build": "extension build --browser=chromium,firefox && bun run scripts/postbuild-embed.ts",
+    "build:release": "bun run build && bun run scripts/zip-release.ts",
+    "verify:release": "bun run scripts/verify-release.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "bun test",
+    "bump": "bun run scripts/bump-version.ts --",
     "generate:api": "bun run scripts/generate-api.ts",
     "generate:theme": "bun run scripts/generate-theme.ts",
+    "generate:icons": "bun run scripts/generate-icons.ts",
     "smoke:auth": "bun run ../dev-scripts/smoke-auth.ts",
     "smoke:bookmarks": "bun run ../dev-scripts/smoke-bookmarks.ts",
     "smoke:totp": "bun run ../dev-scripts/smoke-totp.ts",
@@ -31,7 +35,10 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/bun": "^1.2.0",
     "@types/chrome": "^0.3.7",
+    "@types/node": "^22.13.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.20.0",
@@ -40,11 +47,10 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "extension": "^4.1.41",
+    "fflate": "^0.8.3",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.5.0",
     "typescript": "~5.7.3",
-    "typescript-eslint": "^8.24.0",
-    "@types/bun": "^1.2.0",
-    "@types/node": "^22.13.0",
-    "openapi-typescript": "^7.13.0"
+    "typescript-eslint": "^8.24.0"
   }
 }

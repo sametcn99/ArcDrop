@@ -112,6 +112,49 @@ bun run smoke:e4         # live E4 flow smoke (image upload, selection append, b
 bundles them). All of them need a live ArcDrop API (`docker compose up -d`
 at the repo root works); none are run by CI.
 
+## Release & installation
+
+**From a release zip** (recommended):
+
+1. Download `arcdrop-extension-chromium.zip` (or `-firefox.zip`) from the
+   GitHub Releases page.
+2. Chrome/Edge: unzip → `chrome://extensions` → Developer mode → **Load
+   unpacked** → select the unzipped folder. Firefox: `about:debugging` →
+   **Load Temporary Add-on…** → the zip's `manifest.json`.
+3. Open the popup, connect your server, sign in — done.
+
+**From source**: `bun install && bun run build` inside `extension/`, then
+load `dist/chromium` unpacked as above. `bun run build:release` produces the
+store-ready zips (`dist/arcdrop-extension-*.zip`, verified by
+`bun run verify:release`).
+
+## Privacy
+
+The extension exchanges data exclusively with the ArcDrop server you
+configure during setup — **no analytics, no telemetry, no third-party
+requests**. Session tokens and preferences live in `chrome.storage.local`
+in your browser profile. Page content is only read when you invoke a save
+(action/shortcut/context menu), and image saves request one-time access to
+the image's origin. Full listing notes live in [`STORE.md`](STORE.md).
+
+## Permissions
+
+| Permission                  | Why                                                                                                |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| `storage`                   | Local server address, session and preference storage.                                              |
+| `activeTab`                 | Reads the active page's URL/title only when you invoke the extension.                              |
+| `contextMenus`              | Right-click "Save to ArcDrop" entries.                                                             |
+| `scripting`                 | Injects the metadata collector on explicit save actions (activeTab-gated).                         |
+| `optional_host_permissions` | Runtime access **only** to your server origin (setup) and, one-time, an image origin (image save). |
+
+## Future work
+
+- `chrome.storage.sync` for preferences across devices.
+- Server-side cover assignment + an extension cover picker (needs an API
+  surface decision — see the plan's E7 backlog note).
+- Site-internal highlight overlay (Raindrop's in-page marking).
+- Safari target; signed Firefox build; Chrome Web Store / AMO submission.
+
 ## Notes
 
 - Permissions `storage`, `activeTab`, `contextMenus`, `scripting` are declared
