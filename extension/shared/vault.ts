@@ -16,12 +16,34 @@ export interface VaultUser {
   createdAt: string;
 }
 
+export type ThemeModeSetting = 'light' | 'dark' | 'system';
+
 export interface VaultSettings {
-  /** E2 quick-save destination; options UI arrives in E5. */
-  quickSaveTarget: 'last-used' | 'unsorted';
+  /** Quick-save destination (E5 options UI): last-used / pinned collection / unsorted. */
+  quickSaveTarget: 'last-used' | 'collection' | 'unsorted';
   /** Last collection the user explicitly saved into (quick-save "last used"). */
   lastUsedCollectionId: string | null;
+  /** The pinned collection when quickSaveTarget === 'collection'. */
+  quickSaveCollectionId: string | null;
+  /** Popup opens with an automatic "already saved?" lookup (E5 toggle). */
+  autoQueryOnOpen: boolean;
+  /** Badge feedback on saves (E5 toggle; the background consults it). */
+  badgeEnabled: boolean;
+  /** Popup/options theme; 'system' follows prefers-color-scheme. */
+  themeMode: ThemeModeSetting;
+  /** Selected Material You palette id (shared with the embedded app page). */
+  themePaletteId: string | null;
 }
+
+export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
+  quickSaveTarget: 'last-used',
+  lastUsedCollectionId: null,
+  quickSaveCollectionId: null,
+  autoQueryOnOpen: true,
+  badgeEnabled: true,
+  themeMode: 'system',
+  themePaletteId: null,
+};
 
 /** Schema v1 — additive evolution only; bump `version` when reshaping. */
 export interface VaultState {
@@ -36,11 +58,6 @@ export interface VaultState {
   user: VaultUser | null;
   settings: VaultSettings;
 }
-
-export const DEFAULT_VAULT_SETTINGS: VaultSettings = {
-  quickSaveTarget: 'last-used',
-  lastUsedCollectionId: null,
-};
 
 export const DEFAULT_VAULT: VaultState = {
   version: 1,
@@ -170,4 +187,9 @@ export function subscribeVault(
   return () => {
     onChanged.removeListener(listener);
   };
+}
+
+/** The real chrome.storage.local as a StorageLike (extension page contexts). */
+export function chromeStorageLocal(): StorageLike {
+  return chrome.storage.local;
 }

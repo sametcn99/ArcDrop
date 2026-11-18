@@ -598,4 +598,28 @@ describe('libraryBroker', () => {
     const vault = await readVault(instance.area);
     expect(vault.settings.lastUsedCollectionId).toBe('c7');
   });
+
+  it('honors the badgeEnabled=false setting (no badge calls)', async () => {
+    const badgeCalls: string[] = [];
+    const instance = broker(
+      {
+        '/bookmarks?search=': () => jsonResponse(200, { items: [] }),
+        '/bookmarks': () => jsonResponse(201, BOOKMARK),
+      },
+      {
+        badge: {
+          show: (state: string) => badgeCalls.push(state),
+          clear: () => badgeCalls.push('cleared'),
+        } as unknown as BadgeManager,
+      },
+    );
+    await writeVault(instance.area, {
+      baseUrl: 'http://localhost:3000',
+      settings: { quickSaveTarget: 'unsorted', badgeEnabled: false },
+    });
+
+    const result = await instance.handleMessage({ type: 'library/quick-save' });
+    expect(result).toMatchObject({ ok: true, kind: 'quick-saved' });
+    expect(badgeCalls).toHaveLength(0);
+  });
 });

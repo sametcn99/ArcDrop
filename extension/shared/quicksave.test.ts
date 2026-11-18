@@ -119,6 +119,30 @@ describe('quickSave', () => {
     expect(calls).toHaveLength(1);
   });
 
+  it('targets the pinned collection when quickSaveTarget is "collection"', async () => {
+    const { calls, fetchImpl } = fetchWith([
+      {
+        match: (url) => url.includes('/bookmarks?search='),
+        respond: () => jsonResponse(200, { items: [] }),
+      },
+      {
+        match: (url) => url.includes('/bookmarks'),
+        respond: () => jsonResponse(201, { id: 'b1' }),
+      },
+    ]);
+    await quickSave(
+      deps({
+        fetchImpl,
+        settings: {
+          quickSaveTarget: 'collection',
+          lastUsedCollectionId: 'c-last-used',
+          quickSaveCollectionId: 'c-pinned',
+        },
+      }),
+    );
+    expect(calls[1]?.url).toBe('http://localhost:3000/api/v1/bookmarks?collection=c-pinned');
+  });
+
   it('notifies onSavedToCollection when a collection was used', async () => {
     const env = fetchWith([
       {

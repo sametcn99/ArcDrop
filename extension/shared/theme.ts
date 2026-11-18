@@ -1,74 +1,53 @@
-// Extension theme: MUI theme built from the default Material You "violet"
-// scheme of the web app (apps/web/app/src/theme/palettes/materialYou.ts).
-//
-// SYNC NOTE: the extension installs its own dependencies outside the root
-// workspace, so the seed scheme below is mirrored BY HAND from
-// materialYou.ts (violet, light + dark). When the web palette changes,
-// update these hex values to match. E5 can extend this to the full palette
-// selection; E1 only needs the default look, light + dark.
+// Extension theme: MUI themes built from the Material You palette registry
+// shared with the web app. The palette DATA is generated from
+// apps/web/app/src/theme/palettes/materialYou.ts into theme-palettes.gen.ts
+// (`bun --cwd=extension run generate:theme` — same committed-artifact
+// pattern as api-types.gen.ts), so the selector here always matches the web
+// app's palette list without hand-copied hex values.
 
 import { createTheme, type Theme } from '@mui/material/styles';
+import {
+  DEFAULT_PALETTE_ID,
+  PALETTES,
+  SEMANTIC_TONES,
+  type PaletteDefinition,
+} from './theme-palettes.gen';
 
 export type ThemeMode = 'light' | 'dark';
+export type ThemeModeSetting = 'light' | 'dark' | 'system';
 
-/** MaterialYouScheme subset the extension consumes (mirrors materialYou.ts). */
-interface MirroredScheme {
-  primary: string;
-  onPrimary: string;
-  secondary: string;
-  onSecondary: string;
-  background: string;
-  surface: string;
-  onSurface: string;
-  onSurfaceVariant: string;
-  outlineVariant: string;
+export { DEFAULT_PALETTE_ID };
+export type { PaletteDefinition };
+
+/** The palettes offered by the options selector (web-app parity). */
+export function listPalettes(): readonly PaletteDefinition[] {
+  return PALETTES;
 }
 
-// Violet scheme — mirrored from apps/web/app/src/theme/palettes/materialYou.ts.
-const VIOLET: Record<ThemeMode, MirroredScheme> = {
-  light: {
-    primary: '#6750A4',
-    onPrimary: '#FFFFFF',
-    secondary: '#625B71',
-    onSecondary: '#FFFFFF',
-    background: '#F7F2FA',
-    surface: '#FFFFFF',
-    onSurface: '#1D1B20',
-    onSurfaceVariant: '#49454F',
-    outlineVariant: '#CAC4D0',
-  },
-  dark: {
-    primary: '#D0BCFF',
-    onPrimary: '#381E72',
-    secondary: '#CCC2DC',
-    onSecondary: '#332D41',
-    background: '#141218',
-    surface: '#1D1B20',
-    onSurface: '#E6E1E5',
-    onSurfaceVariant: '#CAC4D0',
-    outlineVariant: '#49454F',
-  },
-};
+/** Falls back to the default palette for unknown/stale ids. */
+export function resolvePaletteId(paletteId: string | null | undefined): string {
+  if (paletteId !== null && paletteId !== undefined && paletteId !== '') {
+    const found = PALETTES.find((palette) => palette.id === paletteId);
+    if (found) return found.id;
+  }
+  return DEFAULT_PALETTE_ID;
+}
 
-// M3 semantic tones — mirrored from MATERIAL_YOU_SEMANTIC in materialYou.ts.
-const SEMANTIC: Record<
-  ThemeMode,
-  { error: string; warning: string; info: string; success: string }
-> = {
-  light: { error: '#B3261E', warning: '#8A5300', info: '#00639B', success: '#146C2E' },
-  dark: { error: '#F2B8B5', warning: '#FFC46E', info: '#9ECAFF', success: '#6DD58C' },
-};
-
-export function resolveThemeMode(): ThemeMode {
+/** 'system' resolves through prefers-color-scheme at render time. */
+export function resolveThemeMode(mode: ThemeModeSetting): ThemeMode {
+  if (mode === 'light' || mode === 'dark') {
+    return mode;
+  }
   if (typeof window === 'undefined' || window.matchMedia === undefined) {
     return 'light';
   }
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-export function getAppTheme(mode: ThemeMode): Theme {
-  const scheme = VIOLET[mode];
-  const semantic = SEMANTIC[mode];
+export function getAppTheme(mode: ThemeMode, paletteId?: string | null): Theme {
+  const palette = PALETTES.find((candidate) => candidate.id === resolvePaletteId(paletteId));
+  const scheme = palette ? palette.schemes[mode] : PALETTES[0]!.schemes[mode];
+  const semantic = SEMANTIC_TONES[mode];
   return createTheme({
     palette: {
       mode,

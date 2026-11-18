@@ -1,5 +1,5 @@
 import { Box, CircularProgress, Stack, Typography } from '@mui/material';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { sendAuthMessage } from '../shared/messages';
 import { strings } from '../shared/strings';
 import { EditorView } from './EditorView';
@@ -38,6 +38,12 @@ export function App() {
     };
   }, []);
 
+  const handleSessionExpired = useCallback((): void => {
+    setStep((current) =>
+      current.name === 'connected' ? { name: 'login', baseUrl: current.baseUrl } : current,
+    );
+  }, []);
+
   return (
     <Box sx={{ p: 2, width: 320 }}>
       {step.name === 'loading' ? (
@@ -72,6 +78,7 @@ export function App() {
         <EditorView
           baseUrl={step.baseUrl}
           onDisconnected={() => setStep({ name: 'setup', baseUrl: step.baseUrl })}
+          onSessionExpired={handleSessionExpired}
         />
       )}
     </Box>

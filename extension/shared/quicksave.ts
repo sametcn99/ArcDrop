@@ -31,7 +31,11 @@ export async function quickSave(deps: QuickSaveDeps): Promise<QuickSaveResult> {
   }
 
   const collectionId =
-    deps.settings.quickSaveTarget === 'last-used' ? deps.settings.lastUsedCollectionId : null;
+    deps.settings.quickSaveTarget === 'last-used'
+      ? deps.settings.lastUsedCollectionId
+      : deps.settings.quickSaveTarget === 'collection'
+        ? deps.settings.quickSaveCollectionId
+        : null;
 
   const bookmark = await createBookmark(
     deps.baseUrl,

@@ -22,6 +22,8 @@
   var VAULT_KEY = 'vault';
   var BASE_KEY = 'arcdrop.baseUrl';
   var REFRESH_KEY = 'arcdrop.refreshToken';
+  var THEME_KEY = 'arcdrop.theme';
+  var PALETTE_KEY = 'arcdrop.palette';
 
   var appConfig = { scripts: [], styles: [] };
   try {
@@ -46,9 +48,13 @@
     });
   }
 
-  function writeVault(patch) {
+  /** Settings-only patch (theme keys forwarded from the app facade). */
+  function writeVaultSettings(settingsPatch) {
     return readVault().then(function (vault) {
-      var next = Object.assign({}, vault || {}, patch, { version: 1 });
+      var next = Object.assign({}, vault || {}, {
+        settings: Object.assign({}, (vault && vault.settings) || {}, settingsPatch),
+        version: 1,
+      });
       var payload = {};
       payload[VAULT_KEY] = next;
       return chrome.storage.local.set(payload);
@@ -101,6 +107,13 @@
   function hydrateFacade(vault) {
     if (vault && vault.baseUrl) setFacade(BASE_KEY, vault.baseUrl);
     if (vault && vault.refreshToken) setFacade(REFRESH_KEY, vault.refreshToken);
+    if (vault && vault.settings) {
+      // Theme keys shared with the web app's ThemeController: 'system' is an
+      // extension-only value — the facade stays keyless for system mode.
+      var mode = vault.settings.themeMode;
+      setFacade(THEME_KEY, mode === 'light' || mode === 'dark' ? mode : null);
+      setFacade(PALETTE_KEY, vault.settings.themePaletteId || null);
+    }
   }
 
   function mirrorFromVault() {
@@ -111,6 +124,11 @@
       if (!vault) return;
       setFacade(BASE_KEY, vault.baseUrl || null);
       setFacade(REFRESH_KEY, vault.refreshToken || null);
+      if (vault.settings) {
+        var mode = vault.settings.themeMode;
+        setFacade(THEME_KEY, mode === 'light' || mode === 'dark' ? mode : null);
+        setFacade(PALETTE_KEY, vault.settings.themePaletteId || null);
+      }
     });
   }
 
@@ -122,7 +140,7 @@
       if (key === BASE_KEY) {
         var normalized = normalizeBaseUrl(stringValue);
         if (normalized) {
-          void writeVault({ baseUrl: normalized });
+          void writeVaultSettings({ baseUrl: normalized });
         }
       } else if (key === REFRESH_KEY && stringValue.length > 0) {
         // App-initiated login inside the embedded page — adopt the session
@@ -132,6 +150,10 @@
             /* invalid token — the vault keeps its previous session */
           },
         );
+      } else if (key === THEME_KEY && (stringValue === 'light' || stringValue === 'dark')) {
+        void writeVaultSettings({ themeMode: stringValue });
+      } else if (key === PALETTE_KEY && stringValue.length > 0) {
+        void writeVaultSettings({ themePaletteId: stringValue });
       }
     };
     // Deliberately NOT forwarding removeItem/clear: the web app drops its
