@@ -174,6 +174,20 @@ export default tseslint.config(
     },
   },
   {
+    // Node dev-scripts (plain .mjs — no TypeScript): declare the Node globals
+    // they use; typescript-eslint disables no-undef for TS, but these are JS.
+    files: [
+      'cross-platform/scripts/**/*.mjs',
+      'cross-platform/src-tauri/plugins/share-target/patch-android.mjs',
+    ],
+    languageOptions: {
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+      },
+    },
+  },
+  {
     files: [webSrcGlob],
     plugins: {
       react: reactPlugin,

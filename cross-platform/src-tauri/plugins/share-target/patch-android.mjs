@@ -74,16 +74,29 @@ if (manifest.includes('ShareTargetActivityAlias')) {
 // based + idempotent, like the manifest alias.
 const gradlePath = join(genAndroid, 'app', 'build.gradle.kts');
 let gradle = readFileSync(gradlePath, 'utf8');
-if (gradle.includes('arcdropReleaseSigning')) {
+if (gradle.includes('signingConfigs')) {
   console.log('[share-target] gradle release signing already present — skipped');
 } else {
+  const topValBlock = [
+    '// arcdropReleaseSigning (managed by plugins/share-target/patch-android.mjs):',
+    '// nullable by design — when ANDROID_KEYSTORE_FILE is absent (no CI secrets)',
+    '// the release build stays unsigned instead of failing.',
+    'val arcdropKeystoreFile: String? = System.getenv("ANDROID_KEYSTORE_FILE")',
+    '',
+  ].join('\n');
+  const importLine = 'import org.jetbrains.kotlin.gradle.dsl.JvmTarget';
+  if (!gradle.includes(importLine)) {
+    throw new Error('[share-target] build.gradle.kts: import anchor not found');
+  }
+  // Gradle forbids statements before plugins {}, so the val goes after them.
+  gradle = gradle.replace(importLine, `${importLine}\n${topValBlock}\n`);
+
   const signingBlock = [
     '    signingConfigs {',
     '        // arcdropReleaseSigning (managed by plugins/share-target/patch-android.mjs)',
     '        create("release") {',
-    '            val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")',
-    '            if (!keystoreFile.isNullOrBlank()) {',
-    '                storeFile = file(keystoreFile)',
+    '            if (!arcdropKeystoreFile.isNullOrBlank()) {',
+    '                storeFile = file(arcdropKeystoreFile)',
     '                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")',
     '                keyAlias = System.getenv("ANDROID_KEY_ALIAS")',
     '                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")',

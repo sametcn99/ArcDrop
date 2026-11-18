@@ -113,8 +113,8 @@ cross-platform/
   site already holds Notification permission (no prompt, no web UX change).
 - **Files** (plan T4): downloads go through a save dialog + plugin-fs inside
   Tauri (browsers keep the synthetic-anchor download); the upload dialog's
-  "choose file" uses the native picker inside Tauri. Shared FILES (image/*,
-  application/*, …) are copied into the app cache by the share-target plugin
+  "choose file" uses the native picker inside Tauri. Shared FILES (image/_,
+  application/_, …) are copied into the app cache by the share-target plugin
   (100 MB cap) and open the upload dialog preselected — read from the cache
   via the `fs:allow-appcache-read-recursive` scope.
 - **Releases** (plan T6): tag pushes `v*` run `release-cross-platform.yml`

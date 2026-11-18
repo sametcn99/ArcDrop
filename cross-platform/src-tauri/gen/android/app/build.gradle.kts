@@ -14,13 +14,17 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// arcdropReleaseSigning (managed by plugins/share-target/patch-android.mjs):
+// nullable by design — when ANDROID_KEYSTORE_FILE is absent (no CI secrets)
+// the release build stays unsigned instead of failing.
+val arcdropKeystoreFile: String? = System.getenv("ANDROID_KEYSTORE_FILE")
+
 android {
     signingConfigs {
         // arcdropReleaseSigning (managed by plugins/share-target/patch-android.mjs)
         create("release") {
-            val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
-            if (!keystoreFile.isNullOrBlank()) {
-                storeFile = file(keystoreFile)
+            if (!arcdropKeystoreFile.isNullOrBlank()) {
+                storeFile = file(arcdropKeystoreFile)
                 storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("ANDROID_KEY_ALIAS")
                 keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
