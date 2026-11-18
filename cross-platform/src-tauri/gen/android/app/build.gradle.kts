@@ -15,6 +15,19 @@ val tauriProperties = Properties().apply {
 }
 
 android {
+    signingConfigs {
+        // arcdropReleaseSigning (managed by plugins/share-target/patch-android.mjs)
+        create("release") {
+            val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")
+            if (!keystoreFile.isNullOrBlank()) {
+                storeFile = file(keystoreFile)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     compileSdk = 37
     namespace = "com.arcdrop.client"
     defaultConfig {
@@ -39,6 +52,10 @@ android {
             }
         }
         getByName("release") {
+            // arcdropReleaseSigning (managed by plugins/share-target/patch-android.mjs)
+            if (!arcdropKeystoreFile.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                enable = true
             }

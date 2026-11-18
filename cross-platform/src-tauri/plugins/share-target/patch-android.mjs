@@ -67,3 +67,50 @@ if (manifest.includes('ShareTargetActivityAlias')) {
   writeFileSync(manifestPath, manifest);
   console.log('[share-target] ACTION_SEND activity-alias injected into AndroidManifest.xml');
 }
+
+// 3) Conditional release signing (plan T6): the gradle release build signs
+// only when ANDROID_KEYSTORE_FILE env is provided (CI secrets); otherwise the
+// artifact stays unsigned and RELEASE.md documents manual signing. Marker
+// based + idempotent, like the manifest alias.
+const gradlePath = join(genAndroid, 'app', 'build.gradle.kts');
+let gradle = readFileSync(gradlePath, 'utf8');
+if (gradle.includes('arcdropReleaseSigning')) {
+  console.log('[share-target] gradle release signing already present — skipped');
+} else {
+  const signingBlock = [
+    '    signingConfigs {',
+    '        // arcdropReleaseSigning (managed by plugins/share-target/patch-android.mjs)',
+    '        create("release") {',
+    '            val keystoreFile = System.getenv("ANDROID_KEYSTORE_FILE")',
+    '            if (!keystoreFile.isNullOrBlank()) {',
+    '                storeFile = file(keystoreFile)',
+    '                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")',
+    '                keyAlias = System.getenv("ANDROID_KEY_ALIAS")',
+    '                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")',
+    '            }',
+    '        }',
+    '    }',
+    '',
+  ].join('\n');
+  const anchor = 'android {';
+  if (!gradle.includes(anchor)) {
+    throw new Error('[share-target] build.gradle.kts: android { block not found');
+  }
+  gradle = gradle.replace(anchor, `${anchor}\n${signingBlock}`);
+  const releaseAnchor = 'getByName("release") {';
+  if (!gradle.includes(releaseAnchor)) {
+    throw new Error('[share-target] build.gradle.kts: release build type not found');
+  }
+  gradle = gradle.replace(
+    releaseAnchor,
+    [
+      'getByName("release") {',
+      '            // arcdropReleaseSigning (managed by plugins/share-target/patch-android.mjs)',
+      '            if (!arcdropKeystoreFile.isNullOrBlank()) {',
+      '                signingConfig = signingConfigs.getByName("release")',
+      '            }',
+    ].join('\n'),
+  );
+  writeFileSync(gradlePath, gradle);
+  console.log('[share-target] conditional release signing injected into build.gradle.kts');
+}

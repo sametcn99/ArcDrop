@@ -1,6 +1,6 @@
 /// Sample bridge command (plan T1): returns the shell's package version so
 /// the web client can verify the invoke channel once it runs inside Tauri
-/// (see apps/web/app/src/platform/native.ts ΓÇö log-level usage only).
+/// (see apps/web/app/src/platform/native.ts — log-level usage only).
 #[tauri::command]
 fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -31,6 +31,11 @@ pub fn run() {
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
             ))
+            // Plan T6: desktop auto-update against GitHub Releases (signature
+            // key in tauri.conf.json; artifacts+latest.json from the release
+            // workflow).
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
     }
 
     builder
@@ -44,7 +49,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![app_version])
         .setup(|app| {
             // On mobile the desktop block below compiles out and `app` would
-            // be an unused closure parameter ΓÇö consume it explicitly there.
+            // be an unused closure parameter — consume it explicitly there.
             #[cfg(mobile)]
             let _ = &app;
 
@@ -62,7 +67,7 @@ pub fn run() {
                 app.deep_link().register("arcdrop")?;
 
                 // System tray (plan T5): show/hide the single window and a
-                // quit entry ΓÇö closing the window hides to tray instead of
+                // quit entry — closing the window hides to tray instead of
                 // exiting, so the app behaves like a desktop resident.
                 let show = MenuItem::with_id(app, "tray-show", "Show ArcDrop", true, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "tray-quit", "Quit ArcDrop", true, None::<&str>)?;
@@ -94,7 +99,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Plan T5: closing the window hides it to the tray; the app only
             // exits through the tray Quit entry (desktop builds only). On
-            // mobile the desktop block compiles out ΓÇö consume the params so
+            // mobile the desktop block compiles out — consume the params so
             // unused_variable lints don't fail the mobile deny-warnings build.
             #[cfg(mobile)]
             let _ = (&window, &event);

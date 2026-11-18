@@ -27,13 +27,22 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["arcdrop"]
+        "schemes": [
+          "arcdrop"
+        ]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUwMjU2NkQzNUJFMTNEMTYKUldRV1BlRmIwMllsNEl0NTM1YjJqWGtuUkRRMkRiY2VYWFVQMFlqVUVnblhYU2xzSWZwbDJONSsK",
+      "endpoints": [
+        "https://github.com/sametcn99/ArcDrop/releases/latest/download/latest.json"
+      ]
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

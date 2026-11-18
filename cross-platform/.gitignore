@@ -3,3 +3,7 @@ src-tauri/target/
 
 # Tauri-generated capability schemas (regenerated on every build)
 src-tauri/gen/schemas/
+
+# Updater signing keys — PRIVATE key must move to GitHub Secrets (see RELEASE.md)
+.updater-keys/arcdrop-updater.key
+.updater-keys/*.key

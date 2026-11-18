@@ -14,6 +14,7 @@
     "android:build:release": "bun node_modules/@tauri-apps/cli/tauri.js android build",
     "ios:init": "bun node_modules/@tauri-apps/cli/tauri.js ios init",
     "ios:build": "bun node_modules/@tauri-apps/cli/tauri.js ios build --target aarch64-sim --debug",
+    "bump": "bun scripts/bump-version.mjs --",
     "icon": "tauri icon ../apps/web/app/public/favicon.svg",
     "rust:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all",
     "rust:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",

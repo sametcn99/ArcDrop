@@ -117,6 +117,14 @@ cross-platform/
   application/*, …) are copied into the app cache by the share-target plugin
   (100 MB cap) and open the upload dialog preselected — read from the cache
   via the `fs:allow-appcache-read-recursive` scope.
+- **Releases** (plan T6): tag pushes `v*` run `release-cross-platform.yml`
+  (desktop bundles + updater artifacts via tauri-action, Android release
+  AAB/APK, draft GitHub Release — publishing is manual). Version bump via
+  `bun run bump -- X.Y.Z` (package.json + tauri.conf.json + Cargo.toml).
+  Signing keys, keystore setup, the publish checklist and the release-notes
+  template live in [RELEASE.md](RELEASE.md); Settings → Desktop has a
+  "Check for updates" flow (desktop builds, signature-verified auto-update
+  from GitHub Releases).
 - **Offline UX** (plan T5): when the configured server is unreachable at
   boot, a dedicated screen offers "Retry connection" (re-runs session
   restore, keeping the persisted refresh token) and "Change server" — no
