@@ -8,7 +8,7 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "build:no-bundle": "tauri build --no-bundle",
-    "android:init": "bun node_modules/@tauri-apps/cli/tauri.js android init",
+    "android:init": "bun node_modules/@tauri-apps/cli/tauri.js android init && bun src-tauri/plugins/share-target/patch-android.mjs",
     "android:dev": "bun node_modules/@tauri-apps/cli/tauri.js android dev",
     "android:build": "bun node_modules/@tauri-apps/cli/tauri.js android build --debug",
     "android:build:release": "bun node_modules/@tauri-apps/cli/tauri.js android build",

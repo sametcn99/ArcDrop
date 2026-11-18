@@ -10,6 +10,7 @@ function fakeAdapter(isTauri: boolean): PlatformAdapter {
     onBackButton: () => () => {},
     share: async () => false,
     resolveDeviceLabel: async () => null,
+    onShareTarget: () => () => {},
   };
 }
 

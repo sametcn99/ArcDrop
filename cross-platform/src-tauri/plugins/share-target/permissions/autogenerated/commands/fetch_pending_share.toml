@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-fetch-pending-share"
+description = "Enables the fetch_pending_share command without any pre-configured scope."
+commands.allow = ["fetch_pending_share"]
+
+[[permission]]
+identifier = "deny-fetch-pending-share"
+description = "Denies the fetch_pending_share command without any pre-configured scope."
+commands.deny = ["fetch_pending_share"]

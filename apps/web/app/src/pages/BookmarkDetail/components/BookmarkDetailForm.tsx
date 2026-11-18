@@ -3,10 +3,12 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined';
 import OpenInNewOutlinedIcon from '@mui/icons-material/OpenInNewOutlined';
 import RestoreFromTrashOutlinedIcon from '@mui/icons-material/RestoreFromTrashOutlined';
+import ShareOutlinedIcon from '@mui/icons-material/ShareOutlined';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
+import IconButton from '@mui/material/IconButton';
 import Paper from '@mui/material/Paper';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
@@ -18,6 +20,7 @@ import type {
   Highlight,
   UpdateHighlightRequest,
 } from '../../../api/schemas/bookmarks';
+import { platform } from '../../../platform';
 import { AuthenticatedFilePreview } from '../../../shared/components/AuthenticatedFilePreview';
 import { BookmarkIconBadge } from '../../../shared/components/BookmarkIconBadge';
 import { CacheStatusChip } from '../../../shared/components/CacheStatusChip';
@@ -29,6 +32,7 @@ import {
   isExtractableTextFileBookmark,
   isImageFileBookmark,
 } from '../../../shared/utils/fileFormat';
+import { useUiStore } from '../../../stores/uiStore';
 import type { BookmarkFormValues } from '../hooks/useBookmarkDetail';
 import { BOOKMARK_DETAIL_STRINGS } from '../strings';
 import { HighlightsSection } from './HighlightsSection';
@@ -98,6 +102,25 @@ export function BookmarkDetailForm({
   const isFile = bookmark.storageKind === 'file';
   const isImageFile = isImageFileBookmark(bookmark);
   const isExtractableText = isExtractableTextFileBookmark(bookmark);
+  const enqueueSnackbar = useUiStore((s) => s.enqueueSnackbar);
+
+  // Share out (plan T3): OS share sheet where available (Web Share inside the
+  // Android webview); graceful fallback copies the link when sharing is not
+  // supported (desktop Tauri has no share sheet until a plugin exists).
+  const handleShare = async () => {
+    if (!bookmark.url) {
+      return;
+    }
+    const shared = await platform.share(bookmark.title ?? '', bookmark.url);
+    if (!shared) {
+      try {
+        await navigator.clipboard.writeText(bookmark.url);
+        enqueueSnackbar({ message: BOOKMARK_DETAIL_STRINGS.shareCopiedFallback, severity: 'info' });
+      } catch {
+        // Clipboard unavailable (sandboxed context) — nothing else to do.
+      }
+    }
+  };
 
   const currentTagNames = useMemo(() => bookmark.tags.map((tag) => tag.name), [bookmark.tags]);
   const tagSyncKey = `${bookmark.id}|${currentTagNames.join('\0')}`;
@@ -178,17 +201,29 @@ export function BookmarkDetailForm({
                 {BOOKMARK_DETAIL_STRINGS.downloadFileLabel}
               </Button>
             ) : bookmark.url ? (
-              <Button
-                component="a"
-                href={bookmark.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                size="small"
-                variant="outlined"
-                endIcon={<OpenInNewOutlinedIcon fontSize="small" />}
-              >
-                {BOOKMARK_DETAIL_STRINGS.openOriginalLabel}
-              </Button>
+              <>
+                <Button
+                  component="a"
+                  href={bookmark.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  size="small"
+                  variant="outlined"
+                  endIcon={<OpenInNewOutlinedIcon fontSize="small" />}
+                >
+                  {BOOKMARK_DETAIL_STRINGS.openOriginalLabel}
+                </Button>
+                <IconButton
+                  aria-label={BOOKMARK_DETAIL_STRINGS.shareLabel}
+                  title={BOOKMARK_DETAIL_STRINGS.shareLabel}
+                  size="medium"
+                  disabled={saving || isTrashed}
+                  onClick={() => void handleShare()}
+                  data-testid="bookmark-share-button"
+                >
+                  <ShareOutlinedIcon fontSize="small" />
+                </IconButton>
+              </>
             ) : null}
           </Stack>
         </Stack>

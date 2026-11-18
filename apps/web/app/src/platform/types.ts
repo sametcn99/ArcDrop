@@ -36,6 +36,14 @@ export interface PlatformAdapter {
    * extension page) — callers keep their current behavior then.
    */
   resolveDeviceLabel(): Promise<string | null>;
+
+  /**
+   * Subscribes to share-target URLs (plan T3): Android ACTION_SEND shares
+   * (custom plugin, incl. the cold-start queue) and desktop
+   * `arcdrop://add?url=…` deep links all arrive on this stream. Returns an
+   * unsubscribe function; no-op in environments without a native bridge.
+   */
+  onShareTarget(callback: (url: string) => void): () => void;
 }
 
 declare global {

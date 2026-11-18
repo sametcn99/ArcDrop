@@ -1,0 +1,4 @@
+[default]
+description = """Allows the web client to fetch a URL queued by an Android
+ACTION_SEND share intent while the app was closed (cold-start flow)."""
+permissions = ["allow-fetch-pending-share"]

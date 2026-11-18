@@ -43,6 +43,16 @@ export function AppProviders() {
     void restoreSession();
   }, [restoreSession]);
 
+  // Share-target & deep-link stream (plan T3): Android ACTION_SEND shares and
+  // desktop arcdrop://add links both land on the existing quick-add route;
+  // when signed out, the standard redirect machinery preserves the target
+  // through the auth flow (PublicOnly/RequireAuth state.from).
+  useEffect(() => {
+    return platform.onShareTarget((url) => {
+      router.navigate(`/quick-add?url=${encodeURIComponent(url)}`);
+    });
+  }, []);
+
   return (
     <ThemeController>
       {platform.isTauri ? (

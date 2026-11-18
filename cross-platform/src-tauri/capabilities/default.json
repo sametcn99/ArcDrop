@@ -3,5 +3,12 @@
   "identifier": "default",
   "description": "Default capability for the main window. T2 adds http (CORS-free API calls against the user's own server), opener (external links to the OS browser) and os (device label for sessions). No URL restriction on http: the server address is entered at runtime — least privilege is enforced by shipping only these three plugin permission sets.",
   "windows": ["main"],
-  "permissions": ["core:default", "http:default", "opener:default", "os:default"]
+  "permissions": [
+    "core:default",
+    "http:default",
+    "opener:default",
+    "os:default",
+    "deep-link:default",
+    "arcdrop-share-target:default"
+  ]
 }

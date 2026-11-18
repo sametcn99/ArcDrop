@@ -47,5 +47,8 @@ export function createBrowserPlatform(): PlatformAdapter {
     // Browsers have no native OS bridge; the session list keeps whatever
     // label the API derives itself (existing behavior, plan T2).
     resolveDeviceLabel: async () => null,
+
+    // Share-target/deep-link payloads only exist with a native bridge (T3).
+    onShareTarget: () => () => {},
   };
 }

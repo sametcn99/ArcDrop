@@ -65,5 +65,8 @@ export function createExtensionPlatform(): PlatformAdapter {
     // Extension pages expose no native OS bridge; the session list keeps the
     // API-derived label (browser parity, plan T2).
     resolveDeviceLabel: async () => null,
+
+    // Share-target/deep-link payloads only exist with a native bridge (T3).
+    onShareTarget: () => () => {},
   };
 }

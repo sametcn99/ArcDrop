@@ -8,11 +8,39 @@ fn app_version() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Desktop-only wiring (plan T3): single-instance must register FIRST so
+    // a second launch (e.g. from an arcdrop:// deep link on Windows/Linux)
+    // hands its argv to the running instance instead of opening a new one.
+    #[cfg(desktop)]
+    {
+        builder = builder
+            .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {
+                // The deep-link plugin already emitted the event to the web
+                // client for matching argv URLs.
+            }))
+            .plugin(tauri_plugin_deep_link::init());
+    }
+
+    builder
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(arcdrop_share_target::init())
         .invoke_handler(tauri::generate_handler![app_version])
+        .setup(|app| {
+            // Associate arcdrop:// with this app on Windows/Linux (registry /
+            // desktop file). The scheme is also statically configured in
+            // tauri.conf.json (bundle-level); this covers the first run
+            // before any installer-level association exists.
+            #[cfg(desktop)]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                app.deep_link().register("arcdrop")?;
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

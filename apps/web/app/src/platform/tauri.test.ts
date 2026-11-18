@@ -136,3 +136,119 @@ describe('tauri platform adapter (plan T2)', () => {
     expect(selectPlatform().isTauri).toBe(false);
   });
 });
+
+describe('onShareTarget (plan T3)', () => {
+  async function flush(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  function shareDeps(overrides: Partial<TauriPlatformDeps> = {}): TauriPlatformDeps & {
+    addPluginListener: ReturnType<typeof vi.fn>;
+    invoke: ReturnType<typeof vi.fn>;
+    onOpenUrl: ReturnType<typeof vi.fn>;
+  } {
+    return {
+      httpFetch: vi.fn(),
+      openExternalUrl: vi.fn().mockResolvedValue(undefined),
+      osType: vi.fn().mockReturnValue('windows'),
+      osVersion: vi.fn().mockReturnValue('11'),
+      userAgent: vi.fn().mockReturnValue(''),
+      addPluginListener: vi.fn().mockResolvedValue({ unlisten: () => undefined }),
+      invoke: vi.fn().mockResolvedValue({ text: '' }),
+      onOpenUrl: vi.fn().mockResolvedValue(() => undefined),
+      ...overrides,
+    } as TauriPlatformDeps & {
+      addPluginListener: ReturnType<typeof vi.fn>;
+      invoke: ReturnType<typeof vi.fn>;
+      onOpenUrl: ReturnType<typeof vi.fn>;
+    };
+  }
+
+  it('delivers warm-start plugin events with the extracted url', async () => {
+    const holder: { cb: ((payload: unknown) => void) | null } = { cb: null };
+    const deps = shareDeps({
+      addPluginListener: vi.fn(
+        async (_plugin: string, _event: string, cb: (p: unknown) => void) => {
+          holder.cb = cb;
+          return { unlisten: () => undefined };
+        },
+      ),
+    });
+    const callback = vi.fn();
+    const unsubscribe = createTauriPlatform(deps).onShareTarget(callback);
+    await flush();
+
+    holder.cb?.({ text: 'Look at https://example.com/article now' });
+    expect(callback).toHaveBeenCalledWith('https://example.com/article');
+    unsubscribe();
+  });
+
+  it('fetches the cold-start queue once registered', async () => {
+    const deps = shareDeps({
+      invoke: vi.fn().mockResolvedValue({ text: 'https://queued.example.com/x' }),
+    });
+    const callback = vi.fn();
+    createTauriPlatform(deps).onShareTarget(callback);
+    await flush();
+
+    expect(deps.invoke).toHaveBeenCalledWith('plugin:arcdrop-share-target|fetch_pending_share');
+    expect(callback).toHaveBeenCalledWith('https://queued.example.com/x');
+  });
+
+  it('parses desktop arcdrop:// deep links onto the same stream', async () => {
+    const holder: { cb: ((urls: string[]) => void) | null } = { cb: null };
+    const deps = shareDeps({
+      onOpenUrl: vi.fn(async (cb: (urls: string[]) => void) => {
+        holder.cb = cb;
+        return () => undefined;
+      }),
+    });
+    const callback = vi.fn();
+    const unsubscribe = createTauriPlatform(deps).onShareTarget(callback);
+    await flush();
+
+    holder.cb?.(['arcdrop://add?url=https%3A%2F%2Fexample.dev%2Fpost']);
+    expect(callback).toHaveBeenCalledWith('https://example.dev/post');
+    unsubscribe();
+  });
+
+  it('ignores payloads without an http(s) url', async () => {
+    const deps = shareDeps({
+      invoke: vi.fn().mockResolvedValue({ text: 'no link here' }),
+    });
+    const callback = vi.fn();
+    createTauriPlatform(deps).onShareTarget(callback);
+    await flush();
+
+    expect(callback).not.toHaveBeenCalled();
+  });
+
+  it('degrades silently when no channel is available (desktop)', async () => {
+    const deps = shareDeps({
+      addPluginListener: undefined,
+      invoke: undefined,
+      onOpenUrl: undefined,
+    });
+    const callback = vi.fn();
+    const unsubscribe = createTauriPlatform(deps).onShareTarget(callback);
+    await flush();
+
+    expect(callback).not.toHaveBeenCalled();
+    expect(() => unsubscribe()).not.toThrow();
+  });
+
+  it('unsubscribes every channel it registered', async () => {
+    const pluginUnlisten = vi.fn();
+    const deepLinkUnlisten = vi.fn();
+    const deps = shareDeps({
+      addPluginListener: vi.fn().mockResolvedValue({ unlisten: pluginUnlisten }),
+      onOpenUrl: vi.fn().mockResolvedValue(deepLinkUnlisten),
+    });
+    const unsubscribe = createTauriPlatform(deps).onShareTarget(vi.fn());
+    await flush();
+
+    unsubscribe();
+    expect(pluginUnlisten).toHaveBeenCalled();
+    expect(deepLinkUnlisten).toHaveBeenCalled();
+  });
+});

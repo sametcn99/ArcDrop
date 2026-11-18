@@ -24,6 +24,8 @@
     "@mui/icons-material": "^9.5.0",
     "@mui/material": "^9.5.0",
     "@mui/x-date-pickers": "^9.18.0",
+    "@tauri-apps/api": "^2.12.5",
+    "@tauri-apps/plugin-deep-link": "^2.6.3",
     "@tauri-apps/plugin-http": "^2.9.0",
     "@tauri-apps/plugin-opener": "^2.7.3",
     "@tauri-apps/plugin-os": "^2.4.0",

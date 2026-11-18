@@ -92,6 +92,20 @@ cross-platform/
   `@tauri-apps/api` package to `apps/web/app` (T1). T2 adds the official
   plugin JS packages (`plugin-http`, `plugin-opener`, `plugin-os`) to
   `apps/web/app` — see `apps/web/app/src/platform/tauri.ts`.
+- **Share-target** (plan T3): the custom `arcdrop-share-target` plugin lives in
+  `src-tauri/plugins/share-target/` (Rust + Kotlin source + manifest patch).
+  Because `android:init` regenerates gen/android from templates, the Kotlin
+  class and the ACTION_SEND activity-alias are re-applied by
+  `src-tauri/plugins/share-target/patch-android.mjs` — it runs automatically
+  as part of the `android:init` script; re-run it by hand after any manual
+  re-init. There is no official share plugin (verified: the npm package does
+  not exist), so the bookmark "Share" action uses the Web Share API and falls
+  back to copying the link.
+- **Deep links** (plan T3): `arcdrop://add?url=…` opens quick-add on desktop
+  (`plugins.deep-link.desktop.schemes` in tauri.conf.json + runtime
+  registration; single-instance plugin forwards links to the running app).
+  Both share-target and deep-link funnels route through
+  `platform.onShareTarget` → `/quick-add?url=…`.
 - CI: `.github/workflows/ci-cross-platform.yml` — rust-checks, Android debug
   APK, desktop matrix (windows/ubuntu/macos, `--no-bundle`), and an iOS
   simulator build (continuous since T2, unsigned). Full bundles/signing come

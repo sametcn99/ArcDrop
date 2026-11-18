@@ -84,6 +84,8 @@ export const BOOKMARK_DETAIL_STRINGS = {
   highlightColorSky: 'Sky',
   highlightColorRose: 'Rose',
   openOriginalLabel: 'Open URL',
+  shareLabel: 'Share',
+  shareCopiedFallback: 'Sharing is not available here — link copied to your clipboard.',
   saveChangesLabel: 'Save changes',
   savingLabel: 'Saving...',
   resetChangesLabel: 'Discard edits',
