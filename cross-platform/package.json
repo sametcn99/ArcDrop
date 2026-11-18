@@ -1,0 +1,28 @@
+{
+  "name": "@arcdrop/cross-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ArcDrop cross-platform shell — Tauri v2 desktop + mobile wrapper embedding the apps/web/app client.",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:no-bundle": "tauri build --no-bundle",
+    "android:init": "bun node_modules/@tauri-apps/cli/tauri.js android init",
+    "android:dev": "bun node_modules/@tauri-apps/cli/tauri.js android dev",
+    "android:build": "bun node_modules/@tauri-apps/cli/tauri.js android build --debug",
+    "android:build:release": "bun node_modules/@tauri-apps/cli/tauri.js android build",
+    "ios:init": "bun node_modules/@tauri-apps/cli/tauri.js ios init",
+    "ios:build": "bun node_modules/@tauri-apps/cli/tauri.js ios build --target ios-simulator --debug",
+    "icon": "tauri icon ../apps/web/app/public/favicon.svg",
+    "rust:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all",
+    "rust:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "rust:test": "cargo test --manifest-path src-tauri/Cargo.toml"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.5"
+  }
+}

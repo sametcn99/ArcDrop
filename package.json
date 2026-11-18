@@ -32,7 +32,17 @@
     "extension:dev": "bun --cwd=extension run dev",
     "extension:build": "bun --cwd=extension run build",
     "extension:lint": "bun --cwd=extension run lint",
-    "extension:typecheck": "bun --cwd=extension run typecheck"
+    "extension:typecheck": "bun --cwd=extension run typecheck",
+    "cross-platform:dev": "bun --cwd=cross-platform run dev",
+    "cross-platform:build": "bun --cwd=cross-platform run build",
+    "cross-platform:build:no-bundle": "bun --cwd=cross-platform run build:no-bundle",
+    "cross-platform:android:init": "bun --cwd=cross-platform run android:init",
+    "cross-platform:android:dev": "bun --cwd=cross-platform run android:dev",
+    "cross-platform:android:build": "bun --cwd=cross-platform run android:build",
+    "cross-platform:ios:init": "bun --cwd=cross-platform run ios:init",
+    "cross-platform:rust:fmt": "bun --cwd=cross-platform run rust:fmt",
+    "cross-platform:rust:clippy": "bun --cwd=cross-platform run rust:clippy",
+    "cross-platform:rust:test": "bun --cwd=cross-platform run rust:test"
   },
   "workspaces": [
     "apps/*",

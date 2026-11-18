@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for the main window. T1 ships core permissions only; plugin permissions (http, opener, notifications, …) are added per milestone.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

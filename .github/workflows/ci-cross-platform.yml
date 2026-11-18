@@ -1,0 +1,199 @@
+# Cross-platform CI (plan T1) — complements the existing ci.yml (API/web),
+# which is untouched. Four jobs: Rust quality gates, Android debug APK,
+# desktop compile matrix, and a manual iOS simulator build.
+name: CI Cross-Platform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust-checks:
+    name: Rust checks (fmt, clippy, test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cross-platform/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      # System dependencies the Tauri crate needs to compile on Linux
+      # (Tauri v2 prerequisites — webkit2gtk-4.1 and friends).
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      # Reads the pinned version from cross-platform/src-tauri/rust-toolchain.toml
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cross-platform/src-tauri
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test
+
+  android:
+    name: Android debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      # beforeBuildCommand compiles the web client, so its workspace deps are
+      # installed from the repo root first; the shell has its own lockfile.
+      - name: Install web client dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install shell dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cross-platform
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # ubuntu-latest runners ship the Android SDK (ANDROID_HOME); the NDK is
+      # installed explicitly at a pinned version, mirroring the Tauri docs
+      # guidance of exporting NDK_HOME from the SDK's ndk/ directory.
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "ndk;27.2.12479018" > /dev/null
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      # Targets required by the Tauri Android template (aarch64/armv7/i686/x86_64).
+      - name: Set up Rust toolchain with Android targets
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Rust cache (android)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cross-platform/src-tauri
+          key: android
+
+      - name: Build debug APK
+        run: bun run android:build
+        working-directory: cross-platform
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-debug-apk
+          path: cross-platform/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install web client dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install shell dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cross-platform
+
+      - name: Install Tauri Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Rust cache (desktop)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cross-platform/src-tauri
+          key: desktop-${{ matrix.os }}
+
+      # Compile-only verification (installer bundles are T6/release work).
+      - name: Build (no bundle)
+        run: bun run build:no-bundle
+        working-directory: cross-platform
+
+  # Manual until T2 (minute cost): validates the iOS build chain on demand.
+  # gen/apple is not committed in T1, so the job generates the Xcode project
+  # itself before building the unsigned simulator target.
+  ios:
+    name: iOS simulator build (manual)
+    runs-on: macos-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install web client dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install shell dependencies
+        run: bun install --frozen-lockfile
+        working-directory: cross-platform
+
+      - name: Install xcodegen (required by tauri ios init)
+        run: brew install xcodegen
+
+      - name: Set up Rust toolchain with iOS targets
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Rust cache (ios)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cross-platform/src-tauri
+          key: ios
+
+      - name: Generate Xcode project
+        run: bun run ios:init
+        working-directory: cross-platform
+
+      - name: Build for iOS simulator
+        run: bun run ios:build
+        working-directory: cross-platform

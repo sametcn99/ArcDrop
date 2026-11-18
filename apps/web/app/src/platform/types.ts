@@ -34,5 +34,14 @@ declare global {
   interface Window {
     /** Tauri v2 IPC internals — presence marks a Tauri webview. */
     __TAURI_INTERNALS__?: unknown;
+    /** Tauri's `withGlobalTauri` API surface; only `core.invoke` is used (T1). */
+    __TAURI__?: TauriGlobalApi;
   }
+}
+
+/** Shape of the `window.__TAURI__` global enabled by `app.withGlobalTauri`. */
+export interface TauriGlobalApi {
+  core: {
+    invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T>;
+  };
 }

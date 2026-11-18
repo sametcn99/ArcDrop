@@ -1,5 +1,6 @@
 import { createBrowserRouter, RouterProvider } from 'react-router';
 import { useEffect } from 'react';
+import { logNativeAppVersion } from '../platform/native';
 import { SnackbarHost } from '../shared/components/SnackbarHost';
 import { useAuthStore } from '../stores/authStore';
 import { ThemeController } from '../theme/ThemeController';
@@ -14,6 +15,7 @@ export function AppProviders() {
   // render a loader until it settles. Single-flight in the store keeps React
   // StrictMode's double effect from replaying the refresh token.
   useEffect(() => {
+    logNativeAppVersion();
     void restoreSession();
   }, [restoreSession]);
 

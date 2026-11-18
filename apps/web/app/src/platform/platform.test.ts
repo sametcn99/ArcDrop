@@ -1,19 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { logNativeAppVersion } from './native';
 import { createBrowserPlatform, detectTauri } from './browser';
 
 describe('browser platform adapter', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
-    // Drop a share capability installed by individual tests.
+    // Drop capabilities installed by individual tests.
     Reflect.deleteProperty(window.navigator, 'share');
     Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    Reflect.deleteProperty(window, '__TAURI__');
   });
 
   it('detects the browser environment (isTauri false, no __TAURI_INTERNALS__)', () => {
     const platform = createBrowserPlatform();
     expect(platform.isTauri).toBe(false);
     expect(detectTauri()).toBe(false);
+  });
+
+  it('isTauri is re-evaluated per access (late-initialized __TAURI_INTERNALS__)', () => {
+    const platform = createBrowserPlatform();
+    expect(platform.isTauri).toBe(false);
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    expect(platform.isTauri).toBe(true);
   });
 
   it('detectTauri is true when __TAURI_INTERNALS__ is present', () => {
@@ -79,5 +88,40 @@ describe('browser platform adapter', () => {
     const platform = createBrowserPlatform();
     await expect(platform.share('Look at this')).resolves.toBe(false);
     expect(shareMock).toHaveBeenCalledWith({ text: 'Look at this' });
+  });
+});
+
+describe('logNativeAppVersion (T1 shell bridge check)', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    Reflect.deleteProperty(window, '__TAURI__');
+  });
+
+  it('is a no-op outside Tauri even with a __TAURI__ global present', () => {
+    const invoke = vi.fn().mockResolvedValue('0.1.0');
+    Object.defineProperty(window, '__TAURI__', { value: { core: { invoke } }, configurable: true });
+
+    logNativeAppVersion();
+
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('invokes the shell app_version command once when inside Tauri', () => {
+    const invoke = vi.fn().mockResolvedValue('0.1.0');
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    Object.defineProperty(window, '__TAURI__', { value: { core: { invoke } }, configurable: true });
+
+    logNativeAppVersion();
+    logNativeAppVersion();
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith('app_version');
+  });
+
+  it('tolerates a missing or malformed __TAURI__ global', () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { value: {}, configurable: true });
+    Object.defineProperty(window, '__TAURI__', { value: { core: {} }, configurable: true });
+
+    expect(() => logNativeAppVersion()).not.toThrow();
   });
 });

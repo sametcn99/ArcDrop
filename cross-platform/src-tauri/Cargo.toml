@@ -1,0 +1,19 @@
+[package]
+name = "arcdrop"
+version = "0.1.0"
+description = "ArcDrop cross-platform shell"
+authors = ["sametcn99"]
+license = "MIT"
+edition = "2021"
+
+# The desktop binary reuses the library crate so mobile builds can load the
+# same code through the platform frameworks (see [lib] below and src/main.rs).
+[lib]
+name = "arcdrop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }

@@ -12,7 +12,11 @@ export function detectTauri(): boolean {
  */
 export function createBrowserPlatform(): PlatformAdapter {
   return {
-    isTauri: detectTauri(),
+    // Re-evaluated per access so late-initialized test doubles (and the Tauri
+    // adapter swap in T2) are always observed correctly.
+    get isTauri() {
+      return detectTauri();
+    },
 
     // Resolve the global fetch per call so test stubs (and, in T2, the native
     // implementation swap) are always picked up at invocation time.
