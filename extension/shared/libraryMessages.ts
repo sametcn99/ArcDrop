@@ -52,7 +52,9 @@ export type LibraryBrokerRequest =
   | { type: 'library/list-savable-tabs' }
   | { type: 'library/save-all-tabs'; collectionId: string | null }
   | { type: 'library/pending-permission' }
-  | { type: 'library/complete-pending-image' };
+  | { type: 'library/complete-pending-image' }
+  // E7 cover picker (plan E7): server-side fetch, no extra origin permission
+  | { type: 'library/set-cover'; bookmarkId: string; imageUrl: string };
 
 export type LibraryBrokerResponse =
   | { ok: true; kind: 'found'; bookmark: Bookmark | null }
@@ -64,6 +66,7 @@ export type LibraryBrokerResponse =
   | { ok: true; kind: 'page-meta'; meta: PageMetaCandidates | null }
   | { ok: true; kind: 'quick-saved'; result: QuickSaveResult }
   | { ok: true; kind: 'done' }
+  | { ok: true; kind: 'cover-assigned'; bookmark: Bookmark }
   | { ok: true; kind: 'savable-tabs'; tabs: TabItem[]; duplicatesRemoved: number }
   | { ok: true; kind: 'save-all-summary'; summary: SaveAllSummary }
   | { ok: true; kind: 'pending-permission'; pending: PendingImageSave | null }

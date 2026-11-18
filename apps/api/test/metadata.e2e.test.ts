@@ -872,6 +872,145 @@ describe('Metadata & icons (e2e)', () => {
       expect(backfilled.excerpt).toBe('Stub description for the good page');
       expect(backfilled.iconRef).toMatch(/\.png$/);
     }, 30_000);
+
+    // -- plan E7: cover assignment via POST /bookmarks/{id}/cover ------------
+
+    describe('E7 cover assignment', () => {
+      let coverBookmarkId: string;
+
+      beforeAll(async () => {
+        // A page whose own enrichment CANNOT produce a cover (og:image is a
+        // non-image), so the cover set below is provably the endpoint's.
+        const created = await call<BookmarkView>(baseUrl, 'POST', '/bookmarks', {
+          bearer: alice.accessToken,
+          body: { url: `${stub.origin}/page-badtypes`, title: 'Cover Target' },
+        });
+        expect(created.status).toBe(201);
+        coverBookmarkId = created.body.id;
+        // Wait for the async pipeline to settle (its update event) so the
+        // assertions below are not racing the 'fill' enrichment.
+        await waitFor(8_000, async () => {
+          const delta = await call<ChangesView>(baseUrl, 'GET', '/sync/changes?since=0', {
+            bearer: alice.accessToken,
+          });
+          return delta.body.changes.some(
+            (change) => change.entity === 'bookmark' && change.id === coverBookmarkId,
+          )
+            ? delta.body
+            : null;
+        });
+      });
+
+      it('exposes the setBookmarkCover operation with a stable id in OpenAPI', async () => {
+        const res = await fetch(`${baseUrl}/openapi.json`);
+        expect(res.status).toBe(200);
+        const served = (await res.json()) as {
+          paths: Record<string, Record<string, { operationId?: string }>>;
+        };
+        expect(served.paths['/api/v1/bookmarks/{id}/cover']?.post?.operationId).toBe(
+          'setBookmarkCover',
+        );
+      });
+
+      it('assigns a coverRef from an image URL, serves it publicly, and records the update', async () => {
+        const assigned = await call<BookmarkView>(
+          baseUrl,
+          'POST',
+          `/bookmarks/${coverBookmarkId}/cover`,
+          {
+            bearer: alice.accessToken,
+            body: { imageUrl: `${stub.origin}/photo.png` },
+          },
+        );
+        expect(assigned.status).toBe(200);
+        expect(assigned.body.coverRef).toMatch(/\.png$/);
+        const coverRef = assigned.body.coverRef as string;
+
+        // The icon cache serves the stored image publicly (same surface as
+        // enrichment covers).
+        const iconRes = await fetch(`${baseUrl}/api/v1/icons/${coverRef}`);
+        expect(iconRes.status).toBe(200);
+        expect(iconRes.headers.get('content-type')).toBe('image/png');
+        const bytes = new Uint8Array(await iconRes.arrayBuffer());
+        expect(bytes.length).toBe(PNG_BYTES.length);
+
+        // Devices learn about it via a bookmark:update change event.
+        const delta = await call<ChangesView>(baseUrl, 'GET', '/sync/changes?since=0', {
+          bearer: alice.accessToken,
+        });
+        expect(
+          delta.body.changes.some(
+            (change) =>
+              change.entity === 'bookmark' &&
+              change.id === coverBookmarkId &&
+              change.action === 'update',
+          ),
+        ).toBe(true);
+
+        // Reassignment with a different source produces a different ref.
+        const reassigned = await call<BookmarkView>(
+          baseUrl,
+          'POST',
+          `/bookmarks/${coverBookmarkId}/cover`,
+          {
+            bearer: alice.accessToken,
+            body: { imageUrl: `${stub.origin}/icon.png` },
+          },
+        );
+        expect(reassigned.status).toBe(200);
+        expect(reassigned.body.coverRef).toMatch(/\.png$/);
+        expect(reassigned.body.coverRef).not.toBe(coverRef);
+      });
+
+      it('rejects a non-image image URL with 400', async () => {
+        const res = await call<BookmarkView>(
+          baseUrl,
+          'POST',
+          `/bookmarks/${coverBookmarkId}/cover`,
+          {
+            bearer: alice.accessToken,
+            body: { imageUrl: `${stub.origin}/plain` },
+          },
+        );
+        expect(res.status).toBe(400);
+      });
+
+      it('rejects an SSRF redirect to a private address with 400 (hop ≥ 1 strict)', async () => {
+        const res = await call<BookmarkView>(
+          baseUrl,
+          'POST',
+          `/bookmarks/${coverBookmarkId}/cover`,
+          {
+            bearer: alice.accessToken,
+            body: { imageUrl: `${stub.origin}/redirect-private` },
+          },
+        );
+        expect(res.status).toBe(400);
+      });
+
+      it('rejects a malformed imageUrl with 400', async () => {
+        const res = await call<BookmarkView>(
+          baseUrl,
+          'POST',
+          `/bookmarks/${coverBookmarkId}/cover`,
+          {
+            bearer: alice.accessToken,
+            body: { imageUrl: 'not a url at all' },
+          },
+        );
+        expect(res.status).toBe(400);
+      });
+
+      it('404s for an unknown bookmark', async () => {
+        const res = await call<BookmarkView>(
+          baseUrl,
+          'POST',
+          `/bookmarks/00000000-0000-4000-8000-000000000000/cover`,
+          { bearer: alice.accessToken, body: { imageUrl: `${stub.origin}/photo.png` } },
+        );
+        expect(res.status).toBe(404);
+      });
+    });
   });
 
   describe('boot B â€” strict (allowPrivate=false): loopback targets are refused at hop 0', () => {

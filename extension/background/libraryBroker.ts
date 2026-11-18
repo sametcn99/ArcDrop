@@ -599,6 +599,28 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
         await clearPendingImage();
         return saved;
       }
+      case 'library/set-cover': {
+        // E7 cover picker: the SERVER fetches the image (SSRF pipeline) —
+        // the extension never touches the image origin itself.
+        const body = message as { bookmarkId?: unknown; imageUrl?: unknown };
+        if (typeof body['bookmarkId'] !== 'string' || typeof body['imageUrl'] !== 'string') {
+          return failure('VALIDATION', 'Missing bookmark id or image URL.');
+        }
+        showBadgeFor(vault, 'saving');
+        try {
+          const bookmark = await bookmarksApi.setBookmarkCover(
+            vault.baseUrl,
+            body['bookmarkId'],
+            body['imageUrl'],
+            auth,
+          );
+          showBadgeFor(vault, 'saved');
+          return { ok: true, kind: 'cover-assigned', bookmark };
+        } catch (error) {
+          showBadgeFor(vault, 'failed');
+          throw error;
+        }
+      }
       default:
         return failure('INVALID_MESSAGE', 'Unknown request type.');
     }

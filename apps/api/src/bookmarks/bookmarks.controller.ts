@@ -59,6 +59,7 @@ import {
   ListBookmarksQueryDto,
   QuickAddBookmarkQueryDto,
   ReplaceBookmarkTagsDto,
+  SetBookmarkCoverDto,
   TagUsageDto,
   UpdateBookmarkDto,
 } from './bookmarks.dto';
@@ -418,5 +419,33 @@ export class BookmarksController {
     @Param() params: BookmarkIdParamDto,
   ): Promise<ReindexBookmarkResponseDto> {
     return this.metadata.reindex(user.id, params.id);
+  }
+
+  @Post(':id/cover')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(UserRateLimitGuard)
+  @UserRateLimit('reindex')
+  @ApiBearerAuth()
+  @ApiBody({ type: SetBookmarkCoverDto })
+  @ApiOperation({
+    operationId: 'setBookmarkCover',
+    summary: 'Assign a cover image by URL (plan E7)',
+    description:
+      'Downloads `imageUrl` through the same SSRF-hardened image pipeline used for ' +
+      'enrichment (private-range and redirect-to-private refusals included; non-image ' +
+      'content types refused), stores it in the icon cache and assigns the stored ref ' +
+      'as the bookmark cover (`coverRef`). Records a `bookmark:update` change event so ' +
+      'devices refetch. Refuses unknown/trashed (404) and file-backed (400) bookmarks; ' +
+      'a fetch failure returns 400 with the reason. Per-user rate limit: reindex budget ' +
+      '(30/min, configurable).',
+  })
+  @ApiOkResponse({ type: BookmarkDto, description: 'The bookmark with the new coverRef' })
+  async setCover(
+    @CurrentUser() user: RequestUser,
+    @Param() params: BookmarkIdParamDto,
+    @Body() dto: SetBookmarkCoverDto,
+  ): Promise<BookmarkDto> {
+    await this.metadata.assignCoverFromUrl(user.id, params.id, dto.imageUrl);
+    return this.bookmarks.get(user, params.id);
   }
 }

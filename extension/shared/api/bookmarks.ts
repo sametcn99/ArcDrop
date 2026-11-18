@@ -10,7 +10,6 @@ export type CreateBookmarkInput = components['schemas']['CreateBookmarkBodyDto']
 export type UpdateBookmarkInput = components['schemas']['UpdateBookmarkDto'];
 export type TagUsage = components['schemas']['TagUsageDto'];
 export type BookmarkCollectionRef = components['schemas']['BookmarkCollectionRefDto'];
-
 type AuthOptions = Omit<ApiFetchOptions, 'accessToken'> & { accessToken: string };
 
 /** Creates a bookmark; `collectionId` rides the quick-add ?collection= query. */
@@ -75,6 +74,29 @@ export async function replaceBookmarkCollections(
     {
       method: 'PUT',
       body: { collectionIds },
+      accessToken: options.accessToken,
+      fetchImpl: options.fetchImpl,
+    },
+  );
+  return result.data;
+}
+
+/**
+ * Assigns a cover by URL (plan E7): the SERVER downloads `imageUrl` through
+ * its SSRF-hardened image pipeline and stores the ref — the extension never
+ * fetches the image itself, so no extra origin permission is needed.
+ */
+export async function setBookmarkCover(
+  baseUrl: string,
+  id: string,
+  imageUrl: string,
+  options: AuthOptions,
+): Promise<Bookmark> {
+  const result = await apiFetch<Bookmark>(
+    `${baseUrl.replace(/\/+$/, '')}/api/v1/bookmarks/${encodeURIComponent(id)}/cover`,
+    {
+      method: 'POST',
+      body: { imageUrl },
       accessToken: options.accessToken,
       fetchImpl: options.fetchImpl,
     },
