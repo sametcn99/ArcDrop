@@ -1,11 +1,21 @@
 {
   "manifest_version": 3,
   "name": "ArcDrop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Self-hosted bookmarking — save, organize and revisit your ArcDrop library from any page.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "action": {
     "default_popup": "popup/index.html",
-    "default_title": "ArcDrop"
+    "default_title": "ArcDrop",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
   },
   "options_ui": {
     "page": "options/index.html",
@@ -22,6 +32,15 @@
         "default": "Ctrl+Shift+S"
       },
       "description": "Quick-save the current page with your default collection"
+    }
+  },
+  "firefox:browser_specific_settings": {
+    "gecko": {
+      "id": "arcdrop@arcdrop.dev",
+      "strict_min_version": "128.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   }
 }
