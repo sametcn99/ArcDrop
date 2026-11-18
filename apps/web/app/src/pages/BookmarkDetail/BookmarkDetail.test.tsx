@@ -252,6 +252,54 @@ describe('BookmarkDetail drawer', () => {
     expect(await screen.findByText('Tags updated.')).toBeInTheDocument();
   }, 60_000);
 
+  it('assigns a cover from a URL via POST /bookmarks/:id/cover (plan E8)', async () => {
+    const user = userEvent.setup({ delay: null });
+    let capturedImageUrl: string | null = null;
+
+    const bookmark = makeMockBookmark({ id: 'bm-cover', coverRef: null });
+
+    server.use(
+      http.get('*/api/v1/bookmarks/bm-cover', () => HttpResponse.json(bookmark)),
+      http.post('*/api/v1/bookmarks/bm-cover/cover', async ({ request }) => {
+        const body = (await request.json()) as { imageUrl: string };
+        capturedImageUrl = body.imageUrl;
+        return HttpResponse.json({ ...bookmark, coverRef: 'new-cover-ref.png' });
+      }),
+    );
+
+    renderDetailAt('/bookmarks/bm-cover');
+    await waitForBootstrapReady();
+
+    const urlInput = await screen.findByRole('textbox', { name: 'Cover image URL' });
+    await user.type(urlInput, 'https://img.example/lead-image.png');
+    await user.click(screen.getByRole('button', { name: 'Apply cover' }));
+
+    await waitFor(() => {
+      expect(capturedImageUrl).toBe('https://img.example/lead-image.png');
+    });
+    expect(await screen.findByText('Cover updated.')).toBeInTheDocument();
+    // The input clears after a successful assignment.
+    expect(screen.getByRole('textbox', { name: 'Cover image URL' })).toHaveValue('');
+  }, 60_000);
+
+  it('keeps the cover apply button disabled for invalid URLs', async () => {
+    const user = userEvent.setup({ delay: null });
+    const bookmark = makeMockBookmark({ id: 'bm-cover-invalid', coverRef: null });
+
+    server.use(http.get('*/api/v1/bookmarks/bm-cover-invalid', () => HttpResponse.json(bookmark)));
+
+    renderDetailAt('/bookmarks/bm-cover-invalid');
+    await waitForBootstrapReady();
+
+    const urlInput = await screen.findByRole('textbox', { name: 'Cover image URL' });
+    await user.type(urlInput, 'not a url at all');
+
+    expect(screen.getByRole('button', { name: 'Apply cover' })).toBeDisabled();
+    expect(
+      screen.getByText('Enter a valid http(s) image URL (max 2048 characters).'),
+    ).toBeInTheDocument();
+  }, 60_000);
+
   it('supports highlight CRUD in the drawer', async () => {
     const user = userEvent.setup({ delay: null });
     let highlights: Highlight[] = [

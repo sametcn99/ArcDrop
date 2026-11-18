@@ -174,6 +174,10 @@ export const replaceBookmarkCollectionsRequestSchema = z.object({
   collectionIds: z.array(z.string()),
 });
 
+export const setBookmarkCoverRequestSchema = z.object({
+  imageUrl: httpUrlSchema.max(2048, 'Image URL must be at most 2048 characters'),
+});
+
 export const bookmarkCollectionRefSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -234,6 +238,7 @@ export type ReindexBookmarkResponse = z.infer<typeof reindexBookmarkResponseSche
 export type CreateBookmarkRequest = z.infer<typeof createBookmarkRequestSchema>;
 export type UpdateBookmarkRequest = z.infer<typeof updateBookmarkRequestSchema>;
 export type ReplaceBookmarkTagsRequest = z.infer<typeof replaceBookmarkTagsRequestSchema>;
+export type SetBookmarkCoverRequest = z.infer<typeof setBookmarkCoverRequestSchema>;
 export type RenameTagRequest = z.infer<typeof renameTagRequestSchema>;
 export type Highlight = z.infer<typeof highlightSchema>;
 export type HighlightListResponse = z.infer<typeof highlightListResponseSchema>;
