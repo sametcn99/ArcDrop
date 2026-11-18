@@ -6,7 +6,12 @@ TypeScript/React entries, `dist/<browser>` output.
 
 Targets: **chromium** (Chrome + Edge) and **Firefox**. Manifest V3.
 
-## Requirements
+> Installing from a release zip? Skip straight to
+> [Release & installation](#release--installation) — you only need a running
+> ArcDrop server. Everything below the first section is for building from
+> source.
+
+## Development requirements
 
 - [Bun](https://bun.sh) 1.2+ (Extension.js runs on Bun; no Node/npm needed)
 
@@ -39,8 +44,8 @@ own `bun.lock`, so the root install never touches extension dependencies.
 1. Open `about:debugging#/runtime/this-firefox`.
 2. Click **Load Temporary Add-on…** and pick `extension/dist/firefox/manifest.json`.
 
-> Firefox temporary add-ons are removed on restart; a signed build (E6) is the
-> persistent path.
+> Firefox temporary add-ons are removed on restart — a signed store build
+> (AMO submission, future work) is the persistent installation path.
 
 ## Structure
 
@@ -52,7 +57,7 @@ extension/
 ├─ background/        # MV3 service worker: auth broker (E1), library broker (E2/E4)
 ├─ embed-src/         # storage-bridge bootstrap for the embedded app page (E3, committed source)
 ├─ embed/             # assembled embedded app (gitignored; web dist + bridge, made by prebuild)
-├─ scripts/           # generate-api + embed build/postbuild steps
+├─ scripts/           # codegen (api types/theme/icons) + embed & release helpers
 ├─ ../dev-scripts/    # live smoke scripts (outside the project so builds never bundle them)
 └─ dist/              # build output (gitignored): chromium/ + firefox/ (+ embedded pages/app)
 ```
@@ -114,14 +119,17 @@ at the repo root works); none are run by CI.
 
 ## Release & installation
 
+Prerequisite: a running ArcDrop server you control (see the main repository
+README) — the extension connects to it during setup.
+
 **From a release zip** (recommended):
 
 1. Download `arcdrop-extension-chromium.zip` (or `-firefox.zip`) from the
-   GitHub Releases page.
-2. Chrome/Edge: unzip → `chrome://extensions` → Developer mode → **Load
-   unpacked** → select the unzipped folder. Firefox: `about:debugging` →
-   **Load Temporary Add-on…** → the zip's `manifest.json`.
-3. Open the popup, connect your server, sign in — done.
+   GitHub Releases page and unzip it.
+2. Chrome/Edge: `chrome://extensions` → Developer mode → **Load unpacked** →
+   select the unzipped folder. Firefox: `about:debugging` → **Load Temporary
+   Add-on…** → the unzipped `manifest.json`.
+3. Open the popup, enter your server address, sign in — done.
 
 **From source**: `bun install && bun run build` inside `extension/`, then
 load `dist/chromium` unpacked as above. `bun run build:release` produces the
