@@ -8,6 +8,22 @@ import * as collectionsApi from '../shared/api/collections';
 import { chromeBadgeWriter, createBadgeManager, type BadgeManager } from '../shared/badge';
 import { isApiError } from '../shared/problem';
 import { collectPageMeta, type PageMetaCandidates } from '../shared/pageImages';
+import {
+  dedupeTabs,
+  filenameFromImageUrl,
+  appendSelectionToExcerpt,
+  deriveLinkTitle,
+  isHttpUrl,
+  summarizeSaveOutcomes,
+  type DedupedTabs,
+  type SaveOutcome,
+} from '../shared/menuActions';
+import type { PendingImageSave } from '../shared/libraryMessages';
+import {
+  hasOriginPermission,
+  requestOriginPermission,
+  type PermissionsLike,
+} from '../shared/hostPermissions';
 import { quickSave, type QuickSaveResult } from '../shared/quicksave';
 import {
   getActiveTabContext,
@@ -38,6 +54,15 @@ function chromeScripting(): ScriptingLike {
   return chrome.scripting;
 }
 
+/** Minimal chrome.storage.session shape (pending-permission stash). */
+export interface SessionAreaLike {
+  get(keys?: string | string[]): Promise<Record<string, unknown>>;
+  set(items: Record<string, unknown>): Promise<void>;
+  remove(keys: string | string[]): Promise<void>;
+}
+
+const PENDING_IMAGE_KEY = 'pendingImageSave';
+
 export interface LibraryBrokerDeps {
   area: StorageLike;
   /** Access token supplier — the auth broker's single-flight getter. */
@@ -46,6 +71,8 @@ export interface LibraryBrokerDeps {
   tabs?: TabsLike;
   scripting?: ScriptingLike;
   fetchImpl?: typeof fetch;
+  permissions?: PermissionsLike;
+  sessionArea?: SessionAreaLike;
 }
 
 function failure(code: string, message: string): Extract<LibraryBrokerResponse, { ok: false }> {
@@ -131,6 +158,237 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
     }
   }
 
+  // ---- E4: context-menu + bulk flows ------------------------------------
+
+  async function listSavableTabs(): Promise<DedupedTabs> {
+    const results = await tabs.query({ url: ['http://*/*', 'https://*/*'] });
+    return dedupeTabs(results.map((tab) => ({ url: tab.url ?? '', title: tab.title ?? '' })));
+  }
+
+  async function saveAllTabs(
+    collectionId: string | null,
+  ): Promise<ReturnType<typeof summarizeSaveOutcomes>> {
+    const vault = await readVault(area);
+    if (!vault.baseUrl) {
+      throw new Error('Not connected to a server yet.');
+    }
+    const { unique, duplicatesRemoved } = await listSavableTabs();
+    badge.show('saving');
+
+    const accessToken = await deps.getAccessToken();
+    const auth = { accessToken, fetchImpl };
+    const outcomes: SaveOutcome[] = [];
+    const CONCURRENCY = 4;
+    let cursor = 0;
+
+    const runNext = async (): Promise<void> => {
+      while (cursor < unique.length) {
+        const item = unique[cursor];
+        cursor += 1;
+        if (!item) continue;
+        try {
+          const existing = await bookmarksApi.findBookmarkByUrl(vault.baseUrl!, item.url, auth);
+          if (existing) {
+            outcomes.push({ status: 'already-saved', url: item.url });
+            continue;
+          }
+          await bookmarksApi.createBookmark(
+            vault.baseUrl!,
+            { url: item.url, title: item.title.slice(0, MAX_TITLE), favorite: false },
+            { ...auth, collectionId: collectionId ?? undefined },
+          );
+          outcomes.push({ status: 'saved', url: item.url });
+        } catch {
+          outcomes.push({ status: 'failed', url: item.url });
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: CONCURRENCY }, () => runNext()));
+    if (collectionId) {
+      await writeVault(area, {
+        settings: { ...vault.settings, lastUsedCollectionId: collectionId },
+      });
+    }
+    const summary = summarizeSaveOutcomes(outcomes, duplicatesRemoved);
+    badge.show(summary.failed === outcomes.length && outcomes.length > 0 ? 'failed' : 'saved');
+    return summary;
+  }
+
+  async function readPendingImage(): Promise<PendingImageSave | null> {
+    if (!deps.sessionArea) return null;
+    const stored = await deps.sessionArea.get(PENDING_IMAGE_KEY);
+    const pending = stored[PENDING_IMAGE_KEY];
+    if (typeof pending !== 'object' || pending === null) return null;
+    const candidate = pending as {
+      origin?: unknown;
+      srcUrl?: unknown;
+      pageTitle?: unknown;
+      savedAt?: unknown;
+    };
+    if (typeof candidate['origin'] !== 'string' || typeof candidate['srcUrl'] !== 'string') {
+      return null;
+    }
+    return {
+      origin: candidate['origin'],
+      srcUrl: candidate['srcUrl'],
+      pageTitle: typeof candidate['pageTitle'] === 'string' ? candidate['pageTitle'] : undefined,
+      savedAt: typeof candidate['savedAt'] === 'number' ? candidate['savedAt'] : 0,
+    };
+  }
+
+  async function clearPendingImage(): Promise<void> {
+    if (!deps.sessionArea) return;
+    await deps.sessionArea.remove(PENDING_IMAGE_KEY);
+  }
+
+  /**
+   * Fetches + uploads an image (POST /bookmarks/file). The source origin
+   * needs a host permission — granted inline when the caller carries a user
+   * gesture, otherwise stashed for the popup ("Grant access" banner).
+   */
+  async function saveImage(srcUrl: string, pageTitle?: string): Promise<LibraryBrokerResponse> {
+    const vault = await readVault(area);
+    if (!vault.baseUrl) {
+      throw new Error('Not connected to a server yet.');
+    }
+    let origin: string;
+    try {
+      origin = new URL(srcUrl).origin;
+    } catch {
+      return failure('VALIDATION', 'Invalid image URL.');
+    }
+
+    const permissions = deps.permissions;
+    let granted = permissions ? await hasOriginPermission(permissions, origin) : true;
+    if (!granted) {
+      if (permissions) {
+        // Works when the caller carries a user gesture (menu click); a
+        // gesture-less background rejects the prompt outright.
+        try {
+          granted = await requestOriginPermission(permissions, origin);
+        } catch {
+          granted = false;
+        }
+      }
+      if (!granted) {
+        if (deps.sessionArea) {
+          await deps.sessionArea.set({
+            [PENDING_IMAGE_KEY]: {
+              origin,
+              srcUrl,
+              pageTitle,
+              savedAt: Date.now(),
+            } satisfies PendingImageSave,
+          });
+          badge.show('failed');
+          return failure(
+            'HOST_PERMISSION_REQUIRED',
+            `Grant access to ${origin} from the ArcDrop popup to save this image.`,
+          );
+        }
+        return failure('HOST_PERMISSION_DENIED', `No access to ${origin}.`);
+      }
+    }
+
+    badge.show('saving');
+    try {
+      const accessToken = await deps.getAccessToken();
+      const response = await fetchImpl(srcUrl);
+      if (!response.ok) {
+        throw new Error(`Image fetch failed with HTTP ${response.status}`);
+      }
+      const mime =
+        (response.headers.get('content-type') ?? 'image/png').split(';')[0]?.trim() ?? 'image/png';
+      if (mime === 'image/svg+xml') {
+        // The API refuses scripted formats (file-types.ts).
+        badge.show('failed');
+        return failure('UNSUPPORTED_IMAGE', 'SVG images cannot be saved as files.');
+      }
+      const blob = await response.blob();
+      const file = new File([blob], filenameFromImageUrl(srcUrl, mime), { type: mime });
+      const bookmark = await bookmarksApi.uploadBookmarkImage(
+        vault.baseUrl,
+        file,
+        { title: pageTitle?.slice(0, MAX_TITLE) },
+        { accessToken, fetchImpl },
+      );
+      badge.show('saved');
+      return { ok: true, kind: 'saved', bookmark };
+    } catch (error) {
+      badge.show('failed');
+      throw error;
+    }
+  }
+
+  async function saveSelection(
+    selectionText: string,
+    pageUrl?: string,
+    pageTitle?: string,
+  ): Promise<LibraryBrokerResponse> {
+    const vault = await readVault(area);
+    if (!vault.baseUrl) {
+      throw new Error('Not connected to a server yet.');
+    }
+    const pageUrlValue = pageUrl ?? '';
+    if (!isHttpUrl(pageUrlValue)) {
+      return failure('VALIDATION', 'This page cannot be saved.');
+    }
+    const accessToken = await deps.getAccessToken();
+    const auth = { accessToken, fetchImpl };
+    badge.show('saving');
+
+    const existing = await bookmarksApi.findBookmarkByUrl(vault.baseUrl, pageUrlValue, auth);
+    if (existing) {
+      // Append to the saved page's description (idempotent on repeats).
+      const { excerpt, changed } = appendSelectionToExcerpt(existing.excerpt, selectionText);
+      if (changed) {
+        await bookmarksApi.updateBookmark(vault.baseUrl, existing.id, { excerpt }, auth);
+      }
+      badge.show('saved');
+      return { ok: true, kind: 'done' };
+    }
+
+    await bookmarksApi.createBookmark(
+      vault.baseUrl,
+      {
+        url: pageUrlValue,
+        title: pageTitle?.slice(0, MAX_TITLE),
+        excerpt: selectionText.trim().slice(0, MAX_EXCERPT) || undefined,
+        favorite: false,
+      },
+      auth,
+    );
+    badge.show('saved');
+    return { ok: true, kind: 'done' };
+  }
+
+  async function saveLink(linkUrl: string, title?: string): Promise<LibraryBrokerResponse> {
+    const vault = await readVault(area);
+    if (!vault.baseUrl) {
+      throw new Error('Not connected to a server yet.');
+    }
+    if (!isHttpUrl(linkUrl)) {
+      return failure('VALIDATION', 'This link cannot be saved.');
+    }
+    const accessToken = await deps.getAccessToken();
+    const auth = { accessToken, fetchImpl };
+    badge.show('saving');
+
+    const existing = await bookmarksApi.findBookmarkByUrl(vault.baseUrl, linkUrl, auth);
+    if (existing) {
+      badge.show('saved');
+      return { ok: true, kind: 'done' };
+    }
+    await bookmarksApi.createBookmark(
+      vault.baseUrl,
+      { url: linkUrl, title: deriveLinkTitle(linkUrl, title).slice(0, MAX_TITLE), favorite: false },
+      auth,
+    );
+    badge.show('saved');
+    return { ok: true, kind: 'done' };
+  }
+
   async function handleMessageInner(message: unknown): Promise<LibraryBrokerResponse> {
     if (typeof message !== 'object' || message === null) {
       return failure('INVALID_MESSAGE', 'Unknown request.');
@@ -138,6 +396,17 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
     const type = (message as { type?: unknown })['type'];
     if (typeof type !== 'string' || !type.startsWith('library/')) {
       return failure('INVALID_MESSAGE', 'Unknown request type.');
+    }
+
+    // Offline-safe requests: they need neither a configured server nor a
+    // token (the tab list is local; the pending stash is session storage).
+    if (type === 'library/list-savable-tabs') {
+      const { unique, duplicatesRemoved } = await listSavableTabs();
+      return { ok: true, kind: 'savable-tabs', tabs: unique, duplicatesRemoved };
+    }
+    if (type === 'library/pending-permission') {
+      const pending = await readPendingImage();
+      return { ok: true, kind: 'pending-permission', pending };
     }
 
     const vault = await readVault(area);
@@ -261,6 +530,64 @@ export function createLibraryBroker(deps: LibraryBrokerDeps) {
       case 'library/quick-save': {
         const result = await quickSaveActiveTab();
         return { ok: true, kind: 'quick-saved', result };
+      }
+      case 'library/save-link': {
+        const body = message as { linkUrl?: unknown; title?: unknown };
+        if (typeof body['linkUrl'] !== 'string') {
+          return failure('VALIDATION', 'Missing link URL.');
+        }
+        return saveLink(
+          body['linkUrl'],
+          typeof body['title'] === 'string' ? body['title'] : undefined,
+        );
+      }
+      case 'library/save-selection': {
+        const body = message as {
+          selectionText?: unknown;
+          pageUrl?: unknown;
+          pageTitle?: unknown;
+        };
+        if (typeof body['selectionText'] !== 'string') {
+          return failure('VALIDATION', 'Missing selection.');
+        }
+        return saveSelection(
+          body['selectionText'],
+          typeof body['pageUrl'] === 'string' ? body['pageUrl'] : undefined,
+          typeof body['pageTitle'] === 'string' ? body['pageTitle'] : undefined,
+        );
+      }
+      case 'library/save-image': {
+        const body = message as { srcUrl?: unknown; pageTitle?: unknown };
+        if (typeof body['srcUrl'] !== 'string') {
+          return failure('VALIDATION', 'Missing image URL.');
+        }
+        return saveImage(
+          body['srcUrl'],
+          typeof body['pageTitle'] === 'string' ? body['pageTitle'] : undefined,
+        );
+      }
+      case 'library/list-savable-tabs':
+        // Handled above (offline-safe); unreachable.
+        return { ok: true, kind: 'savable-tabs', tabs: [], duplicatesRemoved: 0 };
+      case 'library/save-all-tabs': {
+        const collectionId = (message as { collectionId?: unknown })['collectionId'];
+        const summary = await saveAllTabs(
+          typeof collectionId === 'string' && collectionId.length > 0 ? collectionId : null,
+        );
+        return { ok: true, kind: 'save-all-summary', summary };
+      }
+      case 'library/pending-permission':
+        // Handled above (offline-safe); unreachable.
+        return { ok: true, kind: 'pending-permission', pending: null };
+      case 'library/complete-pending-image': {
+        // Popup-driven (real user gesture): grant + finish the stashed save.
+        const pending = await readPendingImage();
+        if (!pending) {
+          return failure('VALIDATION', 'Nothing pending.');
+        }
+        const saved = await saveImage(pending.srcUrl, pending.pageTitle);
+        await clearPendingImage();
+        return saved;
       }
       default:
         return failure('INVALID_MESSAGE', 'Unknown request type.');

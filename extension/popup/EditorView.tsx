@@ -27,6 +27,7 @@ import { errorString, strings } from '../shared/strings';
 import { getActiveTabContext, type TabContext } from '../shared/tabContext';
 import type { Bookmark, TagUsage } from '../shared/api/bookmarks';
 import type { CollectionNode } from '../shared/api/collections';
+import { SaveAllTabsDialog } from './SaveAllTabsDialog';
 
 export interface EditorViewProps {
   baseUrl: string;
@@ -35,7 +36,7 @@ export interface EditorViewProps {
 
 const NEW_COLLECTION_ID = '__new-collection__';
 
-interface CollectionOption {
+export interface CollectionOption {
   id: string;
   title: string;
   depth: number;
@@ -78,6 +79,9 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
   const [quickBusy, setQuickBusy] = useState(false);
   const [newCollectionOpen, setNewCollectionOpen] = useState(false);
   const [newCollectionTitle, setNewCollectionTitle] = useState('');
+  const [saveAllOpen, setSaveAllOpen] = useState(false);
+  const [permissionOrigin, setPermissionOrigin] = useState<string | null>(null);
+  const [permissionBusy, setPermissionBusy] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -88,6 +92,45 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  // E4: a context-menu image save may be waiting on a one-time origin
+  // permission (menu clicks can lack a user gesture in the worker).
+  useEffect(() => {
+    let cancelled = false;
+    void sendLibraryMessage({ type: 'library/pending-permission' })
+      .then((response) => {
+        if (cancelled || !response.ok || response.kind !== 'pending-permission') return;
+        if (response.pending !== null) {
+          setPermissionOrigin(response.pending.origin);
+        }
+      })
+      .catch(() => {
+        /* banner is best-effort */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const grantPendingPermission = (): void => {
+    setPermissionBusy(true);
+    void sendLibraryMessage({ type: 'library/complete-pending-image' })
+      .then((response) => {
+        setPermissionOrigin(null);
+        if (response.ok) {
+          setStatus({ kind: 'success', text: strings.popup.permissionGrantedSavedImage });
+        } else {
+          setStatus({ kind: 'error', text: errorString(response.code) });
+        }
+      })
+      .catch(() => {
+        setPermissionOrigin(null);
+        setStatus({ kind: 'error', text: errorString('NETWORK_ERROR') });
+      })
+      .finally(() => {
+        setPermissionBusy(false);
+      });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -370,6 +413,25 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
         <Alert severity={status.kind === 'error' ? 'error' : 'success'}>{status.text}</Alert>
       ) : null}
 
+      {permissionOrigin !== null ? (
+        <Alert
+          severity="warning"
+          action={
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={grantPendingPermission}
+              disabled={permissionBusy}
+            >
+              {strings.popup.permissionGrantButton}
+            </Button>
+          }
+        >
+          {strings.popup.permissionBannerTitle} —{' '}
+          {strings.popup.permissionBannerBody(permissionOrigin)}
+        </Alert>
+      ) : null}
+
       {coverRef !== null ? (
         <Box
           component="img"
@@ -492,16 +554,26 @@ export function EditorView({ baseUrl, onDisconnected }: EditorViewProps) {
         </Typography>
         <Button
           variant="text"
-          onClick={disconnect}
-          disabled={busy}
+          onClick={() => setSaveAllOpen(true)}
+          disabled={busy || options === null}
           sx={{ color: 'text.secondary' }}
         >
+          {strings.popup.saveAllTabs}
+        </Button>
+        <Button variant="text" color="error" onClick={disconnect} disabled={busy} sx={{ mt: 0.5 }}>
           {strings.popup.disconnect}
         </Button>
         <Typography variant="caption" color="text.secondary" noWrap>
           {strings.popup.stateLabel}: {baseUrl.replace(/^https?:\/\//, '')}
         </Typography>
       </Stack>
+
+      <SaveAllTabsDialog
+        key={saveAllOpen ? 'open' : 'closed'}
+        open={saveAllOpen}
+        onClose={() => setSaveAllOpen(false)}
+        collectionOptions={options ?? []}
+      />
 
       <Dialog
         open={newCollectionOpen}

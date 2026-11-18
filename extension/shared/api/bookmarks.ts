@@ -122,3 +122,27 @@ export async function listTagUsage(baseUrl: string, options: AuthOptions): Promi
   );
   return result.data;
 }
+
+/**
+ * Uploads an image file as a file-backed bookmark (POST /bookmarks/file,
+ * multipart) — the "save image" context-menu flow.
+ */
+export async function uploadBookmarkImage(
+  baseUrl: string,
+  file: File,
+  input: { title?: string },
+  options: AuthOptions,
+): Promise<Bookmark> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  if (input.title !== undefined && input.title.trim() !== '') {
+    form.append('title', input.title.trim());
+  }
+  const result = await apiFetch<Bookmark>(`${baseUrl.replace(/\/+$/, '')}/api/v1/bookmarks/file`, {
+    method: 'POST',
+    body: form,
+    accessToken: options.accessToken,
+    fetchImpl: options.fetchImpl,
+  });
+  return result.data;
+}

@@ -6,16 +6,63 @@
 
 import { createAuthBroker } from './authBroker';
 import { createLibraryBroker } from './libraryBroker';
+import { registerContextMenus, toContextMenuAction, type ContextMenuId } from './contextMenus';
 
 const authBroker = createAuthBroker({ area: chrome.storage.local });
 const libraryBroker = createLibraryBroker({
   area: chrome.storage.local,
   getAccessToken: authBroker.getValidAccessToken,
+  permissions: chrome.permissions,
+  sessionArea: chrome.storage.session,
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     console.info('[ArcDrop] installed — connect your server from the popup.');
+  }
+  // E4: context menus (idempotent; persist across worker restarts).
+  registerContextMenus();
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const action = toContextMenuAction(info, tab ? { title: tab.title } : null);
+  if (!action) {
+    return;
+  }
+  const request = ((): Promise<unknown> | null => {
+    switch (action.id as ContextMenuId) {
+      case 'arcdrop-save-page':
+        return libraryBroker.quickSaveActiveTab();
+      case 'arcdrop-save-link':
+        return libraryBroker.handleMessage({
+          type: 'library/save-link',
+          linkUrl: action.linkUrl ?? '',
+          title: action.selectionText,
+        });
+      case 'arcdrop-save-image':
+        return libraryBroker.handleMessage({
+          type: 'library/save-image',
+          srcUrl: action.srcUrl ?? '',
+          pageTitle: action.pageTitle,
+        });
+      case 'arcdrop-save-selection':
+        return libraryBroker.handleMessage({
+          type: 'library/save-selection',
+          selectionText: action.selectionText ?? '',
+          pageUrl: action.pageUrl,
+          pageTitle: action.pageTitle,
+        });
+      default:
+        return null;
+    }
+  })();
+  if (request) {
+    void request.catch((error: unknown) => {
+      console.warn(
+        '[ArcDrop] context-menu save failed:',
+        error instanceof Error ? error.message : error,
+      );
+    });
   }
 });
 
