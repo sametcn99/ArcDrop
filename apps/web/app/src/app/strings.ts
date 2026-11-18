@@ -29,6 +29,7 @@ export const APP_STRINGS = {
   syncOfflineLabel: 'Offline',
   syncTooltipPrefix: 'Sync status',
   syncStatusAriaPrefix: 'Sync status',
+  syncRetryLabel: 'Retry sync now',
   loadingRouteLabel: 'Loading view',
   notFoundTitle: 'Page not found',
   notFoundDescription: 'The requested route does not exist in this workspace.',

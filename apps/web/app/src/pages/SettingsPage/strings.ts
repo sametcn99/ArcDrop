@@ -15,6 +15,14 @@ export const SETTINGS_PAGE_STRINGS = {
     changeWarning:
       'Changing the server signs you out on this device and returns to first-time setup.',
   },
+  desktop: {
+    heading: 'Desktop',
+    description: 'Conveniences for the desktop app (window placement is remembered automatically).',
+    autostartLabel: 'Start ArcDrop when the system starts',
+    autostartHint: 'Runs ArcDrop in the background at sign-in; the tray icon keeps it available.',
+    autostartReadError: 'Autostart state could not be read.',
+    autostartToggleError: 'Autostart could not be changed.',
+  },
   profile: {
     heading: 'Profile',
     emailLabel: 'Email',

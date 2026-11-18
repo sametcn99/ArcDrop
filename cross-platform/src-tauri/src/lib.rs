@@ -14,7 +14,7 @@ pub fn run() {
     #[cfg_attr(mobile, allow(unused_mut))]
     let mut builder = tauri::Builder::default();
 
-    // Desktop-only wiring (plan T3): single-instance must register FIRST so
+    // Desktop-only wiring (plan T3/T5): single-instance must register FIRST so
     // a second launch (e.g. from an arcdrop:// deep link on Windows/Linux)
     // hands its argv to the running instance instead of opening a new one.
     #[cfg(desktop)]
@@ -24,7 +24,13 @@ pub fn run() {
                 // The deep-link plugin already emitted the event to the web
                 // client for matching argv URLs.
             }))
-            .plugin(tauri_plugin_deep_link::init());
+            .plugin(tauri_plugin_deep_link::init())
+            // Plan T5: remember window size/position across launches.
+            .plugin(tauri_plugin_window_state::Builder::default().build())
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ));
     }
 
     builder
@@ -48,10 +54,51 @@ pub fn run() {
             // before any installer-level association exists.
             #[cfg(desktop)]
             {
+                use tauri::menu::MenuItem;
+                use tauri::tray::TrayIconBuilder;
+                use tauri::Manager;
                 use tauri_plugin_deep_link::DeepLinkExt;
+
                 app.deep_link().register("arcdrop")?;
+
+                // System tray (plan T5): show/hide the single window and a
+                // quit entry — closing the window hides to tray instead of
+                // exiting, so the app behaves like a desktop resident.
+                let show = MenuItem::with_id(app, "tray-show", "Show ArcDrop", true, None::<&str>)?;
+                let quit = MenuItem::with_id(app, "tray-quit", "Quit ArcDrop", true, None::<&str>)?;
+                let menu = tauri::menu::Menu::with_items(app, &[&show, &quit])?;
+                TrayIconBuilder::with_id("arcdrop-tray")
+                    .icon(app.default_window_icon().cloned().ok_or_else(|| {
+                        tauri::Error::AssetNotFound("default window icon".to_string())
+                    })?)
+                    .tooltip("ArcDrop")
+                    .menu(&menu)
+                    .show_menu_on_left_click(false)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "tray-show" => {
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.unminimize();
+                                let _ = window.set_focus();
+                            }
+                        }
+                        "tray-quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .build(app)?;
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Plan T5: closing the window hides it to the tray; the app only
+            // exits through the tray Quit entry (desktop builds only).
+            #[cfg(desktop)]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

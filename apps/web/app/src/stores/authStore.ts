@@ -35,6 +35,8 @@ export interface AuthState {
   status: AuthStatus;
   tfaChallenge: TfaChallengeState | null;
   error: ApiError | null;
+  /** Plan T5: true when the last boot-time server contact was unreachable. */
+  serverUnreachable: boolean;
   login: (input: LoginRequest) => Promise<LoginOutcome>;
   completeTfa: (input: CompleteTfaInput) => Promise<AuthSession>;
   cancelTfa: () => void;
@@ -93,6 +95,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   status: 'unauthenticated',
   tfaChallenge: null,
   error: null,
+  serverUnreachable: false,
 
   setSession(session) {
     apiClient.setTokens({
@@ -104,11 +107,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       status: 'authenticated',
       tfaChallenge: null,
       error: null,
+      serverUnreachable: false,
     });
   },
 
   async login(input) {
-    set({ status: 'authenticating', error: null });
+    set({ status: 'authenticating', error: null, serverUnreachable: false });
     try {
       const outcome = await authApi.login(input);
       if (outcome.kind === 'totp_required') {
@@ -237,7 +241,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     const persisted = apiClient.getPersistedRefreshToken();
     if (!persisted) {
-      set({ status: 'unauthenticated' });
+      set({ status: 'unauthenticated', serverUnreachable: false });
       return Promise.resolve(false);
     }
 
@@ -249,13 +253,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         const session = await authApi.refresh(persisted);
         get().setSession(session);
         return true;
-      } catch {
-        apiClient.clearTokens();
+      } catch (err) {
+        const apiError = toApiError(err);
+        // Plan T5: a network-level failure (status 0 — no HTTP response) means
+        // the server itself is unreachable; the persisted token is still
+        // valid, so keep it and let the unreachable screen offer a retry.
+        // An HTTP-level rejection (401 etc.) means the token is dead: clear
+        // it and fall through to sign-in.
+        const unreachable = apiError.status === 0;
+        if (!unreachable) {
+          apiClient.clearTokens();
+        }
         set({
           user: null,
           status: 'unauthenticated',
           tfaChallenge: null,
           error: null,
+          serverUnreachable: unreachable,
         });
         return false;
       } finally {
@@ -284,6 +298,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       status: 'unauthenticated',
       tfaChallenge: null,
       error: null,
+      serverUnreachable: false,
     });
   },
 }));

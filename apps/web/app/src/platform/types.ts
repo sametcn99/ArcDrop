@@ -9,6 +9,13 @@ export interface PlatformAdapter {
   readonly isTauri: boolean;
 
   /**
+   * True inside a Tauri webview on a desktop OS (plan T5: desktop-only UI
+   * such as the autostart toggle). False in browsers/extensions; on mobile
+   * webviews; resolves false when the OS type is unavailable.
+   */
+  readonly isDesktop: boolean;
+
+  /**
    * Fetch implementation for API calls. Browsers return the global fetch;
    * Tauri (T2) returns the CORS-free plugin-http fetch.
    */

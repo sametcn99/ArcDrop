@@ -19,6 +19,8 @@ export function createBrowserPlatform(): PlatformAdapter {
       return detectTauri();
     },
 
+    isDesktop: false,
+
     // Resolve the global fetch per call so test stubs (and, in T2, the native
     // implementation swap) are always picked up at invocation time.
     getFetch: () => (input, init) => fetch(input, init),

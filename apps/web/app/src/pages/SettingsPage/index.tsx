@@ -6,6 +6,7 @@ import Typography from '@mui/material/Typography';
 import { useState } from 'react';
 import { ApiTokensSection } from './components/ApiTokensSection';
 import { DangerZoneSection } from './components/DangerZoneSection';
+import { DesktopSection } from './components/DesktopSection';
 import { NotificationsSection } from './components/NotificationsSection';
 import { ProfileSection } from './components/ProfileSection';
 import { ServerSection } from './components/ServerSection';
@@ -36,6 +37,7 @@ export default function SettingsPage() {
           <Stack spacing={3}>
             <ProfileSection />
             <ServerSection />
+            <DesktopSection />
           </Stack>
         ) : null}
         {tab === 'security' ? (

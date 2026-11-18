@@ -4,5 +4,5 @@
   "description": "Desktop-only capability: the deep-link plugin is registered behind #[cfg(desktop)] (deep links arrive via intents/App Links on mobile), so its ACL entry must be scoped to desktop platforms or mobile builds fail with 'Permission deep-link:default not found'.",
   "platforms": ["macOS", "windows", "linux"],
   "windows": ["main"],
-  "permissions": ["deep-link:default"]
+  "permissions": ["deep-link:default", "window-state:default", "autostart:default"]
 }

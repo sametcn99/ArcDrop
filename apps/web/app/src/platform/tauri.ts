@@ -23,8 +23,7 @@ export interface TauriPlatformDeps {
   openExternalUrl: (url: string) => Promise<void>;
   osType: () => string;
   osVersion: () => string;
-  userAgent: () => string;
-  /** Plugin event channel (share-target warm start). */
+  userAgent: () => string; /** Plugin event channel (share-target warm start). */
   addPluginListener?: (
     plugin: string,
     event: string,
@@ -90,8 +89,24 @@ export function androidModelFromUserAgent(userAgent: string): string | null {
  * `platform/index.ts` when the app runs inside a Tauri webview.
  */
 export function createTauriPlatform(deps: TauriPlatformDeps = defaultDeps): PlatformAdapter {
+  // Desktop check (plan T5): plugin-os resolves the type synchronously from
+  // webview-injected internals; any failure (plugin missing, tests) degrades
+  // to "not desktop" so desktop-only UI stays hidden.
+  const computeIsDesktop = (): boolean => {
+    try {
+      const os = deps.osType();
+      return os === 'windows' || os === 'macos' || os === 'linux';
+    } catch {
+      return false;
+    }
+  };
+
   return {
     isTauri: true,
+
+    get isDesktop() {
+      return computeIsDesktop();
+    },
 
     // plugin-http's fetch travels through the Rust IPC layer (capability:
     // http:default) so API requests are never subject to browser CORS —

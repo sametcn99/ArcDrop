@@ -17,6 +17,7 @@ const SettingsPage = lazy(() => import('../pages/SettingsPage'));
 const AdminPage = lazy(() => import('../pages/AdminPage'));
 const PublicSharePage = lazy(() => import('../pages/PublicSharePage'));
 const ServerAddressPage = lazy(() => import('../pages/ServerAddressPage'));
+const ServerUnreachablePage = lazy(() => import('../pages/ServerUnreachablePage'));
 
 function withSuspense(node: ReactNode): ReactNode {
   return <Suspense fallback={<RouteLoader />}>{node}</Suspense>;
@@ -82,6 +83,11 @@ export const appRoutes: RouteObject[] = [
     // Settings → "Change server" can also land here.
     path: '/server',
     element: withSuspense(<ServerAddressPage />),
+  },
+  {
+    // Boot-time offline screen (plan T5): reachable in every auth state.
+    path: '/server-unreachable',
+    element: withSuspense(<ServerUnreachablePage />),
   },
   {
     element: <PublicOnly />,

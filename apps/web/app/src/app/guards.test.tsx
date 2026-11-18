@@ -151,6 +151,27 @@ describe('Route guards & logout flow', () => {
     ).toBeInTheDocument();
   }, 60_000);
 
+  it('shows the unreachable screen instead of sign-in when the server cannot be reached (plan T5)', async () => {
+    hasResolvedBaseUrlMock.mockReturnValue(true);
+    useAuthStore.setState({ status: 'unauthenticated', serverUnreachable: true });
+
+    renderAtPath('/settings');
+
+    expect(
+      await screen.findByRole('heading', { name: 'Cannot reach your server' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Sign in' })).not.toBeInTheDocument();
+  }, 60_000);
+
+  it('clears the unreachable flag when a session is established again (plan T5)', () => {
+    // Recovery semantics without a render dance: the flag is set on boot-time
+    // network failure and must clear as soon as a session succeeds again —
+    // after which the guards fall back to the normal sign-in/library flow.
+    useAuthStore.setState({ serverUnreachable: true });
+    useAuthStore.getState().setSession(makeMockSession());
+    expect(useAuthStore.getState().serverUnreachable).toBe(false);
+  }, 60_000);
+
   it('restores the persisted session on boot without redirecting to /login', async () => {
     apiClient.clearTokens();
     window.localStorage.setItem('arcdrop.refreshToken', 'persisted-refresh-token');

@@ -15,6 +15,7 @@ function fakeAdapter(isTauri: boolean): PlatformAdapter {
     saveBlob: async () => true,
     pickFile: async () => null,
     readLocalFile: async () => null,
+    isDesktop: false,
   };
 }
 

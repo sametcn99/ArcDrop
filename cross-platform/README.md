@@ -117,6 +117,15 @@ cross-platform/
   application/*, …) are copied into the app cache by the share-target plugin
   (100 MB cap) and open the upload dialog preselected — read from the cache
   via the `fs:allow-appcache-read-recursive` scope.
+- **Offline UX** (plan T5): when the configured server is unreachable at
+  boot, a dedicated screen offers "Retry connection" (re-runs session
+  restore, keeping the persisted refresh token) and "Change server" — no
+  silent data loss, no forced re-sign-in. Offline write queuing is future
+  work; failed writes already surface explicit errors.
+- **Desktop polish** (plan T5): window size/position is restored between
+  launches (`plugin-window-state`); closing the window hides ArcDrop to the
+  system tray (Show/Quit menu, core tray API); "Start with system" lives in
+  Settings → Desktop (`plugin-autostart`, desktop builds only).
 - CI: `.github/workflows/ci-cross-platform.yml` — rust-checks, Android debug
   APK, desktop matrix (windows/ubuntu/macos, `--no-bundle`), and an iOS
   simulator build (continuous since T2, unsigned). Full bundles/signing come

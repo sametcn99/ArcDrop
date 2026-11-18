@@ -93,5 +93,7 @@ export function createExtensionPlatform(): PlatformAdapter {
     pickFile: async () => null,
 
     readLocalFile: async () => null,
+
+    isDesktop: false,
   };
 }
