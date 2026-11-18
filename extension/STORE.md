@@ -91,8 +91,9 @@ data in the shots — use the local smoke instance with dummy data.
   `manifest.json` (firefox-prefixed block) before a real AMO listing if a
   different id is preferred.
 - AMO builds are unsigned zips; self-distribution works via "Install
-  Add-on From File" with `xpinstall.signs.requiredToInstall` off on
-  Developer Edition, or via the store after signing.
+  Add-on From File" on Firefox Developer/Nightly Edition (where
+  `xpinstall.signatures.required` can be turned off), or via the store
+  after signing.
 
 ## Release flow
 
