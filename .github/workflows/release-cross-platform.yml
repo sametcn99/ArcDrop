@@ -31,11 +31,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            args: '--bundle msi nsis'
+            args: '--bundles msi nsis'
           - os: macos-latest
-            args: '--bundle dmg'
+            args: '--bundles dmg'
           - os: ubuntu-latest
-            args: '--bundle appimage deb'
+            args: '--bundles appimage deb'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
