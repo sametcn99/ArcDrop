@@ -9,6 +9,7 @@ import { origin } from './fixtures';
 export interface Driver {
   visit(url: string): Promise<void>;
   click(selector: string): Promise<void>;
+  setViewport(width: number, height: number): Promise<void>;
   evaluate<T>(script: string, ...args: unknown[]): Promise<T>;
   screenshot(path: string, fullPage?: boolean): Promise<void>;
   close(): Promise<void>;
@@ -54,6 +55,7 @@ export async function openChromium(mobile: boolean, extension?: string) {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
     },
     click: (selector) => page.locator(selector).click(),
+    setViewport: (width, height) => page.setViewportSize({ width, height }),
     evaluate: (script, ...args) =>
       page.evaluate(`(function () { ${script} })(...${JSON.stringify(args)})`),
     async screenshot(path, fullPage = true) {
@@ -105,6 +107,9 @@ async function openWebDriver(endpoint: string, capabilities: Record<string, unkn
         value: selector,
       });
       await request(`/element/${element[key]}/click`, {});
+    },
+    async setViewport(width, height) {
+      await request('/window/rect', { width, height });
     },
     evaluate: (script, ...args) => request('/execute/sync', { script, args }),
     async screenshot(path) {

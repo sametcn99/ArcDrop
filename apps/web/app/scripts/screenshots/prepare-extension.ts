@@ -26,10 +26,17 @@ for (const browser of ['chromium', 'firefox']) {
       if (existing) return existing;
       const tab = await chrome.tabs.create({ url: fixtureUrl, active: false });
       await chrome.tabs.create({ url: ${JSON.stringify(`${origin}/sample/2`)}, active: false });
-      return tab;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        const loaded = await chrome.tabs.get(tab.id);
+        if (loaded.url === fixtureUrl && loaded.status === 'complete') return loaded;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error('The sample tab did not load');
     });
-    chrome.tabs.query = async (info) =>
-      info.active ? [await tabsReady] : (await tabsReady, queryTabs(info));
+    chrome.tabs.query = async (info) => {
+      const active = await tabsReady;
+      return info.active ? [active] : queryTabs(info);
+    };
   `,
   );
   await Bun.write(

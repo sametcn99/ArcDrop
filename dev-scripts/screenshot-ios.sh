@@ -20,7 +20,7 @@ udid=$(xcrun simctl list devices available -j | bun -e '
 xcrun simctl boot "$udid"
 trap 'xcrun simctl shutdown "$udid"' EXIT
 xcrun simctl bootstatus "$udid" -b
-xcrun simctl status_bar "$udid" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState unplugged --batteryLevel 100
+xcrun simctl status_bar "$udid" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --cellularMode active --cellularBars 4 --batteryState discharging --batteryLevel 100
 xcrun simctl ui "$udid" appearance light
 xcrun simctl install "$udid" "$built_app"
 xcrun simctl launch "$udid" com.arcdrop.client

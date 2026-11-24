@@ -115,13 +115,12 @@ async function login(driver: Driver, popup: boolean, captureName: string) {
   await click(driver, 'button', popup ? 'Verify' : 'Verify and sign in');
 }
 
-async function captureApp(driver: Driver, base: string, beforeAccount?: () => Promise<void>) {
+async function captureApp(driver: Driver, base: string) {
   for (const page of guestPages) await pageShot(driver, page, base);
   await driver.visit(`${base}/login`);
   await visible(driver, 'Access your ArcDrop bookmark library.');
   await login(driver, false, 'login-two-factor');
   await visible(driver, 'ArcDrop Architecture Guide');
-  await beforeAccount?.();
   for (const page of accountPages) await pageShot(driver, page, base);
 }
 
@@ -134,6 +133,7 @@ async function captureExtension(
   const popup = `${base}/${popupPath}`;
   const options = `${base}/${optionsPath}`;
   const app = `${base}/pages/app/index.html#`;
+  await driver.setViewport(384, 720);
   await driver.visit(popup);
   await visible(driver, 'Connect your server');
   await shot(driver, 'extension-popup-setup', false);
@@ -142,19 +142,21 @@ async function captureExtension(
   await visible(driver, 'Use your ArcDrop account credentials.');
   await shot(driver, 'extension-popup-login', false);
 
-  await captureApp(driver, app, async () => {
-    await driver.visit(popup);
-    await visible(driver, 'Use your ArcDrop account credentials.');
-    await login(driver, true, 'extension-popup-two-factor');
-    await visible(driver, 'Quick save');
-    await shot(driver, 'extension-popup-editor', false);
-    await click(driver, 'button', 'Save all tabs');
-    await visible(driver, 'savable tab(s) found.');
-    await shot(driver, 'extension-popup-save-all-tabs', false);
-    await driver.visit(options);
-    await visible(driver, 'Manage sessions in ArcDrop');
-    await shot(driver, 'extension-options');
-  });
+  await login(driver, true, 'extension-popup-two-factor');
+  await visible(driver, 'Save all tabs');
+  await shot(driver, 'extension-popup-editor', false);
+  await click(driver, 'button', 'Save all tabs');
+  await visible(driver, 'savable tab(s) found.');
+  await shot(driver, 'extension-popup-save-all-tabs', false);
+  await driver.setViewport(1440, 1000);
+  await driver.visit(options);
+  await visible(driver, 'Manage sessions in ArcDrop');
+  await shot(driver, 'extension-options');
+
+  await driver.visit(popup);
+  await click(driver, 'button', 'Disconnect');
+  await visible(driver, 'Connect your server');
+  await captureApp(driver, app);
 }
 
 const fixtures = await startFixtures();

@@ -6,8 +6,12 @@
 // calls requestOriginPermission directly from its submit handler — messages
 // to the background do not carry the gesture.
 
-/** Match pattern granting exactly this origin's paths ("origin/*"). */
+/** Firefox match patterns omit the port. The API client still uses the configured URL. */
 export function originPattern(origin: string): string {
+  if (typeof chrome !== 'undefined' && 'getBrowserInfo' in (chrome.runtime ?? {})) {
+    const { protocol, hostname } = new URL(origin);
+    return `${protocol}//${hostname}/*`;
+  }
   return `${origin}/*`;
 }
 

@@ -256,6 +256,7 @@ jobs:
           bun --cwd=cross-platform run ios:init
           bun --cwd=cross-platform run ios:build --features screenshot-webdriver
       - name: Capture in iOS Simulator
+        timeout-minutes: 10
         run: bash dev-scripts/screenshot-ios.sh
       - uses: actions/upload-artifact@v4
         with:
