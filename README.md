@@ -40,7 +40,7 @@ The extension and Tauri use their own lockfiles. See the [extension guide](exten
 
 ## Screenshot gallery
 
-Run [Screenshot gallery](https://github.com/sametcn99/ArcDrop/actions/workflows/screenshots.yml) manually from the Actions tab, or run `gh workflow run screenshots.yml --ref main`. The workflow uses a local mock ArcDrop server to capture every app route, the settings and admin tabs, and the extension popup and options. It runs desktop and mobile web layouts, Chromium and Firefox extensions, native desktop apps on Linux, macOS and Windows, and the Android and iOS clients in an emulator and simulator.
+Run [Screenshot gallery](https://github.com/sametcn99/ArcDrop/actions/workflows/screenshots.yml) manually from the Actions tab, or run `gh workflow run screenshots.yml --ref main`. The workflow uses a local mock ArcDrop server to capture every app route, the settings and admin tabs, and the extension popup and options. It runs desktop and mobile web layouts, Chromium and Firefox extensions, native desktop apps on Linux, macOS and Windows, and the Android and iOS clients in an emulator and simulator. It also captures the live API reference with a disposable database.
 
 The [latest gallery](https://github.com/sametcn99/ArcDrop/tree/screenshots/docs/screenshots/latest) lives under `docs/screenshots/latest` on the `screenshots` branch. Only complete runs on the default branch update the gallery. Workflow artifacts contain the PNGs for each target.
 

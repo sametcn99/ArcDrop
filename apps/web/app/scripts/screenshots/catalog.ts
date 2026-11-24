@@ -3,6 +3,7 @@ export interface Screenshot {
   path: string;
   text: string;
   tab?: string;
+  selector?: string;
 }
 
 export const guestPages: Screenshot[] = [
@@ -27,6 +28,13 @@ export const accountPages: Screenshot[] = [
     path: '/bookmarks/bm-1',
     text: 'Keep research material searchable and easy to revisit.',
   },
+  {
+    name: 'bookmark-archive',
+    path: '/bookmarks/bm-1',
+    tab: 'Archive',
+    text: 'Readable HTML',
+    selector: 'iframe[title="Archived readable copy"][srcdoc]',
+  },
   { name: 'trash', path: '/trash', text: 'An older research draft' },
   { name: 'health-duplicates', path: '/health', tab: 'Duplicates', text: 'Normalized URL:' },
   { name: 'health-broken-links', path: '/health', tab: 'Broken links', text: 'HTTP 404' },
@@ -37,7 +45,7 @@ export const accountPages: Screenshot[] = [
     name: 'settings-notifications',
     path: '/settings',
     tab: 'Notifications',
-    text: 'Open notification center',
+    text: 'Review accessibility references',
   },
   { name: 'settings-api-tokens', path: '/settings', tab: 'API tokens', text: 'Research assistant' },
   { name: 'admin-users', path: '/admin', tab: 'Users', text: 'researcher@arcdrop.test' },
@@ -77,4 +85,10 @@ export const targets = [
   'desktop-windows',
   'android-emulator',
   'ios-simulator',
+  'api-reference',
 ] as const;
+
+export function screenshotNames(target: (typeof targets)[number]): string[] {
+  if (target === 'api-reference') return ['api-reference'];
+  return target.startsWith('extension-') ? extensionShotNames : webShotNames;
+}

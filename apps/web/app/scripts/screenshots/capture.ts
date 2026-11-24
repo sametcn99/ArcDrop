@@ -13,7 +13,10 @@ await mkdir(output, { recursive: true });
 async function visible(driver: Driver, label: string) {
   try {
     await until(label, () =>
-      driver.evaluate('return document.body?.innerText.includes(arguments[0]);', label),
+      driver.evaluate(
+        'return document.body?.innerText.toLowerCase().includes(arguments[0].toLowerCase());',
+        label,
+      ),
     );
   } catch (error) {
     const page = await driver
@@ -23,21 +26,27 @@ async function visible(driver: Driver, label: string) {
   }
 }
 
-async function click(driver: Driver, role: 'tab' | 'button', label: string) {
+async function click(driver: Driver, role: 'tab' | 'button', label: string, trusted = false) {
   await until(`${role} "${label}"`, () =>
     driver.evaluate(
       `
-    const [role, label] = arguments;
+    const [role, label, trusted] = arguments;
     const selector = role === 'tab' ? '[role="tab"]' : 'button';
-    const control = [...document.querySelectorAll(selector)].find((element) =>
-      element.textContent.trim() === label && !element.disabled && element.getClientRects().length);
+    const control = [...document.querySelectorAll(selector)].find((element) => {
+      const text = element.textContent.trim();
+      const matches = text === label || (role === 'tab' && text.startsWith(label + ' ('));
+      return matches && !element.disabled && element.getClientRects().length;
+    });
     if (!control) return false;
-    control.click();
+    if (trusted) control.dataset.screenshotClick = 'true';
+    else control.click();
     return true;`,
       role,
       label,
+      trusted,
     ),
   );
+  if (trusted) await driver.click('[data-screenshot-click="true"]');
 }
 
 async function fill(driver: Driver, selector: string, value: string) {
@@ -84,6 +93,11 @@ async function pageShot(driver: Driver, page: Screenshot, base: string) {
   await driver.visit(base + page.path);
   if (page.tab) await click(driver, 'tab', page.tab);
   await visible(driver, page.text);
+  if (page.selector) {
+    await until(page.selector, () =>
+      driver.evaluate('return Boolean(document.querySelector(arguments[0]));', page.selector),
+    );
+  }
   await shot(driver, page.name);
 }
 
@@ -93,7 +107,11 @@ async function login(driver: Driver, popup: boolean, captureName: string) {
   await click(driver, 'button', 'Sign in');
   await visible(driver, 'Two-factor authentication');
   await shot(driver, captureName, !popup);
-  await fill(driver, 'input[autocomplete=one-time-code], input[inputmode=numeric]', '123456');
+  await fill(
+    driver,
+    popup ? 'input' : 'input[autocomplete=one-time-code], input[inputmode=numeric]',
+    '123456',
+  );
   await click(driver, 'button', popup ? 'Verify' : 'Verify and sign in');
 }
 
@@ -120,7 +138,7 @@ async function captureExtension(
   await visible(driver, 'Connect your server');
   await shot(driver, 'extension-popup-setup', false);
   await fill(driver, 'input', origin);
-  await click(driver, 'button', 'Continue');
+  await click(driver, 'button', 'Continue', true);
   await visible(driver, 'Use your ArcDrop account credentials.');
   await shot(driver, 'extension-popup-login', false);
 
@@ -143,7 +161,14 @@ const fixtures = await startFixtures();
 let driver: Driver | undefined;
 let desktop: ReturnType<typeof Bun.spawn> | undefined;
 try {
-  if (target === 'web-desktop' || target === 'web-mobile') {
+  if (target === 'api-reference') {
+    ({ driver } = await openChromium(false));
+    const api = 'http://127.0.0.1:4180';
+    await until('ArcDrop API docs server', async () => (await fetch(`${api}/openapi.json`)).ok);
+    await driver.visit(`${api}/docs`);
+    await visible(driver, 'ArcDrop API');
+    await shot(driver, 'api-reference', false);
+  } else if (target === 'web-desktop' || target === 'web-mobile') {
     ({ driver } = await openChromium(target === 'web-mobile'));
     await captureApp(driver, origin);
   } else if (target === 'extension-chromium' || target === 'extension-firefox') {
@@ -183,7 +208,16 @@ try {
         stderr: 'inherit',
       });
     }
-    driver = await openNative();
+    driver = await Promise.race([
+      openNative(),
+      ...(desktop
+        ? [
+            desktop.exited.then((code) => {
+              throw new Error(`ArcDrop exited before opening WebDriver (exit ${code})`);
+            }),
+          ]
+        : []),
+    ]);
     await until('ArcDrop WebView', () =>
       driver!.evaluate('return Boolean(document.querySelector("#root")?.childElementCount);'),
     );

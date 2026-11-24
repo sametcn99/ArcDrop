@@ -73,6 +73,52 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  api-reference:
+    name: API reference
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: arcdrop
+          POSTGRES_PASSWORD: arcdrop
+          POSTGRES_DB: arcdrop_screenshots
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U arcdrop"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ARCDROP__DATABASE__URL: postgres://arcdrop:arcdrop@127.0.0.1:5432/arcdrop_screenshots
+      ARCDROP__JWT__SECRET: arcdrop-disposable-screenshots-jwt-secret
+      ARCDROP__TOTP__ENCRYPTION_KEY: arcdrop-disposable-screenshots-totp-key
+      ARCDROP__PORT: '4180'
+      ARCDROP__METADATA__ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Capture the API reference with a disposable database
+        run: |
+          export ARCDROP__DATA_DIR="$RUNNER_TEMP/arcdrop-api-data"
+          bun install --frozen-lockfile
+          bun --cwd=apps/api run migration:run
+          bun apps/api/dist/main.js &
+          api_pid=$!
+          trap 'kill "$api_pid" 2>/dev/null || true' EXIT
+          bun x --no-install playwright-core install --with-deps chromium
+          bun "$SCREENSHOT_SCRIPT" api-reference
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-screenshots-api-reference
+          path: screenshot-output/api-reference/*.png
+          if-no-files-found: error
+          retention-days: 14
+
   desktop:
     name: Native desktop (${{ matrix.target }})
     strategy:
@@ -105,6 +151,7 @@ jobs:
         with:
           workspaces: cross-platform/src-tauri
           key: screenshots-${{ matrix.target }}
+          cache-on-failure: true
       - name: Build native ArcDrop
         run: |
           bun install --frozen-lockfile
@@ -114,7 +161,8 @@ jobs:
         if: runner.os == 'Linux'
         env:
           WEBKIT_DISABLE_DMABUF_RENDERER: '1'
-        run: xvfb-run -a -s '-screen 0 1440x1000x24' bun "$SCREENSHOT_SCRIPT" desktop-linux
+          NO_AT_BRIDGE: '1'
+        run: dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' bun "$SCREENSHOT_SCRIPT" desktop-linux
       - name: Capture on macOS or Windows
         if: runner.os != 'Linux'
         env:
@@ -149,6 +197,7 @@ jobs:
         with:
           workspaces: cross-platform/src-tauri
           key: screenshots-android
+          cache-on-failure: true
       - name: Enable hardware virtualization
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -198,6 +247,7 @@ jobs:
         with:
           workspaces: cross-platform/src-tauri
           key: screenshots-ios
+          cache-on-failure: true
       - name: Build ArcDrop for iOS Simulator
         run: |
           bun install --frozen-lockfile
@@ -217,7 +267,7 @@ jobs:
   publish:
     name: Verify and commit the gallery
     if: github.ref_name == github.event.repository.default_branch
-    needs: [web, desktop, android, ios]
+    needs: [web, api-reference, desktop, android, ios]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

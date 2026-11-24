@@ -21,6 +21,10 @@ mkdir -p docs/screenshots
 rm -rf docs/screenshots/latest
 mv "$gallery" docs/screenshots/latest
 git add -- docs/screenshots/latest
+if git diff --cached --quiet; then
+  popd
+  exit 0
+fi
 git -c user.name='github-actions[bot]' \
   -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
   commit -m "Update screenshot gallery for ${GITHUB_SHA:0:12}"

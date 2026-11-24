@@ -8,6 +8,7 @@ import { origin } from './fixtures';
 
 export interface Driver {
   visit(url: string): Promise<void>;
+  click(selector: string): Promise<void>;
   evaluate<T>(script: string, ...args: unknown[]): Promise<T>;
   screenshot(path: string, fullPage?: boolean): Promise<void>;
   close(): Promise<void>;
@@ -52,6 +53,7 @@ export async function openChromium(mobile: boolean, extension?: string) {
     async visit(url) {
       await page.goto(url, { waitUntil: 'domcontentloaded' });
     },
+    click: (selector) => page.locator(selector).click(),
     evaluate: (script, ...args) =>
       page.evaluate(`(function () { ${script} })(...${JSON.stringify(args)})`),
     async screenshot(path, fullPage = true) {
@@ -95,6 +97,14 @@ async function openWebDriver(endpoint: string, capabilities: Record<string, unkn
   const driver: Driver = {
     async visit(url) {
       await request('/url', { url });
+    },
+    async click(selector) {
+      const key = 'element-6066-11e4-a52e-4f735466cecf';
+      const element = await request<Record<string, string>>('/element', {
+        using: 'css selector',
+        value: selector,
+      });
+      await request(`/element/${element[key]}/click`, {});
     },
     evaluate: (script, ...args) => request('/execute/sync', { script, args }),
     async screenshot(path) {

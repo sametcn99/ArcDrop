@@ -68,9 +68,11 @@ pub fn run() {
                 use tauri::menu::MenuItem;
                 use tauri::tray::TrayIconBuilder;
                 use tauri::Manager;
-                use tauri_plugin_deep_link::DeepLinkExt;
-
-                app.deep_link().register("arcdrop")?;
+                #[cfg(any(target_os = "windows", target_os = "linux"))]
+                {
+                    use tauri_plugin_deep_link::DeepLinkExt;
+                    app.deep_link().register("arcdrop")?;
+                }
 
                 // System tray (plan T5): show/hide the single window and a
                 // quit entry — closing the window hides to tray instead of

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { copyFile, mkdir, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { accountPages, extensionShotNames, guestPages, targets, webShotNames } from './catalog';
+import { accountPages, guestPages, screenshotNames, targets } from './catalog';
 
 const [artifacts, destination] = process.argv.slice(2);
 assert.ok(artifacts && destination, 'Provide the downloaded artifacts dir and the gallery dir');
@@ -36,9 +36,7 @@ const gallery = [
 const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 for (const target of targets) {
   const dir = resolve(artifacts, `arcdrop-screenshots-${target}`);
-  const expected = (target.startsWith('extension-') ? extensionShotNames : webShotNames).map(
-    (name) => `${name}.png`,
-  );
+  const expected = screenshotNames(target).map((name) => `${name}.png`);
   assert.deepEqual(
     (await readdir(dir)).sort(),
     [...expected].sort(),

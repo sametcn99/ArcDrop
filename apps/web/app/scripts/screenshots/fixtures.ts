@@ -14,7 +14,7 @@ import {
   problemJsonResponse,
 } from '../../src/test/msw/handlers';
 
-export const port = 4174;
+export const port = Number(process.env['ARCDROP_SCREENSHOT_PORT'] ?? 4174);
 export const origin = `http://127.0.0.1:${port}`;
 export const demoEmail = 'demo@arcdrop.test';
 export const totpEmail = 'two-factor@arcdrop.test';
@@ -246,6 +246,8 @@ export async function fixtureResponse(request: Request): Promise<Response | unde
   }
   if (pathname.startsWith('/api/v1/')) {
     const response = await getResponse(handlers, request);
+    if (process.env['ARCDROP_SCREENSHOT_TRACE'])
+      console.log(request.method, pathname, response?.status);
     if (response) return response;
     console.warn(`Missing screenshot fixture: ${request.method} ${pathname}`);
     return Response.json({ detail: 'Missing screenshot fixture' }, { status: 404 });

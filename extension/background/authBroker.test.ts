@@ -271,6 +271,7 @@ describe('authBroker', () => {
       password: 'correct-horse-battery',
     });
 
+    expect(await instance.handleMessage({ type: 'auth/access-token' })).toMatchObject({ ok: true });
     now += 900_000 + 31_000; // past the 30 s margin
 
     const tokenResult = await instance.handleMessage({ type: 'auth/access-token' });
@@ -346,11 +347,21 @@ describe('authBroker', () => {
     expect(result).toEqual({ ok: true, kind: 'disconnected' });
   });
 
-  it('rejects access-token requests when not connected', async () => {
+  it('rejects access-token requests while disconnected and recovers after sign-in', async () => {
     await writeVault(area, { baseUrl: 'http://localhost:3000' });
-    const result = await broker(AUTH_ROUTES).handleMessage({ type: 'auth/access-token' });
+    const instance = broker(AUTH_ROUTES);
+    const result = await instance.handleMessage({ type: 'auth/access-token' });
     expect(result).toMatchObject({ ok: false, code: 'SESSION_EXPIRED' });
     expect(await readVault(area)).toMatchObject({ refreshToken: null });
+    await instance.handleMessage({
+      type: 'auth/login',
+      email: 'me@example.com',
+      password: 'correct-horse-battery',
+    });
+    expect(await instance.handleMessage({ type: 'auth/access-token' })).toMatchObject({
+      ok: true,
+      refreshToken: 'r1',
+    });
   });
 
   it('answers unknown messages with a failure', async () => {

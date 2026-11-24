@@ -111,10 +111,10 @@ export function createAuthBroker(deps: AuthBrokerDeps) {
           await clearSession(area);
         }
         throw apiError;
-      } finally {
-        inFlightRefresh = null;
       }
-    })();
+    })().finally(() => {
+      inFlightRefresh = null;
+    });
 
     return inFlightRefresh;
   }
