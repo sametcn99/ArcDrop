@@ -1,0 +1,235 @@
+name: Screenshot gallery
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arcdrop-screenshot-gallery
+  cancel-in-progress: false
+
+env:
+  SCREENSHOT_SCRIPT: apps/web/app/scripts/screenshots/capture.ts
+
+jobs:
+  web:
+    name: Web and browser extensions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: browser-actions/setup-firefox@v1
+        id: firefox
+      - name: Install browsers and dependencies
+        run: |
+          bun install --frozen-lockfile
+          bun x --no-install playwright-core install --with-deps chromium
+          curl --fail --silent --show-error --location \
+            https://github.com/mozilla/geckodriver/releases/download/v0.37.1/geckodriver-v0.37.1-linux64.tar.gz \
+            | tar xz -C "$RUNNER_TEMP"
+          echo "ARCDROP_GECKODRIVER_PATH=$RUNNER_TEMP/geckodriver" >> "$GITHUB_ENV"
+          bun --cwd=extension install --frozen-lockfile
+      - name: Build and capture web
+        run: |
+          bun run web:build
+          bun "$SCREENSHOT_SCRIPT" web-desktop
+          bun "$SCREENSHOT_SCRIPT" web-mobile
+      - name: Prepare and capture browser extensions
+        env:
+          ARCDROP_FIREFOX_PATH: ${{ steps.firefox.outputs.firefox-path }}
+        run: |
+          bun --cwd=extension run build
+          bun apps/web/app/scripts/screenshots/prepare-extension.ts
+          bun --cwd=extension run scripts/zip-release.ts
+          bun "$SCREENSHOT_SCRIPT" extension-chromium
+          bun "$SCREENSHOT_SCRIPT" extension-firefox
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-screenshots-web-desktop
+          path: screenshot-output/web-desktop/*.png
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-screenshots-web-mobile
+          path: screenshot-output/web-mobile/*.png
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-screenshots-extension-chromium
+          path: screenshot-output/extension-chromium/*.png
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-screenshots-extension-firefox
+          path: screenshot-output/extension-firefox/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+  desktop:
+    name: Native desktop (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: desktop-linux }
+          - { os: macos-latest, target: desktop-macos }
+          - { os: windows-latest, target: desktop-windows }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      VITE_API_URL: http://127.0.0.1:4174
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Install Linux application dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev xvfb xauth
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cross-platform/src-tauri
+          key: screenshots-${{ matrix.target }}
+      - name: Build native ArcDrop
+        run: |
+          bun install --frozen-lockfile
+          bun --cwd=cross-platform install --frozen-lockfile
+          bun --cwd=cross-platform run build:no-bundle --debug --features screenshot-webdriver
+      - name: Capture on Linux
+        if: runner.os == 'Linux'
+        env:
+          WEBKIT_DISABLE_DMABUF_RENDERER: '1'
+        run: xvfb-run -a -s '-screen 0 1440x1000x24' bun "$SCREENSHOT_SCRIPT" desktop-linux
+      - name: Capture on macOS or Windows
+        if: runner.os != 'Linux'
+        env:
+          CAPTURE_TARGET: ${{ matrix.target }}
+        run: bun "$SCREENSHOT_SCRIPT" "$CAPTURE_TARGET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-screenshots-${{ matrix.target }}
+          path: screenshot-output/${{ matrix.target }}/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+  android:
+    name: Android emulator
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      VITE_API_URL: http://127.0.0.1:4174
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: x86_64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cross-platform/src-tauri
+          key: screenshots-android
+      - name: Enable hardware virtualization
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Build emulator APK
+        run: |
+          bun install --frozen-lockfile
+          bun --cwd=cross-platform install --frozen-lockfile
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install 'ndk;27.2.12479018'
+          export NDK_HOME="$ANDROID_HOME/ndk/27.2.12479018"
+          bun --cwd=cross-platform run android:build --target x86_64 --features screenshot-webdriver
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash dev-scripts/screenshot-android.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-screenshots-android-emulator
+          path: screenshot-output/android-emulator/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+  ios:
+    name: iOS simulator
+    runs-on: macos-latest
+    timeout-minutes: 50
+    env:
+      VITE_API_URL: http://127.0.0.1:4174
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-apple-ios,aarch64-apple-ios-sim
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cross-platform/src-tauri
+          key: screenshots-ios
+      - name: Build ArcDrop for iOS Simulator
+        run: |
+          bun install --frozen-lockfile
+          bun --cwd=cross-platform install --frozen-lockfile
+          brew install xcodegen
+          bun --cwd=cross-platform run ios:init
+          bun --cwd=cross-platform run ios:build --features screenshot-webdriver
+      - name: Capture in iOS Simulator
+        run: bash dev-scripts/screenshot-ios.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-screenshots-ios-simulator
+          path: screenshot-output/ios-simulator/*.png
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Verify and commit the gallery
+    if: github.ref_name == github.event.repository.default_branch
+    needs: [web, desktop, android, ios]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: arcdrop-screenshots-*
+          path: ${{ runner.temp }}/arcdrop-screenshots
+      - name: Publish to the screenshots branch
+        run: bash dev-scripts/publish-screenshots.sh

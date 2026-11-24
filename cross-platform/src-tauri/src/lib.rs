@@ -38,6 +38,12 @@ pub fn run() {
             .plugin(tauri_plugin_process::init());
     }
 
+    // The screenshot workflow uses native WebViews and enables automation only in debug builds.
+    #[cfg(all(debug_assertions, feature = "screenshot-webdriver"))]
+    {
+        builder = builder.plugin(tauri_plugin_webdriver::init());
+    }
+
     builder
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
