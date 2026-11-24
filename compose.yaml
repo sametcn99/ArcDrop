@@ -126,6 +126,8 @@ networks:
     ipam:
       config:
         - subnet: ${ARCDROP_GATEWAY_SUBNET:-172.30.249.0/29}
+          # Keep the trusted web IP outside the addresses Docker assigns dynamically.
+          ip_range: ${ARCDROP_GATEWAY_IP_RANGE:-172.30.249.4/30}
 
 volumes:
   arcdrop-data:
