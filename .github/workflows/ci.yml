@@ -88,3 +88,81 @@ jobs:
 
       - name: E2E tests
         run: bun run test:e2e
+
+  compose-browser:
+    name: Compose browser smoke (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        mode: [clean, upgrade]
+    env:
+      COMPOSE_PROJECT_NAME: arcdrop-ci
+      ARCDROP__JWT__SECRET: arcdrop-ci-disposable-jwt-secret
+      ARCDROP__TOTP__ENCRYPTION_KEY: arcdrop-ci-disposable-totp-encryption-key
+      ARCDROP__PUBLIC__BASE_URL: https://bookmarks.example.test
+      ARCDROP__RATE_LIMIT__PUBLIC_PER_MINUTE: '4'
+      ARCDROP_SMOKE_PUBLIC_ORIGIN: https://bookmarks.example.test
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - run: bun install --frozen-lockfile
+      - run: bunx --no-install playwright-core install --with-deps chromium
+
+      - name: Seed the previous Compose version
+        if: matrix.mode == 'upgrade'
+        run: |
+          git worktree add --detach "$RUNNER_TEMP/arcdrop-before" 77cd7ab
+          docker compose -f "$RUNNER_TEMP/arcdrop-before/compose.yaml" up --build --wait
+          ARCDROP_SMOKE_MODE=seed-upgrade bun dev-scripts/smoke-web.ts
+          docker compose -f "$RUNNER_TEMP/arcdrop-before/compose.yaml" down
+
+      - name: Start the web gateway and API
+        run: docker compose up --build --wait
+
+      - name: Exercise the production web app and WebSocket
+        env:
+          ARCDROP_SMOKE_MODE: ${{ matrix.mode }}
+        run: ARCDROP_SMOKE_SHARE_PATH_FILE="$RUNNER_TEMP/arc-share-path" bun dev-scripts/smoke-web.ts
+
+      - name: Verify separate rate limits through the trusted proxy
+        run: |
+          share_path=$(cat "$RUNNER_TEMP/arc-share-path")
+          for attempt in 1 2 3 4; do
+            docker compose exec -T web wget --header 'X-Forwarded-For: 192.0.2.10' -qO /dev/null "http://127.0.0.1:8080$share_path"
+          done
+          limited=$(docker compose exec -T web wget --header 'X-Forwarded-For: 192.0.2.10' -SO /dev/null "http://127.0.0.1:8080$share_path" 2>&1 || true)
+          [[ "$limited" == *'429 Too Many Requests'* ]]
+          docker compose exec -T web wget --header 'X-Forwarded-For: 192.0.2.11' -qO /dev/null "http://127.0.0.1:8080$share_path"
+
+      - name: Restore a database and data-volume backup into a fresh project
+        if: matrix.mode == 'clean'
+        run: |
+          export ARCDROP_BACKUP_SMOKE_STATE="$RUNNER_TEMP/arc-backup-fixture.json"
+          umask 077
+          ARCDROP_BACKUP_SMOKE_MODE=seed bun dev-scripts/smoke-backup.ts
+          docker compose stop api
+          docker compose exec -T db pg_dump -U arcdrop -d arcdrop -Fc > "$RUNNER_TEMP/arc-backup.pgdump"
+          docker compose run --rm -T --no-deps --entrypoint tar api -czf - -C /data . > "$RUNNER_TEMP/arc-backup.tgz"
+          docker compose down
+          export COMPOSE_PROJECT_NAME=arcdrop-restore-ci
+          export ARCDROP__JWT__SECRET=arcdrop-ci-disposable-replacement-jwt
+          docker compose up -d --wait db
+          docker compose exec -T db pg_restore -U arcdrop -d arcdrop --no-owner --no-privileges < "$RUNNER_TEMP/arc-backup.pgdump"
+          docker compose run --rm -T --no-deps --entrypoint tar api -xzf - -C /data < "$RUNNER_TEMP/arc-backup.tgz"
+          docker compose up --build --wait
+          ARCDROP_BACKUP_SMOKE_MODE=restore bun dev-scripts/smoke-backup.ts
+
+      - run: docker compose logs
+        if: failure()
+
+      - name: Remove disposable Compose projects
+        if: always()
+        run: |
+          docker compose down --volumes
+          docker compose --project-name arcdrop-restore-ci down --volumes

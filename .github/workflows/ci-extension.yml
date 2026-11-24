@@ -19,8 +19,10 @@ jobs:
       - name: Install root dependencies
         run: bun install --frozen-lockfile
 
-      - name: Build web app (embedded by the extension from E3 on)
-        run: bun --cwd=apps/web/app run build
+      - name: Build normal web output
+        run: |
+          bun run web:build
+          sha256sum apps/web/app/dist/index.html > "$RUNNER_TEMP/web-build.sha"
 
       - name: Install extension dependencies
         run: bun --cwd=extension install --frozen-lockfile
@@ -34,8 +36,34 @@ jobs:
       - name: Unit tests
         run: bun --cwd=extension run test
 
-      - name: Build (chromium + firefox)
-        run: bun --cwd=extension run build
+      - name: Build and verify independent web and extension outputs
+        run: |
+          bun --cwd=extension run build:release
+          bun --cwd=extension run verify:release
+          sha256sum -c "$RUNNER_TEMP/web-build.sha"
+          bun run web:build
+          sha256sum -c "$RUNNER_TEMP/web-build.sha"
+          bun --cwd=extension run verify:release
+
+      - name: Install Chromium
+        run: bunx --no-install playwright-core install --with-deps chromium
+
+      - name: Load the Chromium extension
+        run: bun dev-scripts/smoke-extension.ts
+
+      - uses: browser-actions/setup-firefox@v1
+        id: firefox
+
+      - name: Install GeckoDriver
+        run: |
+          curl -fsSL --retry 3 https://github.com/mozilla/geckodriver/releases/download/v0.37.1/geckodriver-v0.37.1-linux64.tar.gz -o "$RUNNER_TEMP/geckodriver.tar.gz"
+          tar -xzf "$RUNNER_TEMP/geckodriver.tar.gz" -C "$RUNNER_TEMP" geckodriver
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+      - name: Load the Firefox extension
+        env:
+          ARCDROP_FIREFOX_PATH: ${{ steps.firefox.outputs.firefox-path }}
+        run: bun dev-scripts/smoke-extension-firefox.ts
 
       - name: Upload dist artifacts
         uses: actions/upload-artifact@v4

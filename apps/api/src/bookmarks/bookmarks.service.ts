@@ -19,9 +19,12 @@ import { Collection } from '@api/database/entities/collection.entity';
 import { Tag } from '@api/database/entities/tag.entity';
 import type { EntityManager, Repository } from 'typeorm';
 import { In, IsNull, Not } from 'typeorm';
-import { ChangeLogService } from '@api/change-log/change-log.service';
+import { ChangeLogService, type ChangeRecorder } from '@api/change-log/change-log.service';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
-import { nextMembershipOrder } from '@api/collections/membership-order';
+import {
+  lockUserForMembershipAppend,
+  nextMembershipOrder,
+} from '@api/collections/membership-order';
 import { FileStorageService } from '@api/files/file-storage.service';
 import {
   defaultTitleFromFileName,
@@ -74,6 +77,14 @@ export interface CreateFileBookmarkInput {
   tags?: readonly string[];
   collectionIds?: readonly string[];
   reminderAt?: string | null;
+}
+
+interface RestoreFileBookmark {
+  sourceId: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  contentType?: Bookmark['contentType'];
+  applyRelations(manager: EntityManager, record: ChangeRecorder, bookmarkId: string): Promise<void>;
 }
 
 /**
@@ -420,6 +431,24 @@ export class BookmarksService {
     user: RequestUser,
     input: CreateFileBookmarkInput,
   ): Promise<BookmarkDto> {
+    const bookmark = await this.persistFileBookmark(user, input);
+    if (!bookmark) throw new Error('File bookmark was not created');
+    return bookmark;
+  }
+
+  async restoreFileBookmark(
+    user: RequestUser,
+    input: CreateFileBookmarkInput,
+    restore: RestoreFileBookmark,
+  ): Promise<boolean> {
+    return (await this.persistFileBookmark(user, input, restore)) !== null;
+  }
+
+  private async persistFileBookmark(
+    user: RequestUser,
+    input: CreateFileBookmarkInput,
+    restore?: RestoreFileBookmark,
+  ): Promise<BookmarkDto | null> {
     let fileRef: string | null = null;
     const bookmarkId = randomUUID();
 
@@ -473,14 +502,15 @@ export class BookmarksService {
 
       const providedTitle = cleanOptionalInput(input.title);
       const providedExcerpt = cleanOptionalInput(input.excerpt);
-      const resolvedTitle = clampText(
-        providedTitle ?? extracted?.title ?? defaultTitleFromFileName(safeFileName),
-        MAX_TITLE_LENGTH,
-      );
-      const resolvedExcerpt = clampNullable(
-        providedExcerpt ?? extracted?.excerpt ?? null,
-        MAX_EXCERPT_LENGTH,
-      );
+      const resolvedTitle = restore
+        ? providedTitle
+        : clampText(
+            providedTitle ?? extracted?.title ?? defaultTitleFromFileName(safeFileName),
+            MAX_TITLE_LENGTH,
+          );
+      const resolvedExcerpt = restore
+        ? providedExcerpt
+        : clampNullable(providedExcerpt ?? extracted?.excerpt ?? null, MAX_EXCERPT_LENGTH);
       const resolvedNote = cleanOptionalInput(input.note);
 
       if (input.tempPath) {
@@ -500,7 +530,20 @@ export class BookmarksService {
 
       const now = new Date();
 
-      return await this.changeLog.transact(async (manager, record) => {
+      const result = await this.changeLog.transact(async (manager, record) => {
+        if (restore) {
+          await lockUserForMembershipAppend(manager, user.id);
+          const ownedFile = { userId: user.id, storageKind: 'file' as const };
+          if (
+            await manager.exists(Bookmark, {
+              where: [
+                { ...ownedFile, id: restore.sourceId },
+                { ...ownedFile, portableSourceId: restore.sourceId },
+              ],
+            })
+          )
+            return null;
+        }
         // Lock the user row FIRST via change-log seq increment to preserve
         // strict lock order across upload_usage and bookmark_collections.
         await record(user.id, { entity: 'bookmark', entityId: bookmarkId, action: 'create' });
@@ -526,12 +569,13 @@ export class BookmarksService {
           id: bookmarkId,
           userId: user.id,
           storageKind: 'file',
+          portableSourceId: restore?.sourceId ?? null,
           url: null,
           title: resolvedTitle,
           excerpt: resolvedExcerpt,
           note: resolvedNote,
           favorite: input.favorite ?? false,
-          contentType: spec.contentType,
+          contentType: restore?.contentType ?? spec.contentType,
           coverRef: null,
           iconRef: null,
           fileRef,
@@ -554,8 +598,8 @@ export class BookmarksService {
           cacheCheckedAt: now,
           cacheError,
           archiveText: extracted?.dbTextContent ?? null,
-          createdAt: now,
-          updatedAt: now,
+          createdAt: restore?.createdAt ? new Date(restore.createdAt) : now,
+          updatedAt: restore?.updatedAt ? new Date(restore.updatedAt) : now,
         });
         await manager.insert(Bookmark, entity);
 
@@ -580,11 +624,18 @@ export class BookmarksService {
           });
         }
 
+        if (restore) await restore.applyRelations(manager, record, bookmarkId);
+
         return toBookmarkDto(
           entity,
           resolvedTags.map((tag) => ({ id: tag.id, name: tag.name })),
         );
       });
+      if (result === null) {
+        await this.fileStorage.remove(fileRef);
+        await this.archives.remove(bookmarkId);
+      }
+      return result;
     } catch (error) {
       if (fileRef) {
         await this.fileStorage.remove(fileRef).catch(() => {});

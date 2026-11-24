@@ -1,6 +1,13 @@
 import { z } from 'zod';
-import { isWebApiOrigin, resolveDefaultBaseUrl } from './baseUrl';
+import { BASE_URL_STORAGE_KEY, isWebApiOrigin, resolveDefaultBaseUrl } from './baseUrl';
 import { platform } from '../platform';
+import { detectExtension } from '../platform/extension';
+import {
+  isBrowserSessionEvent,
+  LEGACY_REFRESH_KEY,
+  readBrowserSession,
+  writeBrowserSession,
+} from './browserSession';
 import { authSessionSchema, type AuthSession } from './schemas/auth';
 import { ApiError, problemDetailsSchema, toApiError } from './schemas/problem';
 
@@ -12,6 +19,7 @@ export interface TokenPair {
 export interface ApiClientHooks {
   onSessionRefreshed?: (session: AuthSession) => void;
   onSessionExpired?: (error: ApiError) => void;
+  onSessionChanged?: () => void;
 }
 
 export interface ApiClientConfig {
@@ -88,9 +96,6 @@ export function parseContentDispositionFilename(header: string | null): string |
   const candidate = (plainMatch?.[1] ?? plainMatch?.[2] ?? '').trim();
   return candidate.length > 0 ? candidate : null;
 }
-
-// localStorage key holding the rotating refresh token (see createApiClient).
-const REFRESH_TOKEN_STORAGE_KEY = 'arcdrop.refreshToken';
 
 function buildApiUrl(
   baseUrl: string,
@@ -176,42 +181,64 @@ export function createApiClient(config: ApiClientConfig = {}) {
   // browser, and the CORS-free plugin-http fetch inside Tauri from T2 on.
   const fetchImpl = config.fetchFn ?? platform.getFetch();
 
-  // The access token lives strictly in memory (never persisted). The refresh
-  // token is persisted to localStorage so a page reload can restore the
-  // session via POST /auth/refresh — safe here because the API rotates
-  // refresh tokens on every use and revokes the whole family when a rotated
-  // token is replayed (reuse detection, auth.service.ts).
+  const browser = !platform.isTauri && !detectExtension();
+  const locks = typeof navigator !== 'undefined' && browser ? navigator.locks : undefined;
+  const lockName = 'arcdrop:browser-session';
   let tokens: TokenPair | null = null;
+  let browserSessionId: string | null = null;
+  let generation = 0;
   let inFlightRefresh: Promise<AuthSession> | null = null;
+  let pendingLogout: { generation: number; rotatedToken?: string } | null = null;
   let hooks: ApiClientHooks = {};
 
-  function readPersistedRefreshToken(): string | null {
+  function readLegacyToken(): string | null {
     try {
-      return window.localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
+      return window.localStorage.getItem(LEGACY_REFRESH_KEY);
     } catch {
       return null;
     }
   }
 
-  function writePersistedRefreshToken(refreshToken: string | null): void {
+  function writeLegacyToken(refreshToken: string | null): void {
     try {
-      if (refreshToken) {
-        window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, refreshToken);
-      } else {
-        window.localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
-      }
+      if (refreshToken) window.localStorage.setItem(LEGACY_REFRESH_KEY, refreshToken);
+      else window.localStorage.removeItem(LEGACY_REFRESH_KEY);
     } catch {
-      // Storage unavailable (private mode, sandboxed origin) — session simply
-      // won't survive a reload.
+      // With unavailable storage, the session lives in memory.
     }
+  }
+
+  function serverKey(): string {
+    return baseUrl || window.location.origin;
+  }
+
+  function readPersistedRefreshToken(): string | null {
+    if (!browser) return readLegacyToken();
+    if (!locks) return null;
+    const stored = readBrowserSession();
+    if (stored) return stored.server === serverKey() ? stored.refreshToken : null;
+    return browserSessionId === null ? readLegacyToken() : null;
   }
 
   function setHooks(nextHooks: ApiClientHooks): void {
     hooks = nextHooks;
   }
 
+  function forgetLocalSession(): void {
+    generation++;
+    tokens = null;
+    browserSessionId = null;
+    inFlightRefresh = null;
+  }
+
   function setBaseUrl(nextBaseUrl: string): void {
-    baseUrl = nextBaseUrl.trim().replace(/\/+$/, '');
+    const normalized = nextBaseUrl.trim().replace(/\/+$/, '');
+    if (normalized !== baseUrl) {
+      if (locks && readBrowserSession()?.server === serverKey()) writeBrowserSession(null);
+      clearTokens();
+      baseUrl = normalized;
+      hooks.onSessionChanged?.();
+    }
   }
 
   function getBaseUrl(): string {
@@ -226,13 +253,50 @@ export function createApiClient(config: ApiClientConfig = {}) {
   }
 
   function setTokens(nextTokens: TokenPair | null): void {
-    tokens = nextTokens ? { ...nextTokens } : null;
-    writePersistedRefreshToken(tokens?.refreshToken ?? null);
+    if (nextTokens === null) {
+      clearTokens();
+      return;
+    }
+    forgetLocalSession();
+    tokens = { ...nextTokens };
+    if (!browser) {
+      writeLegacyToken(tokens.refreshToken);
+    } else if (locks) {
+      const id = crypto.randomUUID();
+      if (writeBrowserSession({ id, server: serverKey(), refreshToken: tokens.refreshToken })) {
+        browserSessionId = id;
+        writeLegacyToken(null);
+      }
+    }
   }
 
   function clearTokens(): void {
-    tokens = null;
-    writePersistedRefreshToken(null);
+    if (!browser) {
+      writeLegacyToken(null);
+    } else if (locks) {
+      const stored = readBrowserSession();
+      if (stored?.id === browserSessionId) writeBrowserSession(null);
+      if (!stored) writeLegacyToken(null);
+    }
+    forgetLocalSession();
+  }
+
+  function handleStorageEvent(event: StorageEvent): void {
+    if (browser && (event.key === BASE_URL_STORAGE_KEY || event.key === null)) {
+      const next = resolveDefaultBaseUrl();
+      if (next !== baseUrl) {
+        baseUrl = next;
+        forgetLocalSession();
+        hooks.onSessionChanged?.();
+        return;
+      }
+    }
+    if (!locks || !isBrowserSessionEvent(event) || !browserSessionId) return;
+    const stored = readBrowserSession();
+    if (stored?.id !== browserSessionId) {
+      forgetLocalSession();
+      hooks.onSessionChanged?.();
+    }
   }
 
   function getAccessToken(): string | null {
@@ -243,59 +307,151 @@ export function createApiClient(config: ApiClientConfig = {}) {
     return tokens?.refreshToken ?? null;
   }
 
-  async function executeRefreshSingleFlight(): Promise<AuthSession> {
-    if (inFlightRefresh) {
-      return inFlightRefresh;
-    }
+  function sessionChanged(): ApiError {
+    return new ApiError({
+      type: 'https://arcdrop.dev/problems/session-changed',
+      title: 'Session changed',
+      status: 409,
+      code: 'SESSION_CHANGED',
+      detail: 'The active session changed.',
+    });
+  }
 
-    const currentRefreshToken = tokens?.refreshToken;
-    if (!currentRefreshToken) {
-      const error = new ApiError({
+  async function refresh(started: number): Promise<AuthSession> {
+    if (started !== generation) throw sessionChanged();
+
+    // Read under the cross-tab lock, so no request can replay a token just
+    // rotated by another tab. The id stays stable across rotations.
+    const server = browser && locks ? serverKey() : null;
+    const stored = server ? readBrowserSession() : null;
+    if (
+      stored &&
+      (stored.server !== server || (browserSessionId && stored.id !== browserSessionId))
+    ) {
+      forgetLocalSession();
+      hooks.onSessionChanged?.();
+      throw sessionChanged();
+    }
+    if (browserSessionId && !stored) {
+      forgetLocalSession();
+      hooks.onSessionChanged?.();
+      throw sessionChanged();
+    }
+    const legacy = !browser || (server && !stored) ? readLegacyToken() : null;
+    const refreshToken = stored?.refreshToken ?? tokens?.refreshToken ?? legacy;
+    if (!refreshToken) {
+      throw new ApiError({
         type: 'https://arcdrop.dev/problems/unauthorized',
         title: 'Unauthorized',
         status: 401,
         code: 'UNAUTHORIZED',
         detail: 'Session expired. Please sign in again.',
       });
-      setTokens(null);
-      hooks.onSessionExpired?.(error);
-      throw error;
     }
 
-    inFlightRefresh = (async () => {
-      try {
-        const session = await requestInternal<AuthSession>('/auth/refresh', {
-          method: 'POST',
-          body: { refreshToken: currentRefreshToken },
-          schema: authSessionSchema,
-          skipAuth: true,
-          _retried: true,
-        });
-        // setTokens (not a bare assignment) so the rotated refresh token is
-        // persisted for the next reload.
-        setTokens({
-          accessToken: session.accessToken,
-          refreshToken: session.refreshToken,
-        });
-        hooks.onSessionRefreshed?.(session);
-        return session;
-      } catch (err) {
-        const apiError = toApiError(err);
-        setTokens(null);
-        hooks.onSessionExpired?.(apiError);
-        throw apiError;
-      } finally {
-        inFlightRefresh = null;
-      }
-    })();
+    const originalSession = (): boolean => {
+      if (!server) return true;
+      const current = readBrowserSession();
+      return stored ? current?.id === stored.id : current === null && readLegacyToken() === legacy;
+    };
 
-    return inFlightRefresh;
+    try {
+      const session = await requestInternal<AuthSession>('/auth/refresh', {
+        method: 'POST',
+        body: { refreshToken },
+        schema: authSessionSchema,
+        skipAuth: true,
+        _retried: true,
+      });
+      if (!originalSession()) {
+        if (started === generation) {
+          forgetLocalSession();
+          hooks.onSessionChanged?.();
+        }
+        throw sessionChanged();
+      }
+      if (started !== generation) {
+        if (pendingLogout?.generation === started)
+          pendingLogout.rotatedToken = session.refreshToken;
+        throw sessionChanged();
+      }
+
+      tokens = { accessToken: session.accessToken, refreshToken: session.refreshToken };
+      if (server) {
+        const id = stored?.id ?? crypto.randomUUID();
+        browserSessionId = writeBrowserSession({ id, server, refreshToken: session.refreshToken })
+          ? id
+          : null;
+        if (browserSessionId) writeLegacyToken(null);
+      } else if (!browser && !detectExtension()) {
+        writeLegacyToken(session.refreshToken);
+      }
+      hooks.onSessionRefreshed?.(session);
+      return session;
+    } catch (error) {
+      const apiError = toApiError(error);
+      if (apiError.status === 401 && started === generation && originalSession()) {
+        if (stored) writeBrowserSession(null);
+        if (!stored && legacy) writeLegacyToken(null);
+        clearTokens();
+        hooks.onSessionExpired?.(apiError);
+      }
+      throw apiError;
+    }
+  }
+
+  function executeRefreshSingleFlight(): Promise<AuthSession> {
+    if (inFlightRefresh) return inFlightRefresh;
+
+    const started = generation;
+    const attempt = (
+      locks ? locks.request(lockName, () => refresh(started)) : refresh(started)
+    ).finally(() => {
+      if (inFlightRefresh === attempt) inFlightRefresh = null;
+    });
+    inFlightRefresh = attempt;
+    return attempt;
+  }
+
+  async function endSession(): Promise<void> {
+    const outstanding = inFlightRefresh;
+    const stored = locks ? readBrowserSession() : null;
+    const ownedId = browserSessionId ?? (stored?.server === serverKey() ? stored?.id : null);
+    const token = tokens?.refreshToken ?? readPersistedRefreshToken();
+    const endpoint = buildApiUrl(baseUrl, '/auth/logout');
+    const logout = { generation, rotatedToken: undefined as string | undefined };
+    pendingLogout = logout;
+    forgetLocalSession();
+    const invalidate = async () => {
+      const latest = locks ? readBrowserSession() : null;
+      const ownsStoredSession = latest !== null && latest.id === ownedId;
+      if (ownsStoredSession) writeBrowserSession(null);
+      if (generation === logout.generation + 1 && !latest) writeLegacyToken(null);
+      const refreshToken = logout.rotatedToken ?? (ownsStoredSession ? latest.refreshToken : token);
+      if (refreshToken) {
+        await fetchImpl(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+      }
+    };
+    try {
+      if (locks) await locks.request(lockName, invalidate);
+      else {
+        await outstanding?.catch(() => {});
+        await invalidate();
+      }
+    } finally {
+      if (pendingLogout === logout) pendingLogout = null;
+    }
   }
 
   async function requestInternal<T>(
     path: string,
     options: InternalRequestOptions<T> = {},
   ): Promise<T> {
+    const started = generation;
     const method = options.method ?? 'GET';
     const url = buildApiUrl(baseUrl, path, options.query);
     const headers: Record<string, string> = {
@@ -329,6 +485,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
       throw toApiError(error);
     }
 
+    if (!options.skipAuth && started !== generation) throw sessionChanged();
     if (response.status === 401 && !options.skipAuth && !options._retried && tokens?.refreshToken) {
       if (tokens.accessToken === usedAccessToken) {
         await executeRefreshSingleFlight();
@@ -366,6 +523,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
     path: string,
     options: InternalBlobRequestOptions = {},
   ): Promise<BlobResponse> {
+    const started = generation;
     const method = options.method ?? 'GET';
     const url = buildApiUrl(baseUrl, path, options.query);
     const headers: Record<string, string> = {
@@ -398,6 +556,7 @@ export function createApiClient(config: ApiClientConfig = {}) {
       throw toApiError(error);
     }
 
+    if (!options.skipAuth && started !== generation) throw sessionChanged();
     if (response.status === 401 && !options.skipAuth && !options._retried && tokens?.refreshToken) {
       if (tokens.accessToken === usedAccessToken) {
         await executeRefreshSingleFlight();
@@ -430,6 +589,8 @@ export function createApiClient(config: ApiClientConfig = {}) {
     resolveUrl,
     setTokens,
     clearTokens,
+    endSession,
+    handleStorageEvent,
     getAccessToken,
     getRefreshToken,
     getPersistedRefreshToken: readPersistedRefreshToken,

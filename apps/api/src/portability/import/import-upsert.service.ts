@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Bookmark } from '@api/database/entities/bookmark.entity';
@@ -12,6 +12,7 @@ import {
   lockUserForMembershipAppend,
   nextMembershipOrder,
 } from '@api/collections/membership-order';
+import { BookmarksService } from '@api/bookmarks/bookmarks.service';
 import { TagsService } from '@api/bookmarks/tags.service';
 import { UrlDecompositionService } from '@api/bookmarks/url-decomposition.service';
 import { MetadataFetchService } from '@api/metadata/metadata-fetch.service';
@@ -77,6 +78,7 @@ export class ImportUpsertService {
     private readonly urls: UrlDecompositionService,
     private readonly tags: TagsService,
     private readonly metadata: MetadataFetchService,
+    private readonly bookmarks: BookmarksService,
   ) {}
 
   /**
@@ -86,7 +88,12 @@ export class ImportUpsertService {
    * bookmarks is scheduled AFTER the last chunk commits — fire-and-forget
    * with bounded concurrency, exactly like the create path's pipeline.
    */
-  async importParsed(user: RequestUser, parsed: ParsedImport): Promise<ImportSummaryDto> {
+  async importParsed(
+    user: RequestUser,
+    parsed: ParsedImport,
+    signal?: AbortSignal,
+  ): Promise<ImportSummaryDto> {
+    signal?.throwIfAborted();
     const summary: ImportSummaryDto = {
       created: 0,
       updated: 0,
@@ -109,6 +116,7 @@ export class ImportUpsertService {
     const createdIds: string[] = [];
     let updatedCount = 0;
     for (let offset = 0; offset < parsed.bookmarks.length; offset += BOOKMARK_CHUNK) {
+      signal?.throwIfAborted();
       const chunk = parsed.bookmarks.slice(offset, offset + BOOKMARK_CHUNK);
       await this.changeLog.transact(async (manager, record) => {
         for (const item of chunk) {
@@ -120,6 +128,51 @@ export class ImportUpsertService {
     }
     summary.created = createdIds.length;
     summary.updated = updatedCount;
+
+    for (const item of parsed.fileBookmarks ?? []) {
+      signal?.throwIfAborted();
+      try {
+        const created = await this.bookmarks.restoreFileBookmark(
+          user,
+          {
+            fileName: item.file.fileName,
+            mimeType: item.file.fileMime,
+            size: item.file.fileSize,
+            tempPath: item.file.path,
+            title: item.title,
+            excerpt: item.excerpt,
+            note: item.note,
+            favorite: item.favorite,
+            tags: item.tags,
+          },
+          {
+            sourceId: item.file.sourceId,
+            createdAt: item.createdAt,
+            updatedAt: item.updatedAt,
+            contentType: item.contentType,
+            applyRelations: async (manager, record, id) => {
+              await this.applyCollections(
+                manager,
+                user,
+                id,
+                [],
+                item.collectionPaths ?? [],
+                collectionCache,
+                record,
+              );
+              await this.applyHighlights(manager, user.id, id, [], item.highlights ?? [], record);
+            },
+          },
+        );
+        if (created) summary.created++;
+        else summary.updated++;
+      } catch (error) {
+        if (!(error instanceof HttpException) || error.getStatus() >= 500) throw error;
+        const body = error.getResponse();
+        const detail = typeof body === 'object' && 'message' in body ? body.message : error.message;
+        summary.errors.push({ source: item.file.fileName, reason: String(detail) });
+      }
+    }
 
     // -- 3. post-import enrichment (bounded, fire-and-forget) ----------------
     void this.enrichCreated(user.id, createdIds);

@@ -3,8 +3,18 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  HttpException,
+  HttpStatus,
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { createReadStream, createWriteStream, type ReadStream } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { ZipFile } from 'yazl';
+import { AppConfigService } from '@api/config/app-config.service';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { IsNull } from 'typeorm';
 import type { ContentType, StorageKind } from '@api/database/entities/bookmark.entity';
@@ -27,7 +37,6 @@ import {
   renderHighlightsTxt,
   type ExportHighlight,
 } from './export/export-highlights';
-import { createZipBuffer, type ZipWriteEntry } from './export/zip-writer';
 import { emptyParsedImport, type ParsedImport } from './import/import-model';
 import {
   detectJsonDialect,
@@ -37,14 +46,20 @@ import {
 } from './import/detect-format';
 import { parseArcDropDocument } from './import/parse-arcdrop';
 import { parseRaindropDocument } from './import/parse-raindrop';
-import { parseZipImport } from './import/parse-zip';
+import {
+  ARCDROP_BUNDLE_FORMAT,
+  limitBytes,
+  readZipImport,
+  removeTransferDirectory,
+  transferDirectory,
+} from './zip-transfer';
 import { ImportUpsertService } from './import/import-upsert.service';
 import { ImportSummaryDto } from './portability.dto';
 
 /** Keyset page size while streaming bookmarks out of the database. */
 const EXPORT_BATCH = 500;
 
-export const ARCDROP_BUNDLE_FORMAT = 'arcdrop/export-bundle/v1';
+export { ARCDROP_BUNDLE_FORMAT } from './zip-transfer';
 
 export interface ExportScope {
   collectionId: string;
@@ -54,9 +69,9 @@ export interface ExportScope {
 }
 
 export interface ImportUpload {
-  bytes: Buffer;
-  /** Original filename — the REST route detects the format from it. */
+  path: string;
   filename: string;
+  signal: AbortSignal;
 }
 
 export interface HighlightsDownload {
@@ -80,6 +95,7 @@ export interface ExportBundleManifest {
   exportedAt: string;
   exportFormat: 'json' | 'csv' | 'html' | 'txt';
   scope: { collectionId: string; collectionPath: string[] } | null;
+  document: 'export.json' | 'restore.json';
   fileCount: number;
   files: ExportBundleManifestFile[];
 }
@@ -103,12 +119,14 @@ export interface ExportBundleManifest {
 export class PortabilityService {
   /** One concurrent import per user — in-memory, single-instance posture. */
   private readonly importLocks = new Set<string>();
+  private zipTransfers = 0;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly bookmarksService: BookmarksService,
     private readonly upsert: ImportUpsertService,
     private readonly fileStorage: FileStorageService,
+    private readonly config: AppConfigService,
   ) {}
 
   // -- export -----------------------------------------------------------------
@@ -193,12 +211,21 @@ export class PortabilityService {
     if (format === 'json') {
       yield this.jsonPrelude(exportedAt, scope, collections, tagNames);
       let first = true;
+      const includedFiles = new Set<string>();
       for await (const batch of this.exportBookmarkBatches(user, scope)) {
         for (const entry of batch) {
+          const id = String(entry.row['id']);
+          if (archivePathByBookmarkId && entry.row['storage_kind'] === 'file') {
+            if (!archivePathByBookmarkId.has(id)) continue;
+            includedFiles.add(id);
+          }
           const bookmark = this.toExportBookmark(entry, pathsById, archivePathByBookmarkId);
           yield (first ? '' : ',') + JSON.stringify(bookmark);
           first = false;
         }
+      }
+      if (archivePathByBookmarkId && includedFiles.size !== archivePathByBookmarkId.size) {
+        throw new ConflictException('The library changed during export. Retry the ZIP export.');
       }
       yield ']}\n';
       return;
@@ -259,89 +286,173 @@ export class PortabilityService {
    */
   async exportZipBundle(
     user: RequestUser,
-    format: 'json' | 'csv' | 'html' | 'txt',
+    format: ExportBundleManifest['exportFormat'],
     collectionId: string | undefined,
     preResolvedScope?: ExportScope | null,
-  ): Promise<{ exportedAt: string; zipBuffer: Buffer; manifest: ExportBundleManifest }> {
-    const scope =
-      preResolvedScope !== undefined
-        ? preResolvedScope
-        : await this.resolveScope(user.id, collectionId);
-    const exportedAt = new Date().toISOString();
-    const modifiedAt = new Date(exportedAt);
-
-    const fileEntries: ZipWriteEntry[] = [];
-    const manifestFiles: ExportBundleManifestFile[] = [];
-    const archivePathByBookmarkId = new Map<string, string>();
-
-    for await (const batch of this.exportBookmarkBatches(user, scope)) {
-      for (const entry of batch) {
-        const row = entry.row;
-        if (row['storage_kind'] !== 'file' || row['file_ref'] === null) continue;
-
-        const bookmarkId = String(row['id']);
-        const fileRef = String(row['file_ref']);
-        const fileName = sanitizeFileName(
-          row['file_name'] === null ? fileRef : String(row['file_name']),
-        );
-        const fileMime =
-          row['file_mime'] === null ? 'application/octet-stream' : String(row['file_mime']);
-        const fileSize = Number(row['file_size'] ?? 0);
-
-        const bytes = await this.fileStorage.readBuffer(fileRef);
-        if (bytes === null) continue;
-
-        const archivePath = `files/${bookmarkId}-${fileName}`;
-        const sha256 = createHash('sha256').update(bytes).digest('hex');
-
-        archivePathByBookmarkId.set(bookmarkId, archivePath);
-        fileEntries.push({ name: archivePath, bytes, modifiedAt });
-        manifestFiles.push({
-          bookmarkId,
-          title: row['title'] === null ? null : String(row['title']),
-          fileName,
-          fileMime,
-          fileSize,
-          archivePath,
-          sha256,
-        });
+    signal?: AbortSignal,
+    channelLimit?: number,
+  ): Promise<{
+    exportedAt: string;
+    stream: ReadStream;
+    size: number;
+    manifest: ExportBundleManifest;
+  }> {
+    const release = this.acquireZipTransfer();
+    let directory: string | undefined;
+    let streamOwnsDirectory = false;
+    const cleanup = async () => {
+      try {
+        if (directory) await removeTransferDirectory(directory);
+      } finally {
+        release();
       }
-    }
-
-    let documentBody = '';
-    for await (const chunk of this.exportChunks(
-      user,
-      format,
-      scope,
-      exportedAt,
-      archivePathByBookmarkId,
-    )) {
-      documentBody += chunk;
-    }
-
-    const manifest: ExportBundleManifest = {
-      format: ARCDROP_BUNDLE_FORMAT,
-      exportedAt,
-      exportFormat: format,
-      scope:
-        scope === null
-          ? null
-          : { collectionId: scope.collectionId, collectionPath: scope.collectionPath },
-      fileCount: manifestFiles.length,
-      files: manifestFiles,
     };
 
-    const zipBuffer = createZipBuffer([
-      { name: `export.${format}`, bytes: Buffer.from(documentBody, 'utf8'), modifiedAt },
-      {
-        name: 'manifest.json',
-        bytes: Buffer.from(JSON.stringify(manifest, null, 2), 'utf8'),
-        modifiedAt,
-      },
-      ...fileEntries,
-    ]);
+    try {
+      signal?.throwIfAborted();
+      directory = await transferDirectory(this.fileStorage.tmpDir);
+      const scope =
+        preResolvedScope === undefined
+          ? await this.resolveScope(user.id, collectionId)
+          : preResolvedScope;
+      const exportedAt = new Date().toISOString();
+      const limits = this.config.snapshot.portability;
+      const zipMax = Math.min(limits.importZipMaxBytes, channelLimit ?? Infinity);
+      const document = format === 'json' ? 'export.json' : 'restore.json';
+      const sizeMessage = channelLimit
+        ? 'ZIP exceeds the MCP export cap. Use REST POST /data/export.'
+        : 'ZIP exceeds the transfer size limit. Export a smaller collection or raise the server limit.';
+      const manifest: ExportBundleManifest = {
+        format: ARCDROP_BUNDLE_FORMAT,
+        exportedAt,
+        exportFormat: format,
+        scope: scope
+          ? { collectionId: scope.collectionId, collectionPath: scope.collectionPath }
+          : null,
+        document,
+        fileCount: 0,
+        files: [],
+      };
 
-    return { exportedAt, zipBuffer, manifest };
+      const archivePaths = new Map<string, string>();
+      const files: Array<{ path: string; name: string }> = [];
+      let expandedBytes = 0;
+      const addExpandedBytes = (size: number) => {
+        expandedBytes += size;
+        if (expandedBytes > limits.zipExpandedMaxBytes) {
+          throw new PayloadTooLargeException(
+            'ZIP exceeds the expanded size limit. Export a smaller collection.',
+          );
+        }
+      };
+
+      for await (const batch of this.exportBookmarkBatches(user, scope)) {
+        for (const { row } of batch) {
+          signal?.throwIfAborted();
+          if (row['storage_kind'] !== 'file') continue;
+          if (files.length + (format === 'json' ? 2 : 3) >= limits.zipMaxEntries) {
+            throw new PayloadTooLargeException(
+              'ZIP has too many files. Export a smaller collection.',
+            );
+          }
+          const id = String(row['id']);
+          const sourceId = String(row['portable_source_id'] ?? id);
+          const fileName = String(row['file_name'] ?? row['file_ref']);
+          const fileSize = Number(row['file_size']);
+          const archivePath = `files/${sourceId}-${sanitizeFileName(fileName)}`;
+          const path = join(directory, `attachment-${files.length}`);
+          addExpandedBytes(fileSize);
+          const file = await this.fileStorage.openStream(String(row['file_ref']));
+          if (!file || file.size !== fileSize) {
+            file?.stream.destroy();
+            throw new ConflictException(
+              'A file is missing or changed. Retry after verifying the library files.',
+            );
+          }
+          const hash = createHash('sha256');
+          await pipeline(
+            file.stream,
+            limitBytes(fileSize, 'File changed during ZIP export', (chunk) => hash.update(chunk)),
+            createWriteStream(path, { flags: 'wx', mode: 0o600 }),
+            { signal },
+          );
+          if ((await stat(path)).size !== fileSize) {
+            throw new ConflictException('A file changed during ZIP export. Retry the export.');
+          }
+
+          archivePaths.set(id, archivePath);
+          files.push({ path, name: archivePath });
+          manifest.files.push({
+            bookmarkId: sourceId,
+            title: row['title'] === null ? null : String(row['title']),
+            fileName,
+            fileMime: String(row['file_mime']),
+            fileSize,
+            archivePath,
+            sha256: hash.digest('hex'),
+          });
+        }
+      }
+      manifest.fileCount = manifest.files.length;
+
+      const documentFormats = format === 'json' ? [format] : ['json' as const, format];
+      for (const exportFormat of documentFormats) {
+        const name = exportFormat === 'json' ? document : `export.${exportFormat}`;
+        const path = join(directory, name);
+        await pipeline(
+          Readable.from(this.exportChunks(user, exportFormat, scope, exportedAt, archivePaths)),
+          limitBytes(
+            limits.importMaxBytes,
+            'ZIP document exceeds the import document size limit.',
+            (chunk) => addExpandedBytes(chunk.length),
+          ),
+          createWriteStream(path, { flags: 'wx', mode: 0o600 }),
+          { signal },
+        );
+        files.push({ path, name });
+      }
+
+      const manifestBytes = Buffer.from(JSON.stringify(manifest));
+      if (manifestBytes.length > limits.importMaxBytes || files.length + 1 > limits.zipMaxEntries) {
+        throw new PayloadTooLargeException('ZIP manifest exceeds the transfer limits.');
+      }
+      addExpandedBytes(manifestBytes.length);
+      const zipPath = join(directory, 'arcdrop-export.zip');
+      const zip = new ZipFile();
+      const output = zip.outputStream as Readable;
+      const activeStreams = new Set<ReadStream>();
+      zip.on('error', (error: Error) => output.destroy(error));
+      for (const file of files) {
+        zip.addReadStreamLazy(file.name, (callback) => {
+          const stream = createReadStream(file.path, { signal });
+          activeStreams.add(stream);
+          stream.once('close', () => activeStreams.delete(stream));
+          callback(null, stream);
+        });
+      }
+      zip.addBuffer(manifestBytes, 'manifest.json');
+      const writing = pipeline(
+        output,
+        limitBytes(zipMax, sizeMessage),
+        createWriteStream(zipPath, { flags: 'wx', mode: 0o600 }),
+        { signal },
+      );
+      zip.end();
+      try {
+        await writing;
+      } finally {
+        for (const stream of activeStreams) stream.destroy();
+      }
+      const size = (await stat(zipPath)).size;
+      const stream = createReadStream(zipPath, { signal });
+      stream.once('close', () => {
+        void cleanup().catch(() => {});
+      });
+      streamOwnsDirectory = true;
+      return { exportedAt, stream, size, manifest };
+    } finally {
+      if (!streamOwnsDirectory) await cleanup();
+    }
   }
 
   /**
@@ -667,46 +778,77 @@ export class PortabilityService {
     };
   }
 
-  /** REST entry: multipart upload → filename detection → parse → upsert. */
+  acquireZipTransfer(): () => void {
+    if (this.zipTransfers >= this.config.snapshot.portability.zipConcurrentTransfers) {
+      throw new HttpException(
+        'A ZIP transfer is already running. Retry when it finishes.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    this.zipTransfers++;
+    return () => {
+      this.zipTransfers--;
+    };
+  }
+
+  /** REST entry: the interceptor holds the upload and transfer leases. */
   async importUpload(user: RequestUser, upload: ImportUpload): Promise<ImportSummaryDto> {
     const format = formatFromFilename(upload.filename);
-    if (format === null) {
+    if (!format) {
       throw new BadRequestException(
         `unsupported import file type: "${upload.filename}" — expected .json .csv .html .htm .txt .enex or .zip`,
       );
     }
-    return this.runImport(user, format, upload.bytes);
+    return format === 'zip'
+      ? this.importZip(user, upload.path, upload.signal)
+      : this.upsert.importParsed(
+          user,
+          this.parseBytes(format, await readFile(upload.path)),
+          upload.signal,
+        );
   }
 
-  /** MCP entry: explicit format + payload (the size cap lives in the DTO). */
+  /** MCP shares the same import pipeline with a stricter transport cap. */
   async importData(
     user: RequestUser,
     format: ImportFormat,
     bytes: Buffer,
   ): Promise<ImportSummaryDto> {
-    return this.runImport(user, format, bytes);
-  }
-
-  private async runImport(
-    user: RequestUser,
-    format: ImportFormat,
-    bytes: Buffer,
-  ): Promise<ImportSummaryDto> {
     const release = this.acquireImportLock(user.id);
-    if (release === null) {
-      throw new ConflictException('An import is already running for this user');
-    }
+    if (!release) throw new ConflictException('An import is already running for this user');
     try {
-      const parsed = this.parseBytes(format, bytes);
-      return await this.upsert.importParsed(user, parsed);
+      if (format !== 'zip')
+        return await this.upsert.importParsed(user, this.parseBytes(format, bytes));
+
+      const releaseZip = this.acquireZipTransfer();
+      try {
+        return await this.importZip(user, bytes);
+      } finally {
+        releaseZip();
+      }
     } finally {
       release();
     }
   }
 
+  private async importZip(user: RequestUser, input: string | Buffer, signal?: AbortSignal) {
+    const directory = await transferDirectory(this.fileStorage.tmpDir);
+    try {
+      const limits = this.config.snapshot.portability;
+      const parsed = await readZipImport(input, directory, {
+        expandedMax: limits.zipExpandedMaxBytes,
+        maxEntries: limits.zipMaxEntries,
+        documentMax: limits.importMaxBytes,
+        signal,
+      });
+      return await this.upsert.importParsed(user, parsed, signal);
+    } finally {
+      await removeTransferDirectory(directory);
+    }
+  }
+
   /** Dispatches to the parser (zip members fan out, JSON sniffs dialects). */
-  private parseBytes(format: ImportFormat, bytes: Buffer): ParsedImport {
-    if (format === 'zip') return parseZipImport(bytes);
+  private parseBytes(format: Exclude<ImportFormat, 'zip'>, bytes: Buffer): ParsedImport {
     const text = bytes.toString('utf8');
     if (format === 'json') {
       const dialect = detectJsonDialect(text);

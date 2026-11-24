@@ -37,7 +37,7 @@ automatically.
 | Variable                                     | Required | Default     | Meaning                                                                                                                                          |
 | -------------------------------------------- | -------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ARCDROP__DATABASE__URL`                     | yes      | —           | PostgreSQL connection URL (`postgres://…`)                                                                                                       |
-| `ARCDROP__JWT__SECRET`                       | yes      | —           | JWT signing secret & TOTP secret encryption key seed, min 32 chars (M2; M15 AES-256-GCM)                                                         |
+| `ARCDROP__JWT__SECRET`                       | yes      | —           | JWT signing secret and fallback for legacy TOTP records, min 32 chars                                                                            |
 | `ARCDROP__PORT`                              | no       | `3000`      | HTTP port                                                                                                                                        |
 | `ARCDROP__CORS__ORIGINS`                     | no       | empty       | Comma-separated browser origins; empty = CORS off                                                                                                |
 | `ARCDROP__DATA_DIR`                          | no       | `/data`     | Data volume root (icons live in `…/icons` since M6; archives in `…/archives` since M17; uploaded files in `…/files` since M18); must be writable |
@@ -49,6 +49,13 @@ automatically.
 | `ARCDROP__PORTABILITY__IMPORT_MAX_BYTES`     | no       | `26214400`  | M8 import cap per uploaded file (25 MiB); larger uploads are a `413` problem+json                                                                |
 | `ARCDROP__PORTABILITY__IMPORT_ZIP_MAX_BYTES` | no       | `314572800` | M8 import cap for ZIP uploads (300 MB — archives unpack to many files)                                                                           |
 | `ARCDROP__LOG__LEVEL`                        | no       | `info`      | pino level: `fatal…trace`                                                                                                                        |
+
+The Compose web entry serves the SPA and proxies the API. Standalone API settings
+include `ARCDROP__HTTP__TRUSTED_PROXIES` (comma-separated IPs or CIDRs),
+`ARCDROP__PUBLIC__BASE_URL` (HTTP(S) public origin), and
+`ARCDROP__TOTP__ENCRYPTION_KEY` (32+ characters). See the
+[operations guide](docs/backup-restore.md) for the previous TOTP key option
+and database rotation command.
 
 ## Local development
 
@@ -617,6 +624,23 @@ the surface) without touching device sessions.
 
 ## Portability (M8 — D13, Raindrop parity G3/G4)
 
+**Restoring ArcDrop ZIP bundles.** New file bundles include a canonical JSON
+document and SHA-256 for each uploaded file, regardless of the selected
+download format. Import the ZIP directly to restore the active library and
+its uploaded bytes, tags, notes, highlights and collection links. A re-import
+keeps each file bookmark's identity. Legacy JSON ArcDrop ZIPs are supported.
+For legacy CSV, HTML or TXT ArcDrop ZIPs, extract the export document and
+upload the files separately.
+
+ZIP input and output are staged under `/data/tmp` with bounded streams.
+Configure `ARCDROP__PORTABILITY__IMPORT_ZIP_MAX_BYTES` (300 MiB),
+`ARCDROP__PORTABILITY__ZIP_EXPANDED_MAX_BYTES` (1 GiB),
+`ARCDROP__PORTABILITY__ZIP_MAX_ENTRIES` (10,000) and
+`ARCDROP__PORTABILITY__ZIP_CONCURRENT_TRANSFERS` (1) to suit the host.
+Each restore document is also capped by the regular import document limit.
+Bundle restores use the normal upload quota. For an instance restore, use
+the PostgreSQL dump and data volume from the operations guide.
+
 Data in and out, user-scoped. **The ACTIVE library only, by design:** the
 trash is not exported and not an upsert target (it auto-purges per D17 —
 portability is for the living library). Identities are NOT exported:
@@ -653,7 +677,9 @@ NETSCAPE-Bookmark-file-1>`), collections as nested `<H3>/<DL>` folders,
   LOSSY: a bookmark in several collections renders once (first path);
   tags with commas break the TAGS list.
 - **txt** — one URL per line. Everything except URLs is lossy by definition.
-- **`includeFiles: true` (M18 ZIP bundle)** — bundles `export.<format>`, a SHA-256 checksummed `manifest.json` (`format: 'arcdrop/export-bundle/v1'`), and every active uploaded file as `files/<bookmarkId>-<fileName>` (trashed file items excluded; re-import counts `storageKind: 'file'` items without URLs as skipped).
+- **`includeFiles: true`** — bundles the requested format, a canonical JSON
+  restore document, a SHA-256 manifest and each active uploaded file.
+  Plain JSON import still skips file entries because it lacks the bytes.
 
 ### Import — `POST /data/import` (operationId `importData`)
 
@@ -666,10 +692,9 @@ counted as skipped), CSV (our export columns), Netscape HTML, TXT (one URL
 per line; blank lines ignored silently, broken lines error with their line
 number), ENEX (Evernote — WEB CLIPS ONLY: the first external http(s) link
 in a note is the source URL; notes without one are skipped and counted,
-Evernote `20231118T120000Z` stamps parse), ZIP (classic archives only —
-zip64 refuses; every supported member is parsed and aggregated, unsupported
-members are skipped and counted with the member name; no recursion into
-nested zips).
+Evernote `20231118T120000Z` stamps parse), and ZIP. Generic ZIPs import
+supported documents and report skipped files by name. ArcDrop bundles
+restore from the manifest and canonical JSON.
 
 Response: `{ created, updated, skipped[], errors[] }` — skipped/errors
 carry a reason + source (`row 12`, `note 3 "title"`, `archive.zip/x.csv:
@@ -719,12 +744,11 @@ tail) so a hostile upload cannot return megabytes of reasons.
 **Caps + concurrency:** `ARCDROP__PORTABILITY__IMPORT_MAX_BYTES` (25 MiB)
 for single files, `…_ZIP_MAX_BYTES` (300 MB) for `.zip` — enforced DURING
 the streaming upload (a 400 MB body dies mid-stream, never after
-buffering; the tighter non-zip cap binds right after parsing). Exceeding
-either is a `413` problem+json (`code: PAYLOAD_TOO_LARGE`). ONE concurrent
-import per user — a second request is a `409` problem+json
-(`code: CONFLICT`); the lock is in-memory (single-instance posture, same
-as the ws tickets). The upload is buffered in memory (multer
-`memoryStorage`) — ≤ 300 MB RAM for one request, accepted v1 posture.
+staging. The tighter non-ZIP limit is checked before reading a document.
+Oversized payloads receive an HTTP 413 problem response. A second import by
+the same user receives 409 before staging. If the configured ZIP transfer
+slots are full, ZIP requests receive 429 and can be retried.
+
 Multer joined as a DIRECT dependency for this (it was already in the tree
 via `@nestjs/platform-express`; a custom interceptor wraps it because the
 cap is config-driven and format-dependent — `FileInterceptor` caps are
@@ -752,13 +776,9 @@ semantics mirror `GET /bookmarks/{id}`).
 - CSV quoting is RFC 4180 (quotes doubled, commas/newlines inside quotes
   literal); the `tags`/`collections` sub-lists use `;` — see the lossy
   notes above.
-- ZIP: stored + deflate members only, encrypted members refuse, EOCD found
-  through a trailing comment, zip64 (> 65535 entries / ≥ 4 GiB members)
-  refuses with a clear error. There is no filesystem extraction — members
-  go straight into the parsers, so zip-slip does not apply.
-- `POST /data/export` is a POST by ticket → mutation-classified for
-  read-only PATs (consistent with `createSyncTicket`); the REST-level
-  `PatScopeGuard` refuses it for read-only tokens the same way.
+- ZIP: stored and deflate entries are read with bounds on expanded bytes and
+  entry count. Nested archives are skipped. Bundle members are staged in
+  files named by the importer and verified before writes to the library.
 
 ## Collections (M4 — D4, D5)
 
@@ -1182,7 +1202,7 @@ tests in lockstep by wiring new app-level concerns THERE.
 - **Caps enforce DURING the streaming upload; memoryStorage accepted.**
   Stream-time enforcement uses the larger (ZIP) cap so an oversized body
   dies mid-stream; the tighter non-zip cap binds right after parsing once
-  the filename is known. One upload lives in RAM (≤ 300 MB) — fine for
+  the filename is known. One upload is staged on disk (≤ 300 MB) — fine for
   single-instance v1, revisit with M9's hardening pass if self-hosters
   report memory pressure.
 - **The MCP import cap is 1 MiB decoded, and the global JSON body limit
@@ -1540,7 +1560,7 @@ M10 opens Wave 2 with highlights, favorites, automatic content-type classificati
   - `GET /bookmarks?file=true|false|<ext|mime|kind>` and M11 grammar operator `file:` (last reserved slot activated) filter file items; `type=` covers MIME-mapped content types.
   - `PUT /bookmarks/{id}` forbids modifying `url` on `file` items (`400`), `POST /bookmarks/{id}/reindex` refuses `file` items (`400`), and `/library/duplicates` + broken-links sweeps skip `file` items.
   - Trash keeps file bytes so restore works; bulk hard delete, `TrashPurgeService`, `POST /me/reset-data`, `DELETE /me`, and `FileEvictionService` (shared daily `05:00` job + purge ride-along) delete file blobs & archives cleanly (`reset-data` preserves `upload_usage` so resets cannot bypass monthly quotas).
-  - `POST /data/export` accepts `includeFiles: true` to produce an `arcdrop-export.zip` with `export.<format>`, SHA-256 `manifest.json` (`arcdrop/export-bundle/v1`), and `files/<bookmarkId>-<fileName>`.
+  - `POST /data/export` accepts `includeFiles: true` to produce an `arcdrop-export.zip` with `export.<format>`, SHA-256 `manifest.json` (`arcdrop/export-bundle/v2`), and `files/<bookmarkId>-<fileName>`.
   - No file versioning/replace by design (Raindrop parity — delete and re-upload).
 
 ## Decisions recorded (M18)

@@ -139,7 +139,7 @@ describe('CollectionShareDialog', () => {
     const rssInput = within(dialog).getByLabelText(
       SHARED_COLLECTION_STRINGS.shareRssUrlLabel,
     ) as HTMLInputElement;
-    expect(publicInput.value).toContain('/api/v1/public/collections/tok-1');
+    expect(publicInput.value).toContain('/s/tok-1');
     expect(rssInput.value).toContain('/api/v1/public/collections/tok-1/rss');
 
     await user.click(within(dialog).getByRole('button', { name: 'Copy URL: Public URL' }));
@@ -197,7 +197,7 @@ describe('CollectionShareDialog', () => {
     const rotatedPublicInput = (await within(shareDialog2).findByLabelText(
       SHARED_COLLECTION_STRINGS.sharePublicUrlLabel,
     )) as HTMLInputElement;
-    expect(rotatedPublicInput.value).toContain('/api/v1/public/collections/tok-2');
+    expect(rotatedPublicInput.value).toContain('/s/tok-2');
 
     await user.click(
       within(shareDialog2).getByRole('button', { name: SHARED_COLLECTION_STRINGS.shareClose }),

@@ -17,28 +17,30 @@ export const IMPORT_MAX_NOTE_LENGTH = 10_000;
  * item is unusable (the reason has been pushed into `errors`); otherwise the
  * item is returned trimmed of outer whitespace in its text fields.
  */
-export function validateBookmarkItem(
-  item: ParsedBookmark,
+export function validateBookmarkItem<T extends Omit<ParsedBookmark, 'url'> & { url?: string }>(
+  item: T,
   source: string,
   errors: ImportNote[],
-): ParsedBookmark | null {
+): T | null {
   const fail = (reason: string): null => {
     errors.push({ reason, source });
     return null;
   };
 
-  const url = item.url.trim();
-  if (url.length === 0) return fail('url is empty');
-  if (url.length > IMPORT_MAX_URL_LENGTH) {
-    return fail(`url exceeds ${IMPORT_MAX_URL_LENGTH} characters`);
-  }
-  // Mirror UrlDecompositionService's acceptance rules (D12) at parse time so
-  // the upsert stage never meets an unparseable URL mid-transaction.
-  try {
-    const parsed = new URL(url);
-    if (!parsed.hostname) return fail('url must include a host');
-  } catch {
-    return fail('url must be a valid absolute URL');
+  const url = item.url?.trim();
+  if (url !== undefined) {
+    if (url.length === 0) return fail('url is empty');
+    if (url.length > IMPORT_MAX_URL_LENGTH) {
+      return fail(`url exceeds ${IMPORT_MAX_URL_LENGTH} characters`);
+    }
+    // Mirror UrlDecompositionService's acceptance rules (D12) at parse time so
+    // the upsert stage never meets an unparseable URL mid-transaction.
+    try {
+      const parsed = new URL(url);
+      if (!parsed.hostname) return fail('url must include a host');
+    } catch {
+      return fail('url must be a valid absolute URL');
+    }
   }
 
   const tags = (item.tags ?? []).map((tag) => tag.trim()).filter((tag) => tag.length > 0);
@@ -76,7 +78,7 @@ export function validateBookmarkItem(
 
   return {
     ...item,
-    url,
+    ...(url === undefined ? {} : { url }),
     title,
     excerpt,
     note,

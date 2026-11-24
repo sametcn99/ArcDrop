@@ -2,6 +2,7 @@ import { Controller, Get, Header, Param, Query, Req, Res, UseGuards } from '@nes
 import { ApiOkResponse, ApiOperation, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
+import { AppConfigService } from '@api/config/app-config.service';
 import { Public } from '@api/auth/decorators/public.decorator';
 import { PublicRateLimitGuard } from './public-rate-limit.guard';
 import {
@@ -30,7 +31,10 @@ import { PublicSharingService } from './public-sharing.service';
 @UseGuards(PublicRateLimitGuard)
 @Controller('public/collections')
 export class PublicCollectionsController {
-  constructor(private readonly publicSharing: PublicSharingService) {}
+  constructor(
+    private readonly publicSharing: PublicSharingService,
+    private readonly config: AppConfigService,
+  ) {}
 
   @Get(':shareToken')
   @Header('Cache-Control', 'public, max-age=60')
@@ -72,7 +76,8 @@ export class PublicCollectionsController {
     @Req() request: Request,
     @Res() res: Response,
   ): Promise<void> {
-    const xml = await this.publicSharing.getRss(params.shareToken, resolveRequestOrigin(request));
+    const origin = this.config.snapshot.public.baseUrl ?? resolveRequestOrigin(request);
+    const xml = await this.publicSharing.getRss(params.shareToken, origin);
     res.setHeader('Content-Type', 'application/rss+xml; charset=utf-8');
     res.setHeader('Cache-Control', 'public, max-age=60');
     res.setHeader('X-Content-Type-Options', 'nosniff');

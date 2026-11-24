@@ -1,57 +1,43 @@
 # ArcDrop
 
-Self-hosted, multi-user bookmark platform serving web, desktop, mobile and browser-extension
-clients from a single API.
+ArcDrop is a self-hosted, multi-user bookmark library. Save links and files, organize them in collections, search archived text, and share collections or RSS feeds from your own server.
+
+## Run ArcDrop
+
+1. Copy `.env.example` to `.env`. Generate independent values for `ARCDROP__JWT__SECRET` and `ARCDROP__TOTP__ENCRYPTION_KEY` with `openssl rand -hex 32`. Set a PostgreSQL password for a new installation.
+2. Run `docker compose up --build --wait`.
+3. Open [http://127.0.0.1:3000/bootstrap](http://127.0.0.1:3000/bootstrap), create the administrator account, and use **Quick add** to save your first bookmark.
+
+The web service serves the app and proxies the API and WebSocket at the same address. It binds to loopback by default. For network deployment, configure HTTPS at an upstream proxy and set `ARCDROP__PUBLIC__BASE_URL` to the public origin. The [operations guide](apps/api/docs/backup-restore.md) covers trusted proxies, upgrades, backups, restores and TOTP key rotation.
+
+Install a browser extension from [GitHub Releases](https://github.com/sametcn99/ArcDrop/releases) or build it from [source](extension/README.md). Configure the extension and Tauri clients with the same server address used on the web.
 
 ## Repository layout
 
-| Path             | What lives here                                             |
-| ---------------- | ----------------------------------------------------------- |
-| `apps/api`       | NestJS REST API (the first app being built; see its README) |
-| `apps/web`       | Web SPA (skeleton, not started)                             |
-| `apps/desktop`   | Desktop client (skeleton, not started)                      |
-| `apps/mobile`    | Mobile client (skeleton, not started)                       |
-| `apps/extension` | Browser extension (skeleton, not started)                   |
+| Path             | Component                                                         |
+| ---------------- | ----------------------------------------------------------------- |
+| `apps/api`       | NestJS API on Bun and PostgreSQL, including MCP, archive and sync |
+| `apps/web`       | React web app and Caddy deployment                                |
+| `extension`      | Chromium and Firefox extension with an embedded web app           |
+| `cross-platform` | Tauri desktop and mobile clients                                  |
 
-## Tooling
+## Develop and verify
 
-- **Bun everywhere** — Bun workspaces, `bun install`, `bun run`, `bun test`. No npm/yarn/pnpm;
-  `bun.lock` is the only lockfile.
-- **ESLint + Prettier at the repo root** — one flat config (`eslint.config.mjs`) and one
-  `.prettierrc` cover every workspace for now; apps can override later if a client framework
-  demands it (kept simple on purpose).
-- **CI** — GitHub Actions runs lint, format check, typecheck, unit tests, and an e2e job with a
-  PostgreSQL service container (`.github/workflows/ci.yml`).
+Use Bun 1.4.2, the version pinned in CI and the container images. Run `bun install --frozen-lockfile` at the root. The [API README](apps/api/README.md) describes the local database and API environment.
 
-## Requirements
+Run `bun run dev` for the API and `bun run web:dev` for the web app. For the Vite dev server, set `VITE_API_URL=http://localhost:3000` and allow `http://localhost:5173` in API CORS configuration. A split web deployment can set `VITE_PUBLIC_WEB_URL` to the site that serves public collection pages.
 
-- [Bun](https://bun.sh) >= 1.2 (development happens on 1.4.x, CI pins the same minor)
-- [Docker](https://docs.docker.com/get-docker/) with Compose (to run the API +
-  PostgreSQL bundle, or to provide a throwaway Postgres for tests)
+| Command                                       | What it checks                                       |
+| --------------------------------------------- | ---------------------------------------------------- |
+| `bun run lint` / `bun run format:check`       | Source and format rules                              |
+| `bun run typecheck` / `bun run web:typecheck` | API and web TypeScript                               |
+| `bun run test:unit` / `bun run web:test`      | API and web unit/component tests                     |
+| `bun run test:e2e`                            | API integration with disposable PostgreSQL           |
+| `bun run build` / `bun run web:build`         | Production builds                                    |
+| `bun dev-scripts/smoke-web.ts`                | Real Chromium against a fresh local Compose instance |
 
-## Commands (repo root)
+The extension and Tauri use their own lockfiles. See the [extension guide](extension/README.md) and [platform release guide](cross-platform/RELEASE.md) for test and package commands.
 
-| Command                | What it does                                                |
-| ---------------------- | ----------------------------------------------------------- |
-| `bun install`          | Install all workspace dependencies                          |
-| `bun run dev`          | Run the API in watch mode                                   |
-| `bun run build`        | Build the API                                               |
-| `bun run lint`         | ESLint over the repo                                        |
-| `bun run format:check` | Prettier check over the repo                                |
-| `bun run typecheck`    | TypeScript strict typecheck (per app)                       |
-| `bun test`             | All tests (unit + e2e)                                      |
-| `bun run test:unit`    | API unit tests only                                         |
-| `bun run test:e2e`     | API e2e tests only                                          |
-| `docker compose up`    | API + PostgreSQL 16 bundle (migrate-on-boot, healthchecked) |
+## License
 
-The compose bundle reads `.env` next to `compose.yaml` — see `.env.example`.
-`ARCDROP__JWT__SECRET` is required (compose refuses to boot without it):
-`openssl rand -hex 32`.
-
-## Status
-
-The API is being rebuilt milestone by milestone — current progress is tracked in
-`apps/api/README.md`. M1 (API foundation) is complete: validated `ARCDROP__` config,
-TypeORM + PostgreSQL with migrate-on-boot, `/api/v1` health probes, OpenAPI 3 +
-Scalar docs, RFC 7807 errors, pino logs with request correlation, optional
-`/metrics`, and a compose bundle that passes the Bun production gate.
+ArcDrop is distributed under the [MIT License](LICENSE). The bundled Onest typeface has its own [SIL Open Font License](apps/web/app/public/licenses/Onest.txt).

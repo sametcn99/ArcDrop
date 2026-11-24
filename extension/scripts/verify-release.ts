@@ -76,6 +76,16 @@ async function verifyBrowser(browser: string): Promise<Check[]> {
       `${browser}: embedded app assets present`,
       names.some((name) => name.startsWith('pages/app/assets/')),
     ),
+    check(
+      `${browser}: ArcDrop and Onest licenses included`,
+      names.includes('pages/app/licenses/ArcDrop.txt') &&
+        names.includes('pages/app/licenses/Onest.txt'),
+    ),
+    check(
+      `${browser}: local font assets and no remote font links`,
+      names.some((name) => name.startsWith('pages/app/assets/onest-') && name.endsWith('.woff2')) &&
+        !/fonts\.(googleapis|gstatic)\.com/.test(decode(zipped['pages/app/index.html'])),
+    ),
     check(`${browser}: no source maps`, !names.some((name) => name.endsWith('.map'))),
   ];
 }

@@ -34,5 +34,6 @@ COPY apps/api/docker-entrypoint.sh ./docker-entrypoint.sh
 COPY apps/api/package.json ./apps/api/package.json
 RUN chmod +x ./docker-entrypoint.sh
 
+COPY LICENSE ./LICENSE
 EXPOSE 3000
 ENTRYPOINT ["./docker-entrypoint.sh"]

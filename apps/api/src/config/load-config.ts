@@ -52,6 +52,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   for (const section of [
     'database',
     'jwt',
+    'totp',
+    'http',
+    'public',
     'cors',
     'metrics',
     'metadata',

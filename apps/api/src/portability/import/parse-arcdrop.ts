@@ -9,6 +9,7 @@ import {
   type ParsedCollection,
   type ParsedHighlight,
   type ParsedImport,
+  type StagedImportFile,
 } from './import-model';
 import { toIsoOrNull, validateBookmarkItem } from './normalize';
 
@@ -35,7 +36,10 @@ export function isArcDropJson(value: unknown): boolean {
   );
 }
 
-export function parseArcDropDocument(value: unknown): ParsedImport {
+export function parseArcDropDocument(
+  value: unknown,
+  bundledFiles?: ReadonlyMap<string, StagedImportFile>,
+): ParsedImport {
   const result = emptyParsedImport();
   if (typeof value !== 'object' || value === null) {
     result.errors.push({ reason: 'JSON document is not an object' });
@@ -85,7 +89,8 @@ export function parseArcDropDocument(value: unknown): ParsedImport {
       continue;
     }
 
-    if (raw['storageKind'] === 'file' || raw['url'] === null) {
+    const isFile = raw['storageKind'] === 'file' || raw['url'] === null;
+    if (isFile && !bundledFiles) {
       result.skipped.push({
         reason:
           'file-backed bookmarks cannot be imported via URL upsert — re-upload via POST /bookmarks/file',
@@ -109,28 +114,42 @@ export function parseArcDropDocument(value: unknown): ParsedImport {
           .filter((path): path is string[] => path !== null)
       : [];
 
-    const validated = validateBookmarkItem(
-      {
-        url: typeof raw['url'] === 'string' ? raw['url'] : '',
-        title: optionalText(raw['title']),
-        excerpt: optionalText(raw['excerpt']),
-        note: optionalText(raw['note']),
-        favorite,
-        contentType,
-        tags: Array.isArray(raw['tags'])
-          ? raw['tags'].filter((tag): tag is string => typeof tag === 'string')
-          : undefined,
-        collectionPaths,
-        highlights: highlights.length > 0 ? highlights : undefined,
-        createdAt:
-          toIsoOrNull(typeof raw['createdAt'] === 'string' ? raw['createdAt'] : null) ?? null,
-        updatedAt:
-          toIsoOrNull(typeof raw['updatedAt'] === 'string' ? raw['updatedAt'] : null) ?? null,
-      },
-      source,
-      result.errors,
-    );
-    if (validated) result.bookmarks.push(validated);
+    const fields = {
+      title: optionalText(raw['title']),
+      excerpt: optionalText(raw['excerpt']),
+      note: optionalText(raw['note']),
+      favorite,
+      contentType,
+      tags: Array.isArray(raw['tags'])
+        ? raw['tags'].filter((tag): tag is string => typeof tag === 'string')
+        : undefined,
+      collectionPaths,
+      highlights: highlights.length > 0 ? highlights : undefined,
+      createdAt:
+        toIsoOrNull(typeof raw['createdAt'] === 'string' ? raw['createdAt'] : null) ?? null,
+      updatedAt:
+        toIsoOrNull(typeof raw['updatedAt'] === 'string' ? raw['updatedAt'] : null) ?? null,
+    };
+    if (isFile) {
+      const metadata = raw['file'] as RawJsonRecord | null | undefined;
+      const archivePath = metadata?.['archivePath'];
+      const file = typeof archivePath === 'string' ? bundledFiles?.get(archivePath) : undefined;
+      if (
+        !file ||
+        metadata?.['name'] !== file.fileName ||
+        metadata['mime'] !== file.fileMime ||
+        metadata['size'] !== file.fileSize
+      ) {
+        result.errors.push({ source, reason: 'file bookmark does not match the bundle manifest' });
+        continue;
+      }
+      const validated = validateBookmarkItem(fields, source, result.errors);
+      if (validated) (result.fileBookmarks ??= []).push({ ...validated, file });
+    } else {
+      const url = typeof raw['url'] === 'string' ? raw['url'] : '';
+      const validated = validateBookmarkItem({ ...fields, url }, source, result.errors);
+      if (validated) result.bookmarks.push(validated);
+    }
   }
 
   return result;

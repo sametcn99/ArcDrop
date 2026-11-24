@@ -7,7 +7,8 @@ export const PORTABILITY_PAGE_STRINGS = {
     'Upload an export from Pocket, Raindrop, browser bookmarks HTML, Evernote ENEX, CSV, JSON, plain text URLs, or an ArcDrop ZIP bundle.',
   importDropzoneTitle: 'Drop a file here or browse from your device',
   importDropzoneActiveTitle: 'Drop file to import',
-  importFormatsHint: 'Accepted formats: .json, .csv, .html, .htm, .txt, .enex, .zip',
+  importFormatsHint:
+    'Accepted formats: .json, .csv, .html, .htm, .txt, .enex, .zip. ArcDrop restore ZIPs recover uploaded files. Older ZIPs can restore files when they include the original ArcDrop JSON export.',
   importFileInputLabel: 'Choose import file',
   importChooseFileLabel: 'Choose file',
   importChangeFileLabel: 'Change file',
@@ -45,7 +46,7 @@ export const PORTABILITY_PAGE_STRINGS = {
   },
   exportScopeLabel: 'Collection scope',
   exportScopeAllOption: 'Entire library (all collections)',
-  exportIncludeFilesLabel: 'Include uploaded files (packages export as a .zip archive)',
+  exportIncludeFilesLabel: 'Include uploaded files (restorable ZIP archive)',
   exportCancelLabel: 'Cancel',
   exportSubmitLabel: 'Download export',
   exportSubmittingLabel: 'Preparing export...',

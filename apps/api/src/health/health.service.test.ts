@@ -1,3 +1,4 @@
+import { loadConfig } from '@api/config/load-config';
 import { describe, expect, it, mock } from 'bun:test';
 import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,25 +16,11 @@ function fakeConfigService(config: AppConfig): AppConfigService {
 }
 
 function makeConfig(dataDir: string): AppConfig {
-  return {
-    database: { url: 'postgres://arcdrop:arcdrop@localhost:5432/arcdrop_test' },
-    jwt: { secret: 'unit-test-secret-0123456789abcdef' },
-    port: 3000,
-    cors: { origins: [] },
-    dataDir,
-    metrics: { enabled: false },
-    metadata: { enabled: false, allowPrivate: false },
-    mcp: { patRequestsPerMinute: 300 },
-    portability: { importMaxBytes: 26_214_400, importZipMaxBytes: 314_572_800 },
-    rateLimit: {
-      importPerMinute: 30,
-      reindexPerMinute: 30,
-      mcpToolsPerMinute: 300,
-      bulkPerMinute: 30,
-      publicPerMinute: 60,
-    },
-    log: { level: 'fatal' },
-  };
+  return loadConfig({
+    ARCDROP__DATABASE__URL: 'postgres://arcdrop:arcdrop@localhost:5432/arcdrop_test',
+    ARCDROP__JWT__SECRET: 'unit-test-secret-0123456789abcdef',
+    ARCDROP__DATA_DIR: dataDir,
+  });
 }
 
 function makeService(dbOk: boolean, dataDir: string): HealthService {

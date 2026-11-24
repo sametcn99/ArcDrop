@@ -140,3 +140,20 @@ Release page.
 >
 > **Checksums & signatures**: `.sig` files are Tauri updater signatures;
 > SHA256 sums are published alongside the assets.
+
+## Record platform acceptance
+
+Record the build version, host or device model, OS version and result for each
+platform before publishing. A CI compile or simulator build verifies that
+target only.
+
+| Platform | Installed artifact and flow to verify                                                     | Result |
+| -------- | ----------------------------------------------------------------------------------------- | ------ |
+| Windows  | Signed installer, same-origin login, deep link, file save and signed update               |        |
+| macOS    | Signed and notarized bundle, same-origin login, deep link, file save and signed update    |        |
+| Linux    | Published package on a supported desktop, login, tray, native file save and signed update |        |
+| Android  | Signed APK on a physical device, share URL and file into ArcDrop, download and reminder   |        |
+| iOS      | Installed build on a physical device, login, library sync and file picker                 |        |
+
+Use the Compose web entry as the server address. Retest after restarting the
+app and confirm that the configured server and session persist.

@@ -696,7 +696,7 @@ describe('File uploads M18 (e2e)', () => {
         sha256: string;
       }>;
     };
-    expect(manifest.format).toBe('arcdrop/export-bundle/v1');
+    expect(manifest.format).toBe('arcdrop/export-bundle/v2');
     expect(manifest.fileCount).toBe(7); // imgDup is trashed so excluded
     const pdfManifestEntry = manifest.files.find((f) => f.bookmarkId === pdfRes.body.id)!;
     expect(pdfManifestEntry).toBeDefined();
@@ -720,6 +720,129 @@ describe('File uploads M18 (e2e)', () => {
     expect(reimport.body.created).toBe(1);
     expect(reimport.body.skipped.length).toBe(7);
     expect(reimport.body.errors).toEqual([]);
+    const uploadZip = (bytes: Uint8Array) =>
+      uploadMultipart<{
+        created: number;
+        updated: number;
+        errors: unknown[];
+      }>(baseUrl, '/data/import', bob.accessToken, {
+        name: 'arcdrop-export.zip',
+        mime: 'application/zip',
+        bytes,
+      });
+
+    const highlight = await call(baseUrl, 'POST', `/bookmarks/${pdfRes.body.id}/highlights`, {
+      bearer: alice.accessToken,
+      body: { text: 'Fixture highlight', note: 'Survives the round trip' },
+    });
+    expect(highlight.status).toBe(201);
+
+    const csvBundle = await call<Buffer>(baseUrl, 'POST', '/data/export', {
+      bearer: alice.accessToken,
+      body: { format: 'csv', includeFiles: true },
+      binary: true,
+    });
+    expect(csvBundle.status).toBe(200);
+    const csvEntries = readZipEntries(csvBundle.rawBuffer!);
+    expect(csvEntries.some((entry) => entry.name === 'restore.json')).toBe(true);
+
+    const modifiedAt = new Date();
+    const corrupted = createZipBuffer(
+      csvEntries.map((entry) => ({
+        ...entry,
+        modifiedAt,
+        bytes:
+          entry.name === pdfManifestEntry.archivePath
+            ? Buffer.alloc(entry.bytes.length, 1)
+            : entry.bytes,
+      })),
+    );
+    expect((await uploadZip(corrupted)).status).toBe(400);
+
+    const oldCsv = createZipBuffer(
+      csvEntries.map((entry) => ({
+        ...entry,
+        modifiedAt,
+        bytes:
+          entry.name === 'manifest.json'
+            ? Buffer.from(
+                JSON.stringify({
+                  ...JSON.parse(entry.bytes.toString('utf8')),
+                  format: 'arcdrop/export-bundle/v1',
+                }),
+              )
+            : entry.bytes,
+      })),
+    );
+    expect((await uploadZip(oldCsv)).status).toBe(400);
+    const beforeRestore = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks', {
+      bearer: bob.accessToken,
+    });
+    expect(beforeRestore.body.totalCount).toBe(1);
+
+    const restored = await uploadZip(csvBundle.rawBuffer!);
+    expect(restored.status).toBe(200);
+    expect(restored.body).toMatchObject({ created: 7, updated: 1, errors: [] });
+
+    const list = await call<BookmarkListView>(baseUrl, 'GET', '/bookmarks?file=true', {
+      bearer: bob.accessToken,
+    });
+    const restoredPdf = list.body.items.find((item) => item.fileName === 'architecture-spec.pdf')!;
+    expect(restoredPdf.id).not.toBe(pdfRes.body.id);
+    expect(restoredPdf).toMatchObject({ note: 'Uploaded directly', favorite: true });
+    expect(restoredPdf.tags.map(({ name }) => name).sort()).toEqual(['PDF', 'Specs']);
+
+    const received = await call<Buffer>(baseUrl, 'GET', `/files/${restoredPdf.id}`, {
+      bearer: bob.accessToken,
+      binary: true,
+    });
+    expect(createHash('sha256').update(received.rawBuffer!).digest('hex')).toBe(
+      pdfManifestEntry.sha256,
+    );
+    const members = await dataSource.query(
+      `SELECT c.title FROM bookmark_collections bc JOIN collections c ON c.id = bc.collection_id
+       WHERE bc.bookmark_id = $1`,
+      [restoredPdf.id],
+    );
+    expect(members).toEqual([{ title: 'Documents' }]);
+    const highlights = await dataSource.query(
+      'SELECT text, note FROM highlights WHERE bookmark_id = $1',
+      [restoredPdf.id],
+    );
+    expect(highlights).toEqual([{ text: 'Fixture highlight', note: 'Survives the round trip' }]);
+
+    const legacyJson = createZipBuffer(
+      zipEntries.map((entry) => ({
+        ...entry,
+        modifiedAt,
+        bytes:
+          entry.name === 'manifest.json'
+            ? Buffer.from(
+                JSON.stringify({
+                  ...manifest,
+                  exportFormat: 'json',
+                  format: 'arcdrop/export-bundle/v1',
+                }),
+              )
+            : entry.bytes,
+      })),
+    );
+    const beforeRetry = await dataSource.query('SELECT * FROM upload_usage WHERE user_id = $1', [
+      bob.user.id,
+    ]);
+    expect((await uploadZip(legacyJson)).body).toMatchObject({
+      created: 0,
+      updated: 8,
+      errors: [],
+    });
+    expect(
+      await dataSource.query('SELECT * FROM upload_usage WHERE user_id = $1', [bob.user.id]),
+    ).toEqual(beforeRetry);
+    expect(
+      readdirSync(join(process.env.ARCDROP__DATA_DIR!, 'tmp')).filter((name) =>
+        name.startsWith('portable-'),
+      ),
+    ).toEqual([]);
   }, 30_000);
 
   it('AC: enforces per-file cap and monthly upload quota (413 with limitBytes/usedBytes/resetAt), leaves zero orphans, and resets on new month', async () => {

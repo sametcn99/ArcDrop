@@ -17,7 +17,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const extensionDir = path.resolve(scriptDir, '..');
 const distDir = path.join(extensionDir, 'dist');
 
-const SKIP_SUFFIXES = ['.map', '.LICENSE.txt'];
+const SKIP_SUFFIXES = ['.map'];
 
 async function collectFiles(dir: string, prefix = ''): Promise<Zippable> {
   const files: Zippable = {};
@@ -28,7 +28,7 @@ async function collectFiles(dir: string, prefix = ''): Promise<Zippable> {
       continue;
     }
     if (SKIP_SUFFIXES.some((suffix) => relative.endsWith(suffix))) {
-      continue; // source maps + license chunks stay out of the store package
+      continue; // source maps stay out of the store package
     }
     files[relative] = new Uint8Array(await readFile(path.join(dir, entry.name)));
   }

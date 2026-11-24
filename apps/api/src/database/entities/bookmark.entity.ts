@@ -85,9 +85,16 @@ export interface UrlParts {
 @Index('IX_bookmarks_user_cache_status', ['userId', 'cacheStatus'])
 @Index('IX_bookmarks_cache_retry', ['cacheStatus', 'cacheNextRetryAt', 'deletedAt'])
 @Index('IX_bookmarks_user_storage_kind', ['userId', 'storageKind'])
+@Index('UQ_bookmarks_user_portable_source', ['userId', 'portableSourceId'], {
+  unique: true,
+  where: 'portable_source_id IS NOT NULL',
+})
 export class Bookmark {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
+
+  @Column({ type: 'uuid', name: 'portable_source_id', nullable: true })
+  portableSourceId?: string | null;
 
   @Column({ type: 'uuid', name: 'user_id' })
   userId!: string;

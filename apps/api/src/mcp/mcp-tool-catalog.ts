@@ -522,16 +522,17 @@ export function buildToolCatalog(deps: {
       async (user, [dto]) => {
         const request = dto as ExportDataDto;
         if (request.includeFiles === true) {
-          const { exportedAt, zipBuffer, manifest } = await portability.exportZipBundle(
+          const { exportedAt, stream, size, manifest } = await portability.exportZipBundle(
             user,
             request.format,
             request.collectionId,
+            undefined,
+            undefined,
+            MCP_IMPORT_MAX_DECODED_BYTES,
           );
-          if (zipBuffer.length > MCP_IMPORT_MAX_DECODED_BYTES) {
-            throw new PayloadTooLargeException(
-              `export ZIP (${zipBuffer.length} bytes) exceeds the ${MCP_IMPORT_MAX_DECODED_BYTES} byte MCP export cap — use REST POST /data/export`,
-            );
-          }
+          const chunks: Buffer[] = [];
+          for await (const chunk of stream) chunks.push(chunk as Buffer);
+          const zipBuffer = Buffer.concat(chunks, size);
           return {
             exportedAt,
             format: 'zip',

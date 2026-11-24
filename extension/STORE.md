@@ -55,7 +55,7 @@ manual, user-driven step.
 ArcDrop stores your server address and session tokens locally in the
 browser profile (chrome.storage.local) and exchanges data exclusively with
 the ArcDrop server you configure during setup. The extension contains **no
-analytics, no telemetry, no third-party requests** — every network call goes
+analytics or telemetry**. ArcDrop API traffic goes
 to your own server. Page content is only read when you invoke a save action
 (activeTab), and image saves additionally ask for one-time access to the
 image's origin. Server-side metadata enrichment (titles, covers) is

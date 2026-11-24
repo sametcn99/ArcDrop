@@ -11,7 +11,8 @@
 // The regular (non-embed) web build is unaffected — both switches are
 // env-conditional in apps/web/app.
 
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -19,22 +20,24 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const extensionDir = path.resolve(scriptDir, '..');
 const repoRoot = path.resolve(extensionDir, '..');
-const webDist = path.join(repoRoot, 'apps', 'web', 'app', 'dist');
 const embedDir = path.join(extensionDir, 'embed');
 
-async function buildWebApp(): Promise<void> {
-  const result = Bun.spawnSync(['bun', '--cwd=../apps/web/app', 'run', 'build'], {
-    cwd: extensionDir,
-    env: {
-      ...process.env,
-      ARCDROP_EMBED: 'extension',
-      VITE_ROUTER_MODE: 'hash',
+function buildWebApp(outputDir: string): void {
+  const result = Bun.spawnSync(
+    ['bun', '--cwd=../apps/web/app', 'run', 'build', '--outDir', outputDir],
+    {
+      cwd: extensionDir,
+      env: {
+        ...process.env,
+        ARCDROP_EMBED: 'extension',
+        VITE_ROUTER_MODE: 'hash',
+      },
+      stdout: 'inherit',
+      stderr: 'inherit',
     },
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
+  );
   if (result.exitCode !== 0) {
-    process.exit(result.exitCode ?? 1);
+    throw new Error('Embedded web build failed');
   }
 }
 
@@ -71,11 +74,15 @@ function adaptIndexHtml(html: string): { html: string; refs: AppRefs } {
 }
 
 async function main(): Promise<void> {
-  await buildWebApp();
-
-  await rm(embedDir, { recursive: true, force: true });
-  await mkdir(embedDir, { recursive: true });
-  await cp(webDist, embedDir, { recursive: true });
+  const outputDir = await mkdtemp(path.join(tmpdir(), 'arcdrop-embed-'));
+  try {
+    buildWebApp(outputDir);
+    await rm(embedDir, { recursive: true, force: true });
+    await mkdir(embedDir, { recursive: true });
+    await cp(outputDir, embedDir, { recursive: true });
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
   await cp(
     path.join(extensionDir, 'embed-src', 'bootstrap.js'),
     path.join(embedDir, 'bootstrap.js'),

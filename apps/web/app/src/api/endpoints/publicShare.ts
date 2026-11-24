@@ -5,7 +5,7 @@ export function createPublicShareApi(client: ApiClient = apiClient) {
   return {
     async getPublicCollection(
       shareToken: string,
-      page = 0,
+      page = 1,
       pageSize = 50,
     ): Promise<PublicCollectionPage> {
       return client.get(`/public/collections/${encodeURIComponent(shareToken)}`, {

@@ -1,3 +1,4 @@
+import { BlockList, isIP } from 'node:net';
 import { z } from 'zod';
 
 /**
@@ -23,6 +24,48 @@ const booleanFlag = (defaultValue: boolean) =>
       .default(defaultValue),
   );
 
+function isProxyAddress(value: string): boolean {
+  const [address, prefix, ...rest] = value.split('/');
+  const family = isIP(address ?? '');
+  if (!family || rest.length > 0) return false;
+  if (prefix === undefined) return true;
+  if (!/^\d+$/.test(prefix)) return false;
+  try {
+    new BlockList().addSubnet(address!, Number(prefix), family === 4 ? 'ipv4' : 'ipv6');
+    return Number(prefix) > 0;
+  } catch {
+    return false;
+  }
+}
+
+const optionalSecret = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().min(32, 'must be at least 32 characters').optional(),
+);
+
+const publicOrigin = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z
+    .url()
+    .refine((value) => {
+      try {
+        const url = new URL(value);
+        return (
+          ['http:', 'https:'].includes(url.protocol) &&
+          url.pathname === '/' &&
+          !url.username &&
+          !url.password &&
+          !url.search &&
+          !url.hash
+        );
+      } catch {
+        return false;
+      }
+    }, 'must be an HTTP(S) origin')
+    .transform((value) => new URL(value).origin)
+    .optional(),
+);
+
 /**
  * Environment schema (plan D8/M1). Variables use the `ARCDROP__` prefix with
  * double-underscore nesting; `strictObject` rejects unknown keys so typos like
@@ -43,6 +86,22 @@ export const envSchema = z.strictObject({
   jwt: z.strictObject({
     secret: z.string().min(32, 'must be at least 32 characters (use a long random value)'),
   }),
+  totp: z
+    .strictObject({
+      encryptionKey: optionalSecret,
+      previousEncryptionKey: optionalSecret,
+    })
+    .refine((keys) => !keys.previousEncryptionKey || !!keys.encryptionKey, {
+      path: ['encryptionKey'],
+      message: 'required when a previous TOTP key is supplied',
+    }),
+  http: z.strictObject({
+    trustedProxies: csvList.refine(
+      (list) => list.every(isProxyAddress),
+      'expected IP addresses or CIDRs',
+    ),
+  }),
+  public: z.strictObject({ baseUrl: publicOrigin }),
   port: z.coerce
     .number()
     .int('must be an integer')
@@ -79,7 +138,10 @@ export const envSchema = z.strictObject({
      * streaming upload, never after buffering.
      */
     importMaxBytes: z.coerce.number().int().min(1).default(26_214_400), // 25 MiB
-    importZipMaxBytes: z.coerce.number().int().min(1).default(314_572_800), // 300 MB
+    importZipMaxBytes: z.coerce.number().int().min(1).default(314_572_800), // 300 MiB
+    zipExpandedMaxBytes: z.coerce.number().int().min(1).default(1_073_741_824), // 1 GiB
+    zipMaxEntries: z.coerce.number().int().min(1).default(10_000),
+    zipConcurrentTransfers: z.coerce.number().int().min(1).default(1),
   }),
   rateLimit: z.strictObject({
     /**

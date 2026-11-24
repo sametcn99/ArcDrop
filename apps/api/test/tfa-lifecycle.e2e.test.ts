@@ -1,3 +1,4 @@
+import { APP_CONFIG } from '../src/config/app-config.service';
 import 'reflect-metadata';
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { INestApplication } from '@nestjs/common';
@@ -94,9 +95,14 @@ async function call<T = Record<string, unknown>>(
 
 const problem = (r: CallResult<unknown>) => r.body as unknown as Problem;
 
-async function bootApp(): Promise<{ app: INestApplication; baseUrl: string }> {
-  const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-  const config = loadConfig();
+async function bootApp(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ app: INestApplication; baseUrl: string }> {
+  const config = loadConfig(env);
+  const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    .overrideProvider(APP_CONFIG)
+    .useValue(config)
+    .compile();
   const app = moduleRef.createNestApplication({ logger: false });
   setupApp(app, config);
   const document = buildOpenApiDocument(app);
@@ -461,6 +467,85 @@ describe('M15 — 2FA & account lifecycle (e2e)', () => {
       expect(disableAgain.status).toBe(400);
     });
   });
+
+  it('rotates enabled and pending legacy secrets and signs in after the JWT secret changes', async () => {
+    const oldJwt = 'disposable-test-jwt-original-000000';
+    const newJwt = 'disposable-test-jwt-after-change-000000';
+    const totpKey = 'disposable-test-totp-dedicated-000000';
+    const email = 'rotation@arcdrop.test';
+    const password = 'disposable-rotation-test-password';
+    const legacyEnv = { ...process.env, ARCDROP__JWT__SECRET: oldJwt };
+    const legacy = await bootApp(legacyEnv);
+    let secret = '';
+    let pendingSecret = '';
+    let pendingId = '';
+    try {
+      await wipeData(legacy.app.get(DataSource));
+      const admin = await bootstrapAdmin(legacy.baseUrl, email, password);
+      const pending = await createUserViaAdmin(
+        legacy.baseUrl,
+        admin,
+        'pending-rotation@arcdrop.test',
+      );
+      pendingId = pending.user.id;
+      const setup = async (token: string) => {
+        const response = await call<{ secret: string }>(legacy.baseUrl, 'POST', '/auth/tfa/setup', {
+          bearer: token,
+        });
+        expect(response.status).toBe(200);
+        return response.body.secret;
+      };
+      secret = await setup(admin.accessToken);
+      pendingSecret = await setup(pending.accessToken);
+      expect(
+        (
+          await call(legacy.baseUrl, 'POST', '/auth/tfa/enable', {
+            bearer: admin.accessToken,
+            body: { code: totpFor(secret) },
+          })
+        ).status,
+      ).toBe(200);
+    } finally {
+      await legacy.app.close();
+    }
+
+    const rotationEnv = { ...legacyEnv, ARCDROP__TOTP__ENCRYPTION_KEY: totpKey };
+    const rotate = async (count: number) => {
+      const result = Bun.spawnSync(['bun', 'src/scripts/rotate-totp-key.ts'], { env: rotationEnv });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).toContain(`TOTP records rotated: ${count}`);
+    };
+    await rotate(2);
+    await rotate(0);
+
+    const rotatedEnv = { ...rotationEnv, ARCDROP__JWT__SECRET: newJwt };
+    const next = await bootApp(rotatedEnv);
+    try {
+      const { baseUrl } = next;
+      const data = (await next.app
+        .get(DataSource)
+        .query('SELECT totp_enabled, totp_secret FROM users WHERE id = $1', [pendingId])) as Array<{
+        totp_enabled: boolean;
+        totp_secret: string;
+      }>;
+      expect(data[0]?.totp_enabled).toBe(false);
+      expect(data[0]?.totp_secret).toStartWith('v2:');
+      expect(data[0]?.totp_secret).not.toContain(pendingSecret);
+      const login = await call<Problem>(baseUrl, 'POST', '/auth/login', {
+        body: { email, password },
+      });
+      expect(login.body.code).toBe('TOTP_REQUIRED');
+      expect(
+        (
+          await call(baseUrl, 'POST', '/auth/login/tfa', {
+            body: { challenge: login.body.challenge, code: totpFor(secret) },
+          })
+        ).status,
+      ).toBe(201);
+    } finally {
+      await next.app.close();
+    }
+  }, 30_000);
 
   describe('boot B — account lifecycle: POST /me/reset-data and DELETE /me', () => {
     let app: INestApplication;

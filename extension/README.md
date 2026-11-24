@@ -69,7 +69,7 @@ extension:
 
 - **Build**: prebuild runs the web app build with `ARCDROP_EMBED=extension`
   (relative asset base) + `VITE_ROUTER_MODE=hash` (extension pages cannot
-  serve history-mode paths), assembles `embed/`, then the postbuild step
+  serve history-mode paths), builds into an isolated temporary directory, assembles `embed/`, then the postbuild step
   copies it verbatim into every `dist/<browser>/pages/app/`. The regular web
   build/CI is unaffected — both switches are env-conditional.
 - **Storage bridge** (`embed-src/bootstrap.js`, served at `pages/app/bootstrap.js`):
@@ -139,8 +139,7 @@ store-ready zips (`dist/arcdrop-extension-*.zip`, verified by
 ## Privacy
 
 The extension exchanges data exclusively with the ArcDrop server you
-configure during setup — **no analytics, no telemetry, no third-party
-requests**. Session tokens and preferences live in `chrome.storage.local`
+configure during setup — **no analytics and no telemetry**. The app packages its font locally. Session tokens and preferences live in `chrome.storage.local`
 in your browser profile. Page content is only read when you invoke a save
 (action/shortcut/context menu), and image saves request one-time access to
 the image's origin. Full listing notes live in [`STORE.md`](STORE.md).

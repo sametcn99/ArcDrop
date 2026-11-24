@@ -55,27 +55,6 @@ export function createAuthApi(client: ApiClient = apiClient) {
       });
     },
 
-    async refresh(refreshToken: string): Promise<AuthSession> {
-      return client.post(
-        '/auth/refresh',
-        { refreshToken },
-        {
-          schema: authSessionSchema,
-          skipAuth: true,
-        },
-      );
-    },
-
-    async logout(refreshToken: string): Promise<void> {
-      await client.post<void>(
-        '/auth/logout',
-        { refreshToken },
-        {
-          skipAuth: true,
-        },
-      );
-    },
-
     async claim(input: ClaimRequest): Promise<AuthSession> {
       return client.post('/auth/claim', input, {
         schema: authSessionSchema,

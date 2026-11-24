@@ -1,0 +1,29 @@
+{
+	admin off
+	servers {
+		trusted_proxies static {$ARCDROP_WEB_TRUSTED_PROXY_CIDRS:127.0.0.1 ::1}
+		trusted_proxies_strict
+	}
+}
+
+http://{$ARCDROP_WEB_LISTEN::8080} {
+	encode zstd gzip
+	@api path /api/v1 /api/v1/* /openapi.json /docs /metrics
+	handle @api {
+		reverse_proxy {$ARCDROP_WEB_UPSTREAM:api:3000} {
+			header_up X-Forwarded-For {client_ip}
+			flush_interval -1
+		}
+	}
+	handle /assets/* {
+		root * {$ARCDROP_WEB_ROOT:/srv}
+		header Cache-Control "public, max-age=31536000, immutable"
+		file_server
+	}
+	handle {
+		root * {$ARCDROP_WEB_ROOT:/srv}
+		try_files {path} /index.html
+		header Cache-Control "no-cache"
+		file_server
+	}
+}

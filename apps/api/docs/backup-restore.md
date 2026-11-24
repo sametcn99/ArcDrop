@@ -6,9 +6,11 @@ This guide covers day-2 operations for the ArcDrop Docker Compose bundle ([`comp
 
 ## 1. Backup Procedure (PostgreSQL + `/data` Volume)
 
-ArcDrop stores relational state (users, bookmarks, collections, tags, change events, PATs, audit log) in PostgreSQL (`arcdrop-pgdata`) and cached bookmark icons (`<sha256>.<ext>`) under `/data/icons` (`arcdrop-data`).
-
-Because `bookmarks.icon_ref` references filenames in `/data/icons`, take both snapshots together. Stopping `api` briefly guarantees point-in-time consistency between the database and the icon cache (if you prefer zero-downtime hot backups, run `pg_dump` live and reconcile any missing icon later via `POST /api/v1/bookmarks/:id/reindex`).
+Back up PostgreSQL and the entire `arcdrop-data` volume together. The volume
+contains cached icons, archives and private uploaded files. Stop the API
+writer before taking both snapshots so file references and their bytes
+describe the same state. Store a protected copy of the configured JWT and
+TOTP keys with the recovery materials.
 
 ```bash
 # 1. Choose a timestamped backup directory
@@ -25,7 +27,7 @@ docker compose exec -T db pg_dump \
   -Fc \
   > "$BACKUP_DIR/arcdrop.pgdump"
 
-# 4. Archive the arcdrop-data volume (/data/icons)
+# 4. Archive the arcdrop-data volume (/data)
 #    Adjust volume name if your compose project name is not `arcdrop`.
 docker run --rm \
   -v arcdrop_arcdrop-data:/data:ro \
@@ -64,7 +66,7 @@ docker compose exec -T db pg_restore \
   --no-privileges \
   < "$BACKUP_DIR/arcdrop.pgdump"
 
-# 4. Restore the /data volume (icons)
+# 4. Restore the /data volume
 docker run --rm \
   -v arcdrop_arcdrop-data:/data \
   -v "$(pwd)/$BACKUP_DIR:/backup:ro" \
@@ -73,7 +75,7 @@ docker run --rm \
 
 # 5. Start the API (migrate-on-boot runs any pending migrations if restoring
 #    into a newer image) and verify readiness
-docker compose up -d api
+docker compose up -d --wait
 curl -fsS http://127.0.0.1:3000/api/v1/readyz
 ```
 
@@ -91,27 +93,53 @@ Expected `/api/v1/readyz` response:
 
 ---
 
-## 3. Secrets Checklist & Rotation Caveats
+## 3. TOTP keys and JWT rotation
 
-| Secret / Credential         | Where Set                    | Generation                                                                | Rotation Caveat                                                                                                                                                                                                                                                                                                                                |
-| --------------------------- | ---------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ARCDROP__JWT__SECRET`      | Shell env / untracked `.env` | `openssl rand -hex 32` (min 32 chars; fail-fast on boot if missing/short) | Signs HS256 **access JWTs** (15 min TTL) and WS sync tickets. Rotating immediately invalidates in-flight access JWTs (clients transparently recover via `POST /api/v1/auth/refresh`, because refresh tokens, PATs, and one-time invite/reset tokens are stored as SHA-256 hashes in Postgres and do **not** depend on `ARCDROP__JWT__SECRET`). |
-| `POSTGRES_PASSWORD`         | Shell env / untracked `.env` | `openssl rand -hex 24`                                                    | Update both the `db` role password (`ALTER USER ...`) and `ARCDROP__DATABASE__URL` simultaneously, then restart `api`. Never commit `.env` files.                                                                                                                                                                                              |
-| Encryption keys (v1 status) | N/A                          | N/A                                                                       | Wave-1 does **not** use a separate symmetric column-encryption key (`@node-rs/argon2` hashes user passwords; opaque tokens use `sha256`). If Wave-2+ introduces encrypted external credentials, add their key rotation procedure here.                                                                                                         |
+A fresh instance should use separately generated `ARCDROP__JWT__SECRET` and
+`ARCDROP__TOTP__ENCRYPTION_KEY`. Existing deployments without a dedicated TOTP
+key can continue to open legacy TOTP records using their original JWT secret.
+
+1. Take the database and data backups and retain the original keys.
+2. Leave the JWT secret in place and add a new random `ARCDROP__TOTP__ENCRYPTION_KEY`.
+   For a dedicated TOTP key rotation, put the old TOTP key in
+   `ARCDROP__TOTP__PREVIOUS_ENCRYPTION_KEY`.
+3. After deploying the new image, stop the API and run the maintenance command.
+   It converts enabled and pending TOTP records in one transaction. Rerunning
+   it leaves records already encrypted with the new key intact.
+
+   ```bash
+   docker compose stop api
+   docker compose run --rm --no-deps --entrypoint bun api /app/apps/api/dist/scripts/rotate-totp-key.js
+   docker compose up -d --wait
+   ```
+
+4. Verify TOTP sign-in and rerun the command to confirm that there are zero
+   records left to rotate. Then rotate the JWT secret or remove the previous
+   TOTP key, as applicable. Recreate the API with the updated configuration.
+
+For rollback to the previous application, restore the pre-rotation database
+and data volume with their matching keys. Keep recovery codes available
+separately from server backups.
 
 ---
 
 ## 4. Upgrade Path
 
+Keep the same Compose project name and the existing PostgreSQL and JWT
+settings. The new web service takes ownership of the published port. Restart
+the project without deleting its volumes. If network clients previously
+connected directly, configure the new listener and HTTPS before switching
+them. The default address is `127.0.0.1:3000`.
+
 1. **Back up first**: Follow [Section 1](#1-backup-procedure-postgresql--data-volume).
 2. **Pull or rebuild the new image**:
    ```bash
-   docker compose pull api   # or: docker compose build api
+   docker compose build api web
    ```
 3. **Rolling container swap with migrate-on-boot**:
    `apps/api/docker-entrypoint.sh` executes TypeORM `migration:run` before starting `bun dist/main.js` (plan D11).
    ```bash
-   docker compose up -d api
+   docker compose up -d --wait
    ```
 4. **Verify health & readiness**:
    ```bash
@@ -126,7 +154,20 @@ Expected `/api/v1/readyz` response:
 
 ## 5. Reverse-Proxy TLS Termination
 
-**TLS termination assumption:** ArcDrop intentionally serves plain HTTP and raw WebSockets (`ws://` at `/api/v1/sync/ws`) on port `3000` and delegates TLS termination, HSTS, and public certificate management to an upstream reverse proxy on the same host or private network. In production, bind the Compose port to loopback (`127.0.0.1:3000:3000`) so clients cannot bypass the proxy.
+Terminate TLS at the upstream and proxy the entire site to the Compose
+web port. Set `ARCDROP__PUBLIC__BASE_URL=https://bookmarks.example.com`
+for public RSS links. Set `ARCDROP_WEB_TRUSTED_PROXY_CIDRS` to the
+space-separated addresses or CIDRs of the upstream proxies as seen by the web
+container. For a host-local proxy, this is often the Docker gateway address.
+Keep the web port bound to loopback when the upstream runs on the same host.
+For a standalone API, set the comma-separated
+`ARCDROP__HTTP__TRUSTED_PROXIES` to the immediate trusted proxy addresses.
+
+The trusted proxy should replace client forwarding headers. Increase its
+request-body limit when raising ArcDrop's compressed ZIP upload limit. Use
+HTTPS for network deployments so browsers can coordinate persisted sessions
+across tabs. A browser without Web Locks keeps its session in the tab until
+that tab is reloaded or closed.
 
 ### Caddy (recommended — automatic HTTPS + WebSockets)
 
@@ -167,7 +208,7 @@ server {
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Request-Id $request_id;
     }
@@ -194,3 +235,21 @@ server {
 
 - M8 temporarily raised the global `express.json()` limit from `100 KB` to `2 MB` so the MCP `importData` tool could carry base64-encoded imports.
 - In M9, `setupApp` scopes the `2 MB` JSON parser exclusively to `/api/v1/mcp` and tightens the global REST JSON parser to `256 KB`. Oversized JSON requests return RFC 7807 `413 Payload Too Large` (`application/problem+json`) with request correlation IDs intact. Multipart file imports (`POST /api/v1/data/import`) stream through `multer` with `ARCDROP__PORTABILITY__IMPORT_MAX_BYTES` (`25 MiB`) and `ARCDROP__PORTABILITY__IMPORT_ZIP_MAX_BYTES` (`300 MB`).
+
+## Portability performance check
+
+On Linux, start a disposable empty API database with a name ending in
+`_bench`, migrate it, and launch the API with metadata fetching disabled.
+Run the following from `apps/api` with the same database environment and
+the PID of that API process.
+
+```bash
+ARCDROP_BENCH_PID=12345 ARCDROP_BENCH_URL=http://127.0.0.1:3000 \
+  bun scripts/benchmark-portability.ts
+```
+
+The script measures warm search latency at 10,000 and 50,000 bookmarks
+and samples peak resident memory during a ZIP export and re-import with
+two 16 MiB attachments. Run it again with an empty database for comparable
+measurements. The numbers represent the test host, library fixture and
+current process, so record them together.

@@ -1,3 +1,4 @@
+import { readBrowserSession } from './browserSession';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { createAuthApi } from './endpoints/auth';
@@ -182,7 +183,7 @@ describe('API client & auth endpoints', () => {
     client.setTokens({ accessToken: 'access-current', refreshToken: 'refresh-stored-1' });
 
     // Refresh token persisted so a reload can restore the session...
-    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBe('refresh-stored-1');
+    expect(readBrowserSession()?.refreshToken ?? null).toBe('refresh-stored-1');
     // ...while the access token never touches storage.
     const storedValues = Object.keys(window.localStorage)
       .map((key) => window.localStorage.getItem(key) ?? '')
@@ -192,9 +193,9 @@ describe('API client & auth endpoints', () => {
     // Rotation updates the persisted token for the next reload.
     await client.refreshSession();
     expect(client.getAccessToken()).toBe('access-rotated-1');
-    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBe('refresh-rotated-1');
+    expect(readBrowserSession()?.refreshToken ?? null).toBe('refresh-rotated-1');
 
     client.clearTokens();
-    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBeNull();
+    expect(readBrowserSession()?.refreshToken ?? null).toBeNull();
   });
 });

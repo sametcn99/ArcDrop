@@ -45,7 +45,7 @@ export function registerContextMenus(menus: ContextMenusLike = chromeContextMenu
         // take precedence in the click handler by menuItemId.
         contexts:
           id === 'arcdrop-save-page'
-            ? ['page', 'frame', 'editable', 'video', 'audio', 'other']
+            ? ['page', 'frame', 'editable', 'video', 'audio']
             : id === 'arcdrop-save-selection'
               ? ['selection']
               : id === 'arcdrop-save-link'

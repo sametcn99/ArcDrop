@@ -66,11 +66,18 @@ function attachClientHooks() {
         error: null,
       });
     },
+    onSessionChanged() {
+      clearClientDataStores();
+      useAuthStore.setState({
+        user: null,
+        status: 'unauthenticated',
+        tfaChallenge: null,
+        error: null,
+        serverUnreachable: false,
+      });
+    },
     onSessionExpired(error) {
       clearClientDataStores();
-      // Also drop the persisted refresh token — the API has revoked its
-      // family (reuse detection) or it expired, so it can never restore.
-      apiClient.clearTokens();
       useAuthStore.setState({
         user: null,
         status: 'unauthenticated',
@@ -92,7 +99,7 @@ let restoreSessionInFlight: Promise<boolean> | null = null;
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
-  status: 'unauthenticated',
+  status: apiClient.getPersistedRefreshToken() ? 'restoring' : 'unauthenticated',
   tfaChallenge: null,
   error: null,
   serverUnreachable: false,
@@ -215,23 +222,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   async logout() {
-    const refreshToken = apiClient.getRefreshToken();
     clearClientDataStores();
-    try {
-      if (refreshToken) {
-        await authApi.logout(refreshToken);
-      }
-    } catch {
-      // Logout is idempotent and must always clear client-side session state.
-    } finally {
-      apiClient.clearTokens();
-      set({
-        user: null,
-        status: 'unauthenticated',
-        tfaChallenge: null,
-        error: null,
-      });
-    }
+    const logout = apiClient.endSession();
+    set({
+      user: null,
+      status: 'unauthenticated',
+      tfaChallenge: null,
+      error: null,
+    });
+    await logout.catch(() => {});
   },
 
   restoreSession() {
@@ -248,22 +247,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ status: 'restoring', error: null });
     restoreSessionInFlight = (async () => {
       try {
-        // The API rotates the refresh token on every use; setSession persists
-        // the new one for the next reload.
-        const session = await authApi.refresh(persisted);
-        get().setSession(session);
+        await apiClient.refreshSession();
+        set({ serverUnreachable: false });
         return true;
       } catch (err) {
         const apiError = toApiError(err);
-        // Plan T5: a network-level failure (status 0 — no HTTP response) means
-        // the server itself is unreachable; the persisted token is still
-        // valid, so keep it and let the unreachable screen offer a retry.
-        // An HTTP-level rejection (401 etc.) means the token is dead: clear
-        // it and fall through to sign-in.
-        const unreachable = apiError.status === 0;
-        if (!unreachable) {
-          apiClient.clearTokens();
+        if (apiError.code === 'SESSION_CHANGED') {
+          if (get().status === 'restoring') set({ status: 'unauthenticated' });
+          return false;
         }
+        // Transport, server and throttling failures keep the persisted session for retry.
+        const unreachable =
+          apiError.status === 0 || apiError.status === 429 || apiError.status >= 500;
         set({
           user: null,
           status: 'unauthenticated',
@@ -304,3 +299,5 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 }));
 
 attachClientHooks();
+
+if (typeof window !== 'undefined') window.addEventListener('storage', apiClient.handleStorageEvent);

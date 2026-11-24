@@ -35,7 +35,10 @@ interface CentralDirectoryEntry {
 const CENTRAL_SIGNATURE = 0x02014b50;
 const LOCAL_SIGNATURE = 0x04034b50;
 
-export function readZipEntries(archive: Buffer): ZipEntry[] {
+export function readZipEntries(
+  archive: Buffer,
+  limits = { expandedBytes: 64 * 1024 * 1024, entries: 10_000 },
+): ZipEntry[] {
   const eocd = findEndOfCentralDirectory(archive);
   if (eocd === -1) {
     throw new ZipParseError('not a ZIP archive (no end-of-central-directory record)');
@@ -49,6 +52,8 @@ export function readZipEntries(archive: Buffer): ZipEntry[] {
     throw new ZipParseError('zip64 archives are not supported');
   }
 
+  if (entryCount > limits.entries) throw new ZipParseError('too many ZIP members');
+  let remaining = limits.expandedBytes;
   const entries: ZipEntry[] = [];
   let cursor = centralOffset;
   for (let i = 0; i < entryCount; i++) {
@@ -65,14 +70,16 @@ export function readZipEntries(archive: Buffer): ZipEntry[] {
     const name = archive.subarray(cursor + 46, cursor + 46 + nameLength).toString('utf8');
 
     if (!name.endsWith('/')) {
-      const bytes = extractMember(archive, view, {
-        name,
-        compressedSize,
-        localHeaderOffset,
-        method,
-        flags,
-      });
-      if (bytes !== null) entries.push({ name, bytes });
+      const bytes = extractMember(
+        archive,
+        view,
+        { name, compressedSize, localHeaderOffset, method, flags },
+        remaining,
+      );
+      if (bytes !== null) {
+        remaining -= bytes.length;
+        entries.push({ name, bytes });
+      }
     }
     cursor += 46 + nameLength + extraLength + commentLength;
   }
@@ -84,6 +91,7 @@ function extractMember(
   archive: Buffer,
   view: DataView,
   entry: CentralDirectoryEntry,
+  remaining: number,
 ): Buffer | null {
   if (entry.name.endsWith('/')) return null; // directory entry
   if ((entry.flags & 0x1) !== 0) {
@@ -105,10 +113,15 @@ function extractMember(
   }
   const data = archive.subarray(dataStart, dataEnd);
 
-  if (entry.method === 0) return Buffer.from(data); // stored — copy out
+  if (entry.method === 0) {
+    if (data.length > remaining) throw new ZipParseError('ZIP exceeds the expanded size limit');
+    return Buffer.from(data);
+  }
   if (entry.method === 8) {
     try {
-      return inflateRawSync(data);
+      const bytes = inflateRawSync(data, { maxOutputLength: Math.max(1, remaining) });
+      if (bytes.length > remaining) throw new ZipParseError('ZIP exceeds the expanded size limit');
+      return bytes;
     } catch {
       throw new ZipParseError(`failed to decompress member "${entry.name}"`);
     }

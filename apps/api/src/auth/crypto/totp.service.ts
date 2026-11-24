@@ -189,28 +189,62 @@ export class TotpService {
 
   /** Encrypts a Base32 secret for DB storage using AES-256-GCM. */
   encryptSecret(secretBase32: string): string {
+    const current = this.config.snapshot.totp?.encryptionKey;
+    const version = current ? 'v2' : 'v1';
+    const key = this.encryptionKey(version, current ?? this.config.snapshot.jwt.secret);
     const iv = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.encryptionKey(), iv);
+    const cipher = createCipheriv('aes-256-gcm', key, iv);
     const ciphertext = Buffer.concat([cipher.update(secretBase32, 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
-    return `v1:${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
+    return `${version}:${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
   }
 
-  /** Decrypts a stored `v1:...` encrypted TOTP secret. */
   decryptSecret(encoded: string): string {
-    if (!encoded.startsWith('v1:')) {
-      throw new Error('Unsupported encrypted TOTP secret format');
+    if (encoded.startsWith('v1:')) {
+      return this.decryptWithKey(
+        encoded,
+        this.encryptionKey('v1', this.config.snapshot.jwt.secret),
+      );
     }
-    const parts = encoded.slice(3).split('.');
-    if (parts.length !== 3) {
-      throw new Error('Malformed encrypted TOTP secret');
-    }
-    const [ivB64, tagB64, ciphertextB64] = parts as [string, string, string];
-    const iv = Buffer.from(ivB64, 'base64url');
-    const tag = Buffer.from(tagB64, 'base64url');
-    const ciphertext = Buffer.from(ciphertextB64, 'base64url');
 
-    const decipher = createDecipheriv('aes-256-gcm', this.encryptionKey(), iv);
+    if (!encoded.startsWith('v2:')) throw new Error('Unsupported encrypted TOTP secret format');
+    const keys = this.config.snapshot.totp;
+    if (!keys?.encryptionKey) throw new Error('Missing TOTP encryption key');
+
+    try {
+      return this.decryptWithKey(encoded, this.encryptionKey('v2', keys.encryptionKey));
+    } catch (error) {
+      if (!keys.previousEncryptionKey) throw error;
+      return this.decryptWithKey(encoded, this.encryptionKey('v2', keys.previousEncryptionKey));
+    }
+  }
+
+  /** Returns null when the stored value is already encrypted with the current key. */
+  reencryptSecret(encoded: string): string | null {
+    const current = this.config.snapshot.totp?.encryptionKey;
+    if (!current)
+      throw new Error('Configure ARCDROP__TOTP__ENCRYPTION_KEY before rotating records');
+    if (encoded.startsWith('v2:')) {
+      try {
+        this.decryptWithKey(encoded, this.encryptionKey('v2', current));
+        return null;
+      } catch {
+        // A pending rotation may still require the previous key.
+      }
+    }
+    return this.encryptSecret(this.decryptSecret(encoded));
+  }
+
+  private decryptWithKey(encoded: string, key: Buffer): string {
+    const parts = encoded.slice(3).split('.');
+    if (parts.length !== 3) throw new Error('Malformed encrypted TOTP secret');
+    const [iv, tag, ciphertext] = parts.map((part) => Buffer.from(part, 'base64url')) as [
+      Buffer,
+      Buffer,
+      Buffer,
+    ];
+    if (iv.length !== 12 || tag.length !== 16) throw new Error('Malformed encrypted TOTP secret');
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   }
@@ -230,9 +264,7 @@ export class TotpService {
     return createHash('sha256').update(normalizeRecoveryCode(code)).digest('hex');
   }
 
-  private encryptionKey(): Buffer {
-    return createHash('sha256')
-      .update(`arcdrop:totp-secret:v1:${this.config.snapshot.jwt.secret}`)
-      .digest();
+  private encryptionKey(version: 'v1' | 'v2', secret: string): Buffer {
+    return createHash('sha256').update(`arcdrop:totp-secret:${version}:${secret}`).digest();
   }
 }

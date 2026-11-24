@@ -1,3 +1,4 @@
+import { loadConfig } from '@api/config/load-config';
 import { describe, expect, it } from 'bun:test';
 import { AppConfigService } from '@api/config/app-config.service';
 import {
@@ -8,26 +9,19 @@ import {
   TotpService,
 } from './totp.service';
 
-function makeTotpService(secret = 'unit-test-secret-0123456789abcdef0123456789'): TotpService {
-  const config = new AppConfigService({
-    database: { url: 'postgres://irrelevant:irrelevant@localhost:5432/irrelevant' },
-    jwt: { secret },
-    port: 3000,
-    cors: { origins: [] },
-    dataDir: '/data',
-    metrics: { enabled: false },
-    metadata: { enabled: false, allowPrivate: false },
-    mcp: { patRequestsPerMinute: 300 },
-    portability: { importMaxBytes: 26_214_400, importZipMaxBytes: 314_572_800 },
-    rateLimit: {
-      importPerMinute: 30,
-      reindexPerMinute: 30,
-      mcpToolsPerMinute: 300,
-      bulkPerMinute: 30,
-      publicPerMinute: 60,
-    },
-    log: { level: 'fatal' },
-  });
+function makeTotpService(
+  secret = 'unit-test-secret-0123456789abcdef0123456789',
+  encryptionKey?: string,
+  previousEncryptionKey?: string,
+): TotpService {
+  const config = new AppConfigService(
+    loadConfig({
+      ARCDROP__DATABASE__URL: 'postgres://irrelevant:irrelevant@localhost:5432/irrelevant',
+      ARCDROP__JWT__SECRET: secret,
+      ARCDROP__TOTP__ENCRYPTION_KEY: encryptionKey,
+      ARCDROP__TOTP__PREVIOUS_ENCRYPTION_KEY: previousEncryptionKey,
+    }),
+  );
   return new TotpService(config);
 }
 
@@ -57,6 +51,22 @@ const RFC_6238_VECTORS: ReadonlyArray<{
 ];
 
 describe('TotpService (RFC 4648 Base32, RFC 6238 TOTP, AES-256-GCM)', () => {
+  it('rotates a dedicated key and preserves already rotated TOTP records', () => {
+    const originalKey = 'test-dedicated-totp-key-original-123';
+    const newKey = 'test-dedicated-totp-key-replacement-123';
+    const original = makeTotpService(undefined, originalKey);
+    const secret = original.generateSecret();
+    const previous = original.encryptSecret(secret);
+    const rotating = makeTotpService(undefined, newKey, originalKey);
+    const migrated = rotating.reencryptSecret(previous);
+    expect(migrated).toStartWith('v2:');
+
+    const current = makeTotpService(undefined, newKey);
+    expect(current.decryptSecret(migrated!)).toBe(secret);
+    expect(current.reencryptSecret(migrated!)).toBeNull();
+    expect(() => current.decryptSecret(previous)).toThrow();
+  });
+
   it('matches RFC 6238 Appendix B 8-digit test vectors across SHA1, SHA256, SHA512', () => {
     for (const vec of RFC_6238_VECTORS) {
       const timestampMs = vec.unixSeconds * 1000;

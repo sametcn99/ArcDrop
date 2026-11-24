@@ -11,6 +11,7 @@ import { M16ManualOrdering1794634989570 } from './1794634989570-M16ManualOrderin
 import { M17ArchiveFullTextSearch1794636418427 } from './1794636418427-M17ArchiveFullTextSearch';
 import { M18FileUploads1794638000000 } from './1794638000000-M18FileUploads';
 import { M19PublicSharingRss1794640000000 } from './1794640000000-M19PublicSharingRss';
+import { PortableFileIdentity1794641000000 } from './1794641000000-PortableFileIdentity';
 
 /**
  * Migration registry — EXPLICIT list, same rule as `entities`: no globs
@@ -30,4 +31,5 @@ export const migrations = [
   M17ArchiveFullTextSearch1794636418427,
   M18FileUploads1794638000000,
   M19PublicSharingRss1794640000000,
+  PortableFileIdentity1794641000000,
 ];

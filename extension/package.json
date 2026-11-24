@@ -1,5 +1,6 @@
 {
   "name": "arcdrop-extension",
+  "license": "MIT",
   "version": "0.2.0",
   "private": true,
   "description": "ArcDrop browser extension — popup, options and background for the self-hosted ArcDrop bookmark platform.",

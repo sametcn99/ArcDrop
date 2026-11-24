@@ -1,27 +1,15 @@
+import { loadConfig } from '@api/config/load-config';
 import { describe, expect, it } from 'bun:test';
 import { AppConfigService } from '@api/config/app-config.service';
 import { AccessTokenClaims, JwtService } from './jwt.service';
 
 function makeJwtService(secret: string): JwtService {
-  const config = new AppConfigService({
-    database: { url: 'postgres://irrelevant:irrelevant@localhost:5432/irrelevant' },
-    jwt: { secret },
-    port: 3000,
-    cors: { origins: [] },
-    dataDir: '/data',
-    metrics: { enabled: false },
-    metadata: { enabled: false, allowPrivate: false },
-    mcp: { patRequestsPerMinute: 300 },
-    portability: { importMaxBytes: 26_214_400, importZipMaxBytes: 314_572_800 },
-    rateLimit: {
-      importPerMinute: 30,
-      reindexPerMinute: 30,
-      mcpToolsPerMinute: 300,
-      bulkPerMinute: 30,
-      publicPerMinute: 60,
-    },
-    log: { level: 'fatal' },
-  });
+  const config = new AppConfigService(
+    loadConfig({
+      ARCDROP__DATABASE__URL: 'postgres://irrelevant:irrelevant@localhost:5432/irrelevant',
+      ARCDROP__JWT__SECRET: secret,
+    }),
+  );
   return new JwtService(config);
 }
 

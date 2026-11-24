@@ -59,9 +59,22 @@ export interface ParsedBookmark {
   updatedAt?: string | null;
 }
 
+export interface StagedImportFile {
+  sourceId: string;
+  path: string;
+  fileName: string;
+  fileMime: string;
+  fileSize: number;
+}
+
+export interface ParsedFileBookmark extends Omit<ParsedBookmark, 'url'> {
+  file: StagedImportFile;
+}
+
 export interface ParsedImport {
   collections: ParsedCollection[];
   bookmarks: ParsedBookmark[];
+  fileBookmarks?: ParsedFileBookmark[];
   skipped: ImportNote[];
   errors: ImportNote[];
 }

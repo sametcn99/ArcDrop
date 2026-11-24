@@ -46,8 +46,8 @@ export default function ServerAddressPage() {
         return;
       }
       // Persist for the next boot and apply to the running client immediately.
-      writeStoredBaseUrl(result.baseUrl);
       apiClient.setBaseUrl(result.baseUrl);
+      writeStoredBaseUrl(result.baseUrl);
       navigate('/login', { replace: true });
     } finally {
       setValidating(false);

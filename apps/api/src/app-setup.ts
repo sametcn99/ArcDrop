@@ -27,6 +27,10 @@ import pkg from '../package.json';
  */
 export function setupApp(app: INestApplication, config: AppConfig): void {
   app.useLogger(app.get(Logger));
+  if (config.http.trustedProxies.length > 0) {
+    const server = app.getHttpAdapter().getInstance() as Express;
+    server.set('trust proxy', config.http.trustedProxies);
+  }
   app.setGlobalPrefix('api');
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.useGlobalPipes(createValidationPipe());

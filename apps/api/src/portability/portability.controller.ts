@@ -4,6 +4,7 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Res,
   StreamableFile,
   UseGuards,
   UseInterceptors,
@@ -17,6 +18,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Readable } from 'node:stream';
+import type { Response } from 'express';
 import { CurrentUser } from '@api/auth/decorators/current-user.decorator';
 import type { RequestUser } from '@api/auth/decorators/current-user.decorator';
 import { UserRateLimit } from '@api/common/rate-limit/user-rate-limit.decorator';
@@ -73,6 +75,7 @@ export class PortabilityController {
   async exportData(
     @CurrentUser() user: RequestUser,
     @Body() dto: ExportDataDto,
+    @Res({ passthrough: true }) response: Response,
   ): Promise<StreamableFile> {
     // The scope 404s BEFORE the stream starts (a broken download would
     // not be a problem+json response).
@@ -82,13 +85,18 @@ export class PortabilityController {
     );
 
     if (dto.includeFiles === true) {
-      const { zipBuffer } = await this.portability.exportZipBundle(
+      const abort = new AbortController();
+      response.once('close', () => abort.abort());
+      if (response.destroyed) abort.abort();
+      const { stream, size } = await this.portability.exportZipBundle(
         user,
         dto.format,
         dto.collectionId,
         scope,
+        abort.signal,
       );
-      return new StreamableFile(zipBuffer, {
+      return new StreamableFile(stream, {
+        length: size,
         type: 'application/zip',
         disposition: 'attachment; filename="arcdrop-export.zip"',
       });
@@ -128,7 +136,8 @@ export class PortabilityController {
     @ImportFile() upload: ImportFilePayload,
   ): Promise<ImportSummaryDto> {
     return this.portability.importUpload(user, {
-      bytes: upload.buffer,
+      path: upload.path,
+      signal: upload.signal,
       filename: upload.originalname,
     });
   }

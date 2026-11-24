@@ -1,3 +1,4 @@
+import { isWebApiOrigin } from '../baseUrl';
 import { apiClient, type ApiClient } from '../client';
 import {
   collectionListResponseSchema,
@@ -105,6 +106,14 @@ export function createCollectionsApi(client: ApiClient = apiClient) {
       return client.post('/collections/delete-empty', undefined, {
         schema: deleteEmptyCollectionsResponseSchema,
       });
+    },
+
+    resolveSharePageUrl(token: string): string {
+      const origin = window.location.origin;
+      const base =
+        import.meta.env.VITE_PUBLIC_WEB_URL?.trim() ||
+        (isWebApiOrigin(origin) ? origin : client.getBaseUrl());
+      return base ? `${base.replace(/\/+$/, '')}/s/${encodeURIComponent(token)}` : '';
     },
 
     resolveShareUrl(path: string): string {

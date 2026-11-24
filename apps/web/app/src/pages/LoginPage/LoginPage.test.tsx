@@ -1,3 +1,4 @@
+import { readBrowserSession } from '../../api/browserSession';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
@@ -39,7 +40,7 @@ describe('LoginPage', () => {
     expect(apiClient.getAccessToken()).toBe('access-token-login');
     // Refresh token persisted so a reload can restore the session; the
     // access token itself never touches storage.
-    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBe('refresh-token-login');
+    expect(readBrowserSession()?.refreshToken ?? null).toBe('refresh-token-login');
     const storedValues = Object.keys(window.localStorage)
       .map((key) => window.localStorage.getItem(key) ?? '')
       .join('|');

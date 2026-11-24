@@ -1,18 +1,31 @@
 name: arcdrop
 
-# ArcDrop API + PostgreSQL 16 bundle (plan D1/D8/D11, hardened M9).
-#   docker compose up --build
-# The API service migrates on boot (TypeORM CLI) and reports readiness at
-# /api/v1/readyz; compose healthchecks gate on it. Override the variables
-# below via your shell or a .env file next to this compose file (see
-# apps/api/.env.example).
-#
-# Production TLS note: ArcDrop serves plain HTTP/WS on port 3000 and assumes
-# a reverse proxy (Caddy / Nginx — see apps/api/docs/backup-restore.md)
-# terminates TLS. Bind `127.0.0.1:3000:3000` if the proxy runs on the same
-# host and you do not want port 3000 exposed directly.
-
+# The web service is the single HTTP/WebSocket entry point.
+# Use an HTTPS reverse proxy in front of it for a network deployment.
 services:
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      ARCDROP_WEB_TRUSTED_PROXY_CIDRS: ${ARCDROP_WEB_TRUSTED_PROXY_CIDRS:-127.0.0.1 ::1}
+    ports:
+      - '${ARCDROP_WEB_BIND:-127.0.0.1}:${ARCDROP_WEB_PORT:-3000}:8080'
+    networks:
+      gateway:
+        ipv4_address: ${ARCDROP_WEB_GATEWAY_IP:-172.30.249.2}
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8080/api/v1/readyz']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   api:
     build:
       context: .
@@ -34,9 +47,20 @@ services:
       ARCDROP__DATA_DIR: /data
       ARCDROP__CORS__ORIGINS: ${ARCDROP__CORS__ORIGINS:-}
       ARCDROP__METRICS__ENABLED: ${ARCDROP__METRICS__ENABLED:-false}
+      ARCDROP__HTTP__TRUSTED_PROXIES: ${ARCDROP_WEB_GATEWAY_IP:-172.30.249.2}
+      ARCDROP__RATE_LIMIT__PUBLIC_PER_MINUTE: ${ARCDROP__RATE_LIMIT__PUBLIC_PER_MINUTE:-60}
+      ARCDROP__PUBLIC__BASE_URL: ${ARCDROP__PUBLIC__BASE_URL:-}
+      ARCDROP__TOTP__ENCRYPTION_KEY: ${ARCDROP__TOTP__ENCRYPTION_KEY:-}
+      ARCDROP__TOTP__PREVIOUS_ENCRYPTION_KEY: ${ARCDROP__TOTP__PREVIOUS_ENCRYPTION_KEY:-}
+      ARCDROP__PORTABILITY__IMPORT_MAX_BYTES: ${ARCDROP__PORTABILITY__IMPORT_MAX_BYTES:-26214400}
+      ARCDROP__PORTABILITY__IMPORT_ZIP_MAX_BYTES: ${ARCDROP__PORTABILITY__IMPORT_ZIP_MAX_BYTES:-314572800}
+      ARCDROP__PORTABILITY__ZIP_EXPANDED_MAX_BYTES: ${ARCDROP__PORTABILITY__ZIP_EXPANDED_MAX_BYTES:-1073741824}
+      ARCDROP__PORTABILITY__ZIP_MAX_ENTRIES: ${ARCDROP__PORTABILITY__ZIP_MAX_ENTRIES:-10000}
+      ARCDROP__PORTABILITY__ZIP_CONCURRENT_TRANSFERS: ${ARCDROP__PORTABILITY__ZIP_CONCURRENT_TRANSFERS:-1}
       ARCDROP__LOG__LEVEL: ${ARCDROP__LOG__LEVEL:-info}
-    ports:
-      - '3000:3000'
+    networks:
+      - default
+      - gateway
     volumes:
       - arcdrop-data:/data
     deploy:
@@ -96,6 +120,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+
+networks:
+  gateway:
+    ipam:
+      config:
+        - subnet: ${ARCDROP_GATEWAY_SUBNET:-172.30.249.0/29}
 
 volumes:
   arcdrop-data:

@@ -46,14 +46,11 @@ function CollectionShareDialogInner({
 
   const isEnabled = liveCollection.share.enabled;
   const activeToken = shareResponse?.shareToken ?? liveCollection.share.shareToken;
-  const publicPath =
-    shareResponse?.publicPath ??
-    (isEnabled && activeToken ? `/api/v1/public/collections/${activeToken}` : null);
   const rssPath =
     shareResponse?.rssPath ??
     (isEnabled && activeToken ? `/api/v1/public/collections/${activeToken}/rss` : null);
 
-  const publicUrl = publicPath ? collectionsApi.resolveShareUrl(publicPath) : '';
+  const publicUrl = isEnabled && activeToken ? collectionsApi.resolveSharePageUrl(activeToken) : '';
   const rssUrl = rssPath ? collectionsApi.resolveShareUrl(rssPath) : '';
 
   const handleToggleShare = async (nextEnabled: boolean) => {

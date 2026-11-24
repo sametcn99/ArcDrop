@@ -198,7 +198,8 @@ describe('Route guards & logout flow', () => {
     expect(await screen.findByRole('heading', { name: 'Library' })).toBeInTheDocument();
     expect(useAuthStore.getState().status).toBe('authenticated');
     // The rotated refresh token replaces the persisted one for the next reload.
-    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBeTruthy();
+    expect(apiClient.getPersistedRefreshToken()).toBeTruthy();
+    expect(window.localStorage.getItem('arcdrop.refreshToken')).toBeNull();
   }, 60_000);
 
   it('clears the persisted token and redirects to /login when restore fails', async () => {
