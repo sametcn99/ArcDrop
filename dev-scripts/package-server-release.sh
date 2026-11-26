@@ -49,7 +49,8 @@ compose=(docker compose --project-name arcdrop-release-smoke --file "$folder/com
 trap '"${compose[@]}" down --volumes --remove-orphans' EXIT
 "${compose[@]}" up -d --pull never --wait --wait-timeout 180
 curl -fsS http://127.0.0.1:3000/api/v1/readyz
+curl -fsS http://127.0.0.1:3000/api/v1/healthz | jq --exit-status --arg version "${tag#v}" '.status == "ok" and .version == $version'
 curl -fsS http://127.0.0.1:3000/bootstrap > "$stage/web.html"
-rg '<title>ArcDrop' "$stage/web.html"
+grep -F '<title>ArcDrop' "$stage/web.html"
 
 tar -C "$stage" -czf "release-assets/$bundle.tar.gz" "$bundle"

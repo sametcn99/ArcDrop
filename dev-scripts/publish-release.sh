@@ -2,6 +2,8 @@
 set -euo pipefail
 
 tag=$1
+remote_head=$(git ls-remote --exit-code origin "$GITHUB_REF" | cut -f 1)
+test "$remote_head" = "$GITHUB_SHA" || { echo 'Release commit is no longer the default branch tip'; exit 1; }
 bun dev-scripts/stage-release.ts "$tag" downloaded-assets release-assets
 
 keyfile="$RUNNER_TEMP/arcdrop-updater.pub"
