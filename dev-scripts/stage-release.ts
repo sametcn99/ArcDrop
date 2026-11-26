@@ -11,7 +11,9 @@ const updaterAssets = {
   'darwin-aarch64': 'macos-universal.app.tar.gz',
   'darwin-x86_64': 'macos-universal.app.tar.gz',
   'linux-aarch64': 'linux-arm64.AppImage',
+  'linux-aarch64-deb': 'linux-arm64.deb',
   'linux-x86_64': 'linux-x64.AppImage',
+  'linux-x86_64-deb': 'linux-x64.deb',
   'windows-aarch64': 'windows-arm64-setup.exe',
   'windows-x86_64': 'windows-x64-setup.exe',
   'windows-x86_64-msi': 'windows-x64.msi',
@@ -20,8 +22,6 @@ const signed = [...new Set(Object.values(updaterAssets))];
 const assets = [
   ...signed,
   ...signed.map((name) => `${name}.sig`),
-  'linux-arm64.deb',
-  'linux-x64.deb',
   'macos-universal.dmg',
   'android-universal.apk',
   'android-universal.aab',

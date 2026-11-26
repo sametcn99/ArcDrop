@@ -23,7 +23,7 @@ for (const [extension, glob] of Object.entries(expected)) {
   const asset = join('release-assets', `ArcDrop-${tag}-${platform}${separator}${extension}`);
   await copyFile(files[0], asset);
 
-  if (['AppImage', 'setup.exe', 'msi', 'app.tar.gz'].includes(extension)) {
+  if (extension !== 'dmg') {
     await copyFile(`${files[0]}.sig`, `${asset}.sig`);
   }
 }
