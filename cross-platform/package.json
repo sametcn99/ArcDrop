@@ -1,7 +1,7 @@
 {
   "name": "@arcdrop/cross-platform",
   "license": "MIT",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "description": "ArcDrop cross-platform shell — Tauri v2 desktop + mobile wrapper embedding the apps/web/app client.",
   "type": "module",

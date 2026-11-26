@@ -10,7 +10,7 @@ ArcDrop is a self-hosted, multi-user bookmark library. Save links and files, org
 
 The web service serves the app and proxies the API and WebSocket at the same address. It binds to loopback by default. For network deployment, configure HTTPS at an upstream proxy and set `ARCDROP__PUBLIC__BASE_URL` to the public origin. The [operations guide](apps/api/docs/backup-restore.md) covers trusted proxies, upgrades, backups, restores and TOTP key rotation.
 
-Install a browser extension from [GitHub Releases](https://github.com/sametcn99/ArcDrop/releases) or build it from [source](extension/README.md). Configure the extension and Tauri clients with the same server address used on the web.
+Download desktop installers, mobile packages, browser extensions and prebuilt self-hosted server bundles from the [latest GitHub Release](https://github.com/sametcn99/ArcDrop/releases/latest). Configure the extension and desktop or mobile clients with the same server address used on the web. See the [release guide](cross-platform/RELEASE.md) for installation by platform.
 
 ## Repository layout
 

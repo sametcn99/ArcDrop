@@ -1,184 +1,276 @@
-# Release pipeline (plan T6): tag push `v*` → desktop bundles + updater
-# artifacts (signed when TAURI_SIGNING_PRIVATE_KEY secret exists) → draft
-# GitHub Release, plus the Android release AAB/APK. The draft is published
-# manually by the maintainer.
-#
-# Signing fallback (deliberate, v0.1.0): when secrets are absent the
-# workflow still ships UNSIGNED artifacts —
-#   * desktop: updater artifacts are disabled (config patched in-place),
-#   * android: the APK/AAB keeps the `-unsigned` suffix.
-# RELEASE.md documents keystore/signing-key generation and the exact secret
-# names to fill in for signed releases.
-name: Release Cross-Platform
+name: Release ArcDrop
 
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: arcdrop-release
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Verify release version
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Check application versions and release status
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(bun -e '
+            import assert from "node:assert/strict";
+            const manifests = [
+              "apps/api/package.json", "apps/web/app/package.json", "extension/package.json",
+              "extension/manifest.json", "cross-platform/package.json",
+              "cross-platform/src-tauri/tauri.conf.json",
+            ];
+            const [version, ...versions] = await Promise.all(
+              manifests.map(async (file) => (await Bun.file(file).json()).version),
+            );
+            const { package: crate } = Bun.TOML.parse(await Bun.file("cross-platform/src-tauri/Cargo.toml").text());
+            assert.match(version, /^\d+\.\d+\.\d+$/);
+            assert.ok([...versions, crate.version].every((value) => value === version), "Application versions differ");
+            console.log(version);
+          ')
+          tag="v$version"
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq \
+            ".[] | select(.tag_name == \"$tag\") | [.draft, .target_commitish] | @tsv")
+          if [[ -n "$existing" && "$existing" != $'true\t'"$GITHUB_SHA" ]]; then
+            echo "::error::$tag already has a release for a different commit or is already published"
+            exit 1
+          fi
+          if git ls-remote --exit-code origin "refs/tags/$tag" >/dev/null; then
+            git fetch --no-tags origin "refs/tags/$tag"
+            test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$GITHUB_SHA"
+          else
+            test "$?" = 2
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   desktop:
-    name: Desktop bundles (${{ matrix.os }})
+    name: Desktop (${{ matrix.platform }})
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
         include:
+          - os: ubuntu-24.04
+            platform: linux-x64
+            target: x86_64-unknown-linux-gnu
+            rust-targets: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            target: aarch64-unknown-linux-gnu
+            rust-targets: aarch64-unknown-linux-gnu
+            bundles: appimage,deb
           - os: windows-latest
-            args: '--bundles msi nsis'
+            platform: windows-x64
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+          - os: windows-latest
+            platform: windows-arm64
+            target: aarch64-pc-windows-msvc
+            rust-targets: aarch64-pc-windows-msvc
+            bundles: nsis
           - os: macos-latest
-            args: '--bundles dmg'
-          - os: ubuntu-latest
-            args: '--bundles appimage deb'
+            platform: macos-universal
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            bundles: app,dmg
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-
-      - name: Install web client dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install shell dependencies
-        run: bun install --frozen-lockfile
-        working-directory: cross-platform
-
+        with:
+          bun-version: '1.4.2'
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.99.0'
+          target: ${{ matrix.rust-targets }}
+          cache-workspaces: cross-platform/src-tauri -> target
+          cache-key: release-${{ matrix.platform }}
       - name: Install Tauri Linux dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev
-
-      - name: Set up Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-
-      - name: Rust cache (release)
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: cross-platform/src-tauri
-          key: release-desktop-${{ matrix.os }}
-
-      # v0.1.0 fallback: without the updater signing secret, updater
-      # artifacts are disabled so the bundles still ship (unsigned).
-      - name: Disable updater artifacts when the signing key is absent
-        if: env.TAURI_SIGNING_PRIVATE_KEY == ''
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev libfuse2t64 patchelf
+      - name: Install dependencies
         run: |
-          node -e "const fs=require('fs');const p='cross-platform/src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(p,'utf8'));c.bundle.createUpdaterArtifacts=false;fs.writeFileSync(p,JSON.stringify(c,null,2)+'\n');console.log('updater artifacts disabled (no signing key)');"
-
-      - name: Build and upload to the draft release
-        uses: tauri-apps/tauri-action@v0
+          bun install --frozen-lockfile
+          bun --cwd=cross-platform install --frozen-lockfile
+      - name: Build installers and sign desktop updates
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ matrix.target }}
+          BUNDLES: ${{ matrix.bundles }}
+          APPIMAGE_EXTRACT_AND_RUN: '1'
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || { echo "::error::Missing Tauri updater signing key"; exit 1; }
+          if [[ "$RUNNER_OS" == macOS ]]; then export APPLE_SIGNING_IDENTITY='-'; fi
+          bun --cwd=cross-platform run build --target "$TARGET" --bundles "$BUNDLES" --ci -- --locked
+      - name: Collect installer and updater files
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PLATFORM: ${{ matrix.platform }}
+          TARGET: ${{ matrix.target }}
+        run: bun dev-scripts/collect-desktop-release.ts "$TAG" "$PLATFORM" "$TARGET"
+      - uses: actions/upload-artifact@v4
         with:
-          projectPath: cross-platform
-          tagName: ${{ github.ref_name }}
-          releaseName: 'ArcDrop ${{ github.ref_name }}'
-          releaseBody: 'Draft release — see cross-platform/RELEASE.md for verification steps and known notes before publishing.'
-          releaseDraft: true
-          prerelease: false
-          includeUpdaterJson: true
-          args: ${{ matrix.args }}
+          name: arcdrop-release-${{ matrix.platform }}
+          path: release-assets/*
+          compression-level: 0
+          if-no-files-found: error
 
   android:
-    name: Android release (AAB + APK)
+    name: Android signed APK and AAB
+    needs: prepare
     runs-on: ubuntu-latest
-    needs: desktop
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
-
-      - name: Install web client dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install shell dependencies
-        run: bun install --frozen-lockfile
-        working-directory: cross-platform
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Install Android NDK
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.99.0'
+          target: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          cache-workspaces: cross-platform/src-tauri -> target
+          cache-key: release-android
+      - name: Install dependencies and the NDK
         run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" --install "ndk;27.2.12479018" > /dev/null
+          bun install --frozen-lockfile
+          bun --cwd=cross-platform install --frozen-lockfile
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" --install 'ndk;27.2.12479018'
           echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-
-      - name: Set up Rust toolchain with Android targets
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
-
-      - name: Rust cache (android)
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: cross-platform/src-tauri
-          key: android
-
-      # Plan T6 signing fallback: with keystore secrets the AAB/APK are
-      # signed; without them the artifact keeps the -unsigned suffix.
-      - name: Decode keystore when provided
-        id: keystore
+      - name: Build and verify signed Android packages
         env:
-          ANDROID_KEYSTORE_FILE_B64: ${{ secrets.ANDROID_KEYSTORE_FILE }}
-        run: |
-          if [ -n "$ANDROID_KEYSTORE_FILE_B64" ]; then
-            echo "$ANDROID_KEYSTORE_FILE_B64" | base64 -d > "$RUNNER_TEMP/arcdrop-release.keystore"
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No keystore secret — building an UNSIGNED release. See cross-platform/RELEASE.md for signing."
-          fi
-
-      - name: Build release AAB + APK
-        run: bun run android:build:release
-        working-directory: cross-platform
-        env:
-          NDK_HOME: ${{ env.NDK_HOME }}
-          ANDROID_KEYSTORE_FILE: ${{ steps.keystore.outputs.signed == 'true' && format('{0}/arcdrop-release.keystore', runner.temp) || '' }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_FILE }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: bash dev-scripts/package-android-release.sh "$TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-release-android
+          path: release-assets/*
+          compression-level: 0
+          if-no-files-found: error
 
-      - name: Collect artifacts
-        env:
-          SIGNED: ${{ steps.keystore.outputs.signed }}
+  ios:
+    name: iOS Simulator app
+    needs: prepare
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.99.0'
+          target: aarch64-apple-ios,aarch64-apple-ios-sim
+          cache-workspaces: cross-platform/src-tauri -> target
+          cache-key: release-ios-simulator
+      - name: Build optimized iOS Simulator app
         run: |
-          mkdir -p release-artifacts
-          suffix=""; if [ "$SIGNED" != "true" ]; then suffix="-unsigned"; fi
-          find cross-platform/src-tauri/gen/android/app/build/outputs \
-            \( -name '*.apk' -o -name '*.aab' \) | while read -r src; do
-              base="$(basename "$src")"
-              name="${base%.*}"; ext="${base##*.}"
-              cp "$src" "release-artifacts/${name}${suffix}.${ext}"
-            done
-          ls -la release-artifacts
+          bun install --frozen-lockfile
+          bun --cwd=cross-platform install --frozen-lockfile
+          brew install xcodegen
+          bun --cwd=cross-platform run ios:init
+          cd cross-platform
+          bun node_modules/@tauri-apps/cli/tauri.js ios build --target aarch64-sim --ci
+      - name: Verify and package the simulator build
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: bash dev-scripts/package-ios-release.sh "$TAG"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-release-ios
+          path: release-assets/*
+          compression-level: 0
+          if-no-files-found: error
 
-      - name: Upload artifacts to the draft release
+  extension:
+    name: Browser extensions
+    needs: prepare
+    uses: ./.github/workflows/release-extension.yml
+
+  server:
+    name: Self-hosted server (${{ matrix.arch }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, arch: x64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Package and start the self-hosted deployment
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: bash dev-scripts/package-server-release.sh "$TAG" "$ARCH"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arcdrop-release-server-${{ matrix.arch }}
+          path: release-assets/*
+          compression-level: 0
+          if-no-files-found: error
+
+  publish:
+    name: Verify and publish one GitHub Release
+    needs: [prepare, desktop, android, ios, extension, server]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: arcdrop-release-*
+          path: downloaded-assets
+      - name: Verify and publish all release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
-          gh release view "$TAG" --json isDraft > /dev/null 2>&1 || \
-            gh release create "$TAG" --draft --title "ArcDrop $TAG" --notes "Draft release (android-only fallback)."
-          gh release upload "$TAG" release-artifacts/* --clobber
+          sudo apt-get update
+          sudo apt-get install -y minisign
+          bash dev-scripts/publish-release.sh "$TAG"

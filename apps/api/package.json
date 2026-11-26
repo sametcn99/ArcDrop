@@ -1,7 +1,7 @@
 {
   "name": "@arcdrop/api",
   "license": "MIT",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "description": "ArcDrop API — NestJS REST API running on Bun",
   "scripts": {
