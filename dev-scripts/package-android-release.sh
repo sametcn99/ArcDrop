@@ -26,13 +26,30 @@ expected=$(keytool -exportcert -keystore "$ANDROID_KEYSTORE_FILE" -alias "$ANDRO
   -storepass:env ANDROID_KEYSTORE_PASSWORD | sha256sum | cut -d ' ' -f 1)
 "$build_tools/apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/arcdrop-apk-signature.txt"
 grep -F "certificate SHA-256 digest: $expected" "$RUNNER_TEMP/arcdrop-apk-signature.txt"
-"$build_tools/zipalign" -c 4 "$apk"
+"$build_tools/zipalign" -c -P 16 4 "$apk"
 jarsigner -verify "$aab"
 aab_fingerprint=$(keytool -printcert -jarfile "$aab" | awk '/SHA256:/{gsub(":", "", $2); print tolower($2); exit}')
 test "$aab_fingerprint" = "$expected"
 for abi in arm64-v8a armeabi-v7a x86 x86_64; do
   unzip -Z1 "$apk" | grep -Fx "lib/$abi/libarcdrop_lib.so"
   unzip -Z1 "$aab" | grep -Fx "base/lib/$abi/libarcdrop_lib.so"
+done
+
+readelf="$NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+native="$RUNNER_TEMP/arcdrop-elf.so"
+for abi in arm64-v8a x86_64; do
+  for package in "$apk" "$aab"; do
+    prefix=''
+    if [[ "$package" == "$aab" ]]; then prefix=base/; fi
+    unzip -p "$package" "${prefix}lib/$abi/libarcdrop_lib.so" > "$native"
+    headers=$("$readelf" --program-headers --wide "$native")
+    mapfile -t alignments < <(awk '$1 == "LOAD" {print $NF}' <<< "$headers")
+    test "${#alignments[@]}" -gt 0
+    for alignment in "${alignments[@]}"; do
+      (( alignment >= 16384 )) || { echo "::error::$abi in $package has an unaligned LOAD segment"; exit 1; }
+    done
+    echo "$abi 16 KiB ELF alignment verified in $(basename "$package")"
+  done
 done
 mkdir -p release-assets
 cp "$apk" "release-assets/ArcDrop-$tag-android-universal.apk"
